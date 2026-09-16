@@ -130,6 +130,34 @@ results land. Never make the user guess what is running.
 > 🚩 "one worker will discover it and handle it" (you merged discovery with
 > execution) · "one keeps it simple" (1 worker on N units = N× latency).
 
+## Stage plan — show the parallel/sequential call
+
+**Required before any multi-wave or PIPELINE dispatch** (dependent stages, or more
+than one wave). Optional for a plain single-wave MAP — the heads-up line covers
+that, though drawing it anyway is fine when it clarifies your own thinking.
+
+Print a numbered stage plan *before* dispatching stage 1. Each stage names what it
+is for, then lists its agents as `- <model>@<effort>: <task>` bullets:
+
+```
+Stage 1: Inventory — what exists
+  - Sonnet-5@Medium: enumerate the 12 log dirs
+Stage 2: Fix (parallel)
+  - Sonnet-5@High: patch rotation in logrotate.c
+  - Sonnet-5@Medium: config schema + allowlist
+Stage 3: QC
+  - Sonnet-5@High: verify 1+2 against the goal
+```
+
+- Bullets **within** a stage run together, in the background.
+- Stages run **top to bottom** unless one is marked `(parallel with Stage N)` —
+  mark that only when neither needs the other's output.
+- A stage may mix tiers freely; naming each agent's model@effort next to its task
+  is what makes the split visible rather than merely decided.
+
+This is where the parallel-vs-sequential call gets **shown**, not just made. If you
+cannot draw it, you have not sized the work (see **Sizing**).
+
 ## Routing
 
 Path obvious and low-risk → dispatch the **Workhorse** directly. Path unclear →

@@ -110,7 +110,11 @@ def render(db: dict) -> str:
         st = t["state"]
         if st == "blocked" and t.get("blocked_by"):
             st = "blocked-by " + ",".join(str(x) for x in t["blocked_by"])
-        task = t["task"] + (f" — {t['plan']}" if t.get("plan") else "")
+        # The lead often writes the plan ref into the task text too; appending it
+        # again gave "… — I1 — I1".
+        task, pl = t["task"], t.get("plan")
+        if pl and not task.rstrip().endswith(pl):
+            task = f"{task} — {pl}"
         return (f"| {tick} | {t['id']} | {task} | "
                 f"{'`'+t['agent']+'`' if t.get('agent') else ''} | {owns} | {st} | "
                 f"{t.get('branch') or '—'} |")

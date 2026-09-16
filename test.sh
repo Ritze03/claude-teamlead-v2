@@ -101,6 +101,14 @@ if mt "${R2}__board_add" && mt "${R2}__board_update" && ! mt "${R2}__board_list"
   ok "  hooks.json matcher covers the real names"
 else bad "  hooks.json matcher covers the real names"; fi
 
+echo "== board renders a plan ref once =="
+python3 "$B" add --project $bp --task "do a thing — I9" --agent tl-sonnet-low --owns src/qq --plan I9 >/dev/null
+n=$(grep -o '— I9' $bp/.claude/teamlead/board.md | wc -l)
+check "plan ref not duplicated" "$n" 1
+
+echo "== core skill keeps the stage plan =="
+grep -q '## Stage plan' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" && ok "stage plan section present" || bad "stage plan section present"
+
 echo "== board MCP server =="
 mcpout=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
