@@ -89,6 +89,17 @@ check "worker write refused"      "$(bf '{'"$W"'"tool_name":"mcp__teamlead-board
 check "worker add refused"        "$(bf '{'"$W"'"tool_name":"mcp__teamlead-board__board_add"}')" deny
 check "worker may still read"     "$(bf '{'"$W"'"tool_name":"mcp__teamlead-board__board_list"}')" allow
 check "unrelated tool untouched"  "$(bf '{'"$W"'"tool_name":"Bash"}')" allow
+# The real, plugin-namespaced names as observed live — the earlier ones were guesses.
+R=mcp__plugin_teamlead_teamlead-board
+check "real namespaced update refused" "$(bf '{'"$W"'"tool_name":"'$R'__board_update"}')" deny
+check "real namespaced add refused"    "$(bf '{'"$W"'"tool_name":"'$R'__board_add"}')" deny
+check "real namespaced list allowed"   "$(bf '{'"$W"'"tool_name":"'$R'__board_list"}')" allow
+m=$(jq -r '.hooks.PreToolUse[] | select(.matcher|test("board")) | .matcher' "$CLAUDE_PLUGIN_ROOT/hooks/hooks.json")
+mt(){ python3 -c "import re,sys; sys.exit(0 if re.match(sys.argv[1],sys.argv[2]) else 1)" "$m" "$1"; }
+R2=mcp__plugin_teamlead_teamlead-board
+if mt "${R2}__board_add" && mt "${R2}__board_update" && ! mt "${R2}__board_list"; then
+  ok "  hooks.json matcher covers the real names"
+else bad "  hooks.json matcher covers the real names"; fi
 
 echo "== board MCP server =="
 mcpout=$(printf '%s\n' \
