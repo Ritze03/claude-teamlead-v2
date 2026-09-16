@@ -1,0 +1,14 @@
+{
+  "name": "teamlead",
+  "owner": {
+    "name": "Ritze03"
+  },
+  "plugins": [
+    {
+      "name": "teamlead",
+      "source": "./",
+      "description": "Team-lead orchestration for Claude Code: durable task board, planning mode, brainstorm, superdoc. Linux only."
+    }
+  ],
+  "description": "Team-lead orchestration for Claude Code. Linux only."
+}

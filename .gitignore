@@ -1,0 +1,6 @@
+# teamlead runtime state — never committed
+.claude/teamlead/.state/
+.claude/teamlead/board.md
+
+# never commit the v1 backup or scratch
+*.bak

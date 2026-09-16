@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Live plan-file watch. Run via the Monitor tool with persistent: true.
+# Each stdout line becomes a notification, so only emit on a real change.
+#
+#   watch-plan.sh <project-dir> <plan-file.md>
+#
+# Two rules that are not obvious and both matter:
+#  1. Watch the DIRECTORY. vim and VS Code save by writing a temp file and
+#     renaming over the target, which replaces the inode — a watch on the file
+#     silently stops working after the first save.
+#  2. Never stop this to edit. Stopping opens a window where a user save is
+#     clobbered AND generates no notification — exactly the failure this exists
+#     to catch. Instead the echo is suppressed by content: the lead updates the
+#     snapshot after its own writes, so its own saves look identical and are
+#     silent. A 2s settle delay closes the write-then-snapshot race and
+#     collapses autosave bursts at the same time.
+set -uo pipefail
+proj="${1:?project dir}"; plan="${2:?plan file}"
+dir=$(dirname "$plan"); base=$(basename "$plan")
+snap="$proj/.claude/teamlead/.state/snap/$base"
+mkdir -p "$(dirname "$snap")"
+[ -f "$snap" ] || cp "$plan" "$snap" 2>/dev/null || : > "$snap"
+
+command -v inotifywait >/dev/null 2>&1 || {
+  echo "plan-watch: inotify-tools is required (Linux only, by design)"; exit 1; }
+
+inotifywait -m -q -e close_write,moved_to --format '%f' "$dir" | while read -r f; do
+  [ "$f" = "$base" ] || continue
+  # Settle before comparing. The lead writes the file and then updates the
+  # snapshot; without this pause inotify fires in between and its own edit
+  # looks like a user edit. Waiting also collapses autosave bursts.
+  sleep 2
+  cmp -s "$plan" "$snap" && continue     # unchanged: our own write, or a repeat save
+  echo "--- $base changed on disk ---"
+  diff -u "$snap" "$plan" | tail -n +3 | head -40
+  "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/plan-lint.sh" "$plan" 2>&1 | grep -v '^plan-lint: ok$' || true
+  cp "$plan" "$snap"
+done
