@@ -30,16 +30,9 @@ if [ ! -f "$TL_STATE/active" ]; then
       mkdir -p "$TL_STATE"
       : > "$TL_STATE/active"
       tl_pin_root
-      # Seed the board. A model handed an empty prompt invents its own format;
-      # handed an existing table, it fills in rows. Cheaper than enforcing prose.
-      [ -f "$TL_BOARD" ] || cat > "$TL_BOARD" <<'BOARD'
-# Board
-
-| ✓ | ID | Task | Agent | Owns | State | Branch |
-|:-:|:--:|------|-------|------|-------|--------|
-
-## Done
-BOARD
+      # Seed through the script: board.json is the truth, board.md is rendered.
+      [ -f "$TL_STATE/board.json" ] || \
+        python3 "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/scripts/board.py" render --project "$TL_PROJECT" >/dev/null 2>&1
       echo "TEAMLEAD ACTIVATED for this project (persists across sessions until 'stop teamlead'). Print: ✅ TEAMLEAD ACTIVATED"
       "$HERE/state.sh" "$TL_PROJECT"
       exit 0 ;;
@@ -75,9 +68,10 @@ fi
 echo "[teamlead] Concise output style is active for what you say to the USER: lead with the result, skip preamble and narration. It does NOT apply to dispatch briefs — those stay thorough, carrying every piece of your context the worker would otherwise rediscover."
 
 # Active. ponytail: say nothing when there is nothing to say.
-[ -f "$TL_BOARD" ] || exit 0
-open=$(grep -cE '^\| +\|' "$TL_BOARD" 2>/dev/null) || open=0
-[ "$open" -eq 0 ] && exit 0
+[ -f "$TL_STATE/board.json" ] || exit 0
+open=$(python3 "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/scripts/board.py" list --project "$TL_PROJECT" 2>/dev/null \
+       | python3 -c 'import json,sys; print(json.load(sys.stdin)["open"])' 2>/dev/null) || open=0
+[ "${open:-0}" -eq 0 ] && exit 0
 d=$(grep -c '  dispatch  ' "$TL_EVENTS" 2>/dev/null) || d=0
 r=$(grep -c '  return    ' "$TL_EVENTS" 2>/dev/null) || r=0
 echo "[teamlead] board.md: $open open task(s), $((d - r)) worker(s) still out. You orchestrate; workers implement."

@@ -31,31 +31,37 @@ slash command or matched by description. It **persists across sessions** until
 
 ## The board is the job
 
-**Every substantive prompt becomes rows in `.claude/teamlead/board.md` before you
-dispatch anything.** Not a mental list, not a TodoWrite — that file. It survives
-compaction and `/clear`; your memory does not.
+**Every substantive prompt becomes board tasks before you dispatch anything.** Not
+a mental list, not a TodoWrite — the board. It survives compaction and `/clear`;
+your memory does not.
 
-```markdown
-| ✓ | ID | Task | Agent | Owns | State | Branch |
-|:-:|:--:|------|-------|------|-------|--------|
-| x | 1 | Inventory the log dirs — I1 | `tl-sonnet-medium` | *(read-only)* | merged | — |
-|   | 2 | Patch rotation — I2 | `tl-sonnet-high` | `src/log/` | running | wt/task-2 |
-```
+**You never write `board.md` by hand.** It is generated. The truth lives in
+`.claude/teamlead/.state/board.json`, and you change it only through the board
+tools:
 
-- `Owns` is the worker's write scope, copied verbatim into its brief. **Two rows in
-  flight must never share an `Owns` path.**
-- States: `queued` → `running` → `returned` → `merged`, plus `blocked-by N`.
-  `returned` means the worker finished and you have **not yet acted on it** — this
-  is where work goes missing, so move rows out of it promptly.
-- Done rows move to a `## Done` section, capped at ~10. Older history is in
-  `.state/events.log`, which you never write.
+| tool | use |
+|---|---|
+| `board_list` | What is open, and in what state. Read it before deciding anything. |
+| `board_add` | Decompose a request into tasks — call this *before* dispatching. Takes several at once. |
+| `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
-**The board is checked.** `board-lint.sh` runs on every Stop and rejects: duplicate
-ids, a `✓` row whose State says otherwise, an unfinished row with no agent, an
-unknown State, and — the one that matters — **two unfinished rows owning
-overlapping paths**, parent/child included (`src/` overlaps `src/router/`). That
-last rule is the parallel-safety guarantee; it is checked here rather than merely
-stated, because execution is where the collision actually happens.
+States: `queued` → `running` → `returned` → `merged`, plus `blocked`.
+**`returned` means the worker finished and you have not yet acted on it** — that is
+where work goes missing, so move tasks out of it promptly.
+
+`owns` is the worker's write scope and goes verbatim into its brief. **Two
+unfinished tasks may never own overlapping paths** — parent counts as overlapping
+its child, so `src/` collides with `src/router/`. The tools refuse such a write
+outright, so this cannot be violated, only attempted. A refusal means your split is
+wrong: narrow the scopes or sequence the tasks.
+
+When you merge a task, set `notes` to **how it was solved**, not what was asked.
+That is the part worth having in three weeks, and it is rendered into the board's
+"How it was solved" section.
+
+If the board tools are unavailable, the same operations exist as a CLI:
+`python3 <plugin-root>/scripts/board.py add|update|list|check --project "$PWD" …`
+(the plugin root is in `.claude/teamlead/.state/plugin-root`).
 
 ## Output style — concise (to the USER only)
 

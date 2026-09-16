@@ -50,34 +50,36 @@ check "loop guard releases" "$(ev "$LOOP" "$H/gate.sh")" 0
 ev "$R" "$H/record.sh" >/dev/null
 check "return recorded, gate clears" "$(ev "$STOP" "$H/gate.sh")" 0
 
-echo "== board format =="
-echo "# Board" > .claude/teamlead/board.md   # invented format
-check "invented format blocks" "$(ev "$STOP" "$H/gate.sh")" 2
-printf '# Board\n\n| ✓ | ID | Task | Agent | Owns | State | Branch |\n|:-:|:--:|---|---|---|---|---|\n' > .claude/teamlead/board.md
-check "table format passes" "$(ev "$STOP" "$H/gate.sh")" 0
 
-echo "== board integrity (board-lint) =="
-BL="$H/board-lint.sh"
-bl(){ printf '%s' "$1" > "$T/b.md"; "$BL" "$T/b.md" >"$T/blout" 2>&1; echo $?; }
-HDR='# Board
+echo "== board: JSON is the truth, md is rendered =="
+B="$CLAUDE_PLUGIN_ROOT/scripts/board.py"
+bp=$T/bp; mkdir -p $bp
+bcmd(){ python3 "$B" "$@" --project $bp >"$T/bout" 2>&1; echo $?; }
+check "add a task" "$(bcmd add --task A --agent tl-sonnet-low --owns src/a)" 0
+check "add a second, disjoint" "$(bcmd add --task B --agent tl-sonnet-low --owns src/b)" 0
+check "overlapping path refused at write time" "$(bcmd add --task C --agent tl-sonnet-low --owns src)" 1
+grep -q 'overlapping paths' "$T/bout" && ok "  refusal names the overlap" || bad "  refusal names the overlap"
+check "board.md was generated" "$([ -f $bp/.claude/teamlead/board.md ] && echo 0 || echo 1)" 0
+grep -q 'GENERATED from .state/board.json' $bp/.claude/teamlead/board.md && ok "  md is marked generated" || bad "  md is marked generated"
+check "merge with notes" "$(bcmd update --id 2 --state merged --notes 'swapped the loader')" 0
+grep -q 'How it was solved' $bp/.claude/teamlead/board.md && ok "  how-it-was-solved recorded" || bad "  how-it-was-solved recorded"
+check "finished task frees its path" "$(bcmd add --task D --agent tl-sonnet-low --owns src/b)" 0
+check "check passes on a valid board" "$(bcmd check)" 0
+printf 'hand edited\n' >> $bp/.claude/teamlead/board.md
+check "hand-edit drift detected" "$(bcmd check)" 1
+grep -q 'drifted' "$T/bout" && ok "  drift names the cause" || bad "  drift names the cause"
+check "render repairs the drift" "$(bcmd render)" 0
+check "check passes again" "$(bcmd check)" 0
 
-| ✓ | ID | Task | Agent | Owns | State | Branch |
-|:-:|:--:|------|-------|------|-------|--------|
-'
-check "clean board passes" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/a/ | running | w1 |
-| x | 2 | b | \`tl-sonnet-low\` | src/b/ | merged | — |")" 0
-check "duplicate id caught" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/a/ | running | w1 |
-|   | 1 | b | \`tl-sonnet-low\` | src/b/ | running | w2 |")" 1
-check "overlapping in-flight Owns caught" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/ | running | w1 |
-|   | 2 | b | \`tl-sonnet-low\` | src/deep/ | running | w2 |")" 1
-grep -q 'overlapping paths' "$T/blout" && ok "  names the overlap" || bad "  names the overlap"
-check "tick/state mismatch caught" "$(bl "$HDR| x | 1 | a | \`tl-sonnet-low\` | src/a/ | running | w1 |")" 1
-check "missing agent caught" "$(bl "$HDR|   | 1 | a |  | src/a/ | running | w1 |")" 1
-check "unknown state caught" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/a/ | wibble | w1 |")" 1
-check "finished rows may share a path" "$(bl "$HDR| x | 1 | a | \`tl-sonnet-low\` | src/a/ | merged | — |
-| x | 2 | b | \`tl-sonnet-low\` | src/a/ | merged | — |")" 0
-check "read-only rows never collide" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | *(read-only)* | running | — |
-|   | 2 | b | \`tl-sonnet-low\` | *(read-only)* | running | — |")" 0
+echo "== board MCP server =="
+mcpout=$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | CLAUDE_PROJECT_DIR=$bp python3 "$B" --mcp)
+grep -q 'teamlead-board' <<<"$mcpout" && ok "server initializes" || bad "server initializes"
+for t in board_list board_add board_update; do
+  grep -q "\"$t\"" <<<"$mcpout" && ok "  exposes $t" || bad "  exposes $t"
+done
 
 echo "== decompose =="
 echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"go"}' | "$H/mode.sh" >/dev/null
@@ -102,14 +104,16 @@ S='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ok stop teaml
 ev "$S" "$H/mode.sh" >/dev/null
 [ -f .claude/teamlead/.state/active ] && bad "stop removes the flag" || ok "stop removes the flag"
 
-echo "== reconcile reads the State column, not the line =="
-mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active   # re-arm: the block above deactivated
-git -C "$T/wt" reset -q --hard 2>/dev/null; rm -f "$T/wt/new.txt" 2>/dev/null   # clear the worktree noise
-printf '# Board\n\n| ✓ | ID | Task | Agent | Owns | State | Branch |\n|:-:|:--:|---|---|---|---|---|\n|   | 1 | running the migration script | `tl-sonnet-low` | src/x | queued | — |\n' > .claude/teamlead/board.md
+echo "== reconcile counts state from JSON, not from text =="
+mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active   # re-arm
+git -C "$T/wt" reset -q --hard 2>/dev/null; rm -f "$T/wt/new.txt" 2>/dev/null
+rm -f .claude/teamlead/.state/board.json
+python3 "$B" add --project $proj --task "running the migration script" --agent tl-sonnet-low --owns src/x >/dev/null
 printf 'x  dispatch  a\nx  return    a\n' > .claude/teamlead/.state/events.log
-check "task text starting 'running' is not a state" "$(ev "$STOP" "$H/gate.sh")" 0
-sed -i 's/| queued | — |/| running | wt1 |/' .claude/teamlead/board.md
-check "a real running row with 0 out blocks" "$(ev "$STOP" "$H/gate.sh")" 2
+check "a task whose TEXT starts with 'running' is not counted" "$(ev "$STOP" "$H/gate.sh")" 0
+python3 "$B" update --project $proj --id 1 --state running --branch wt1 >/dev/null
+check "a real running task with 0 out blocks" "$(ev "$STOP" "$H/gate.sh")" 2
+python3 "$B" update --project $proj --id 1 --state merged >/dev/null
 rm -f .claude/teamlead/.state/events.log
 
 echo "== plugin root is discoverable without the env var =="

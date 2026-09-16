@@ -38,10 +38,15 @@ fi
 
 # 2. Returned but never acted on. A task the board still calls 'running' while
 # the ledger recorded its return is exactly the work that used to evaporate.
-# State is column 7 of "| ✓ | ID | Task | Agent | Owns | State | Branch |".
-# Scanning the whole line matched a Task cell that merely began with "running".
-tl_state_count() { awk -F'|' -v want="$1" 'NF>7{s=$7;gsub(/^ +| +$/,"",s); if(s==want)n++} END{print n+0}' "$TL_BOARD"; }
-if [ -f "$TL_BOARD" ] && [ "$r" -gt 0 ] && [ "$(tl_state_count running)" -gt 0 ]; then
+# Counted from board.json, the source of truth — never by grepping the rendered
+# markdown, which was how a task whose text merely began with "running" once
+# tripped this check.
+tl_state_count() {
+  python3 "${CLAUDE_PLUGIN_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}/scripts/board.py" \
+    list --project "$TL_PROJECT" 2>/dev/null \
+  | python3 -c "import json,sys;print(len(json.load(sys.stdin)['by_state'].get('$1',[])))" 2>/dev/null || echo 0
+}
+if [ -f "$TL_STATE/board.json" ] && [ "$r" -gt 0 ] && [ "$(tl_state_count running)" -gt 0 ]; then
   running=$(tl_state_count running)
   outstanding=$((d - r))
   if [ "$running" -gt "$outstanding" ]; then
@@ -53,8 +58,9 @@ fi
 
 # 2b. Board integrity. board.md is the one durable artefact the MODEL writes, so
 # it is the one that can be wrong. events.log is hook-written and cannot lie.
-if [ -f "$TL_BOARD" ]; then
-  bl=$("$(dirname "${BASH_SOURCE[0]}")/board-lint.sh" "$TL_BOARD" 2>/dev/null) || true
+if [ -f "$TL_STATE/board.json" ]; then
+  bl=$(python3 "${CLAUDE_PLUGIN_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}/scripts/board.py" \
+       check --project "$TL_PROJECT" 2>&1) || true
   [ -n "$bl" ] && problems+=$'\n'"$(printf '%s' "$bl" | sed 's/^  - /- /')"
 fi
 
