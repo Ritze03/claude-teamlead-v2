@@ -1038,3 +1038,29 @@ Two corrections it surfaced:
   CLI `check` uses the new one, which surfaces as a spurious `board.md has drifted` from the
   Stop gate. A dev-loop artifact, not a product bug — but restart the session after editing
   `board.py`, or expect one confusing drift report.
+
+
+## 14. Brainstorm — first real run, 2026-09-16
+
+3 agents × 1 round + Opus verify, on the produce-site project. Everything v1 specified held:
+the Setup picker offered all three modes with correct agent counts (2x correctly reported 6
+agents for 3 lenses), the stage plan printed as a cost preview before any spend, lenses were
+assigned across Design/UX · Performance/Reliability · Cost/Simplicity, and the heads-up line
+matched the documented format exactly.
+
+**The one adaptation added for brainstorm (§5, "no summary while dispatches are outstanding")
+fired on its first real opportunity.** The lead reached the end of its turn with all three
+thinkers still out, and the Stop gate blocked:
+
+    - 3 dispatched worker(s) have not returned yet. Wait for them, or say why you are
+      proceeding without them.
+
+The lead then said plainly: *"the round summary won't be written until every one has
+returned."* That is the reported "loses returned work" failure being prevented in the exact
+habitat predicted for it — the most fan-out-heavy mode, where the lead is re-invoked by the
+*first* agent to land and nothing else would have stopped it summarising three-thirds of the
+way short.
+
+Also confirmed live: the file is written from round 1 (header metadata, shared context block,
+`## Round 1 _(pending — agents out)_`), and the lead offered inline `> me:` answering in the
+brainstorm file alongside the chat list.
