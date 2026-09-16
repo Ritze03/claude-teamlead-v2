@@ -72,6 +72,8 @@ if [ -f "$TL_DIR/settings.md" ]; then
   fi
 fi
 
+echo "[teamlead] Concise output style is active. Be concise: lead with the result, skip preamble and narration, keep only what the user needs."
+
 # Active. ponytail: say nothing when there is nothing to say.
 [ -f "$TL_BOARD" ] || exit 0
 open=$(grep -cE '^\| +\|' "$TL_BOARD" 2>/dev/null) || open=0
