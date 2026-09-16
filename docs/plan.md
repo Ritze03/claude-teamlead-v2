@@ -1127,3 +1127,32 @@ sent on an errand it could not complete, and nothing was reported as done that w
 The lead never let a worker fail, so the ladder has still never fired. Triggering it would
 need a task that *looks* achievable and only fails on execution — a harder fixture to build,
 since the lead now demonstrably reads before it dispatches.
+
+
+### Superdoc result — complete and correct
+
+Full FRESH scout-then-fan on the 5-page produce site produced 8 files:
+
+    superdoc/architecture/overview.md
+    superdoc/claude-instructions/{documentation,documentation-version-policy}.md
+    superdoc/features/{produce-catalog,seasonal-guide,recipes}.md
+    superdoc/meta/TERMINOLOGY.md
+    superdoc/ui/STYLING-GUIDE.md
+
+Four workers wrote them in parallel with **non-overlapping `owns`** (one folder each, plus
+`CLAUDE.md` for the wiring worker), and QC was queued `blocked-by 6,7,8,9`. Each branch
+fast-forwarded into master separately.
+
+`CLAUDE.md` is wired exactly as the playbook specifies: guarded `superdoc:start`/`superdoc:end`
+markers, `@`-force-loading **only** TERMINOLOGY and `claude-instructions/*`, with everything
+else a plain on-demand link and the `@`-budget rule stated inline ("force-load a file only if
+its absence would let the agent do the wrong thing on *any* task").
+
+The docs themselves are usable rather than ceremonial — the overview is dated per the version
+policy, links to siblings instead of duplicating them, and is honest about the shape of what
+it documents ("no single entry point the way a coded app has one").
+
+One false alarm worth recording: an intermediate `find` showed `features/` missing while the
+board already said W3 merged, which looked like a task closed without its output. It was a
+mid-merge read — all 8 files were in `HEAD`. The board was right. Worth remembering that
+checking the working tree during a fast-forward can manufacture a phantom discrepancy.
