@@ -13,7 +13,7 @@ Validation happens at WRITE time, so a bad board cannot exist rather than being
 detected afterwards.
 """
 from __future__ import annotations
-import json, os, sys, datetime, pathlib
+import json, os, sys, datetime, pathlib, subprocess
 
 STATES = ("queued", "running", "returned", "merged", "blocked")
 
@@ -22,9 +22,27 @@ def now() -> str:
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _main_checkout(p: str) -> str:
+    """A worker runs inside .claude/worktrees/agent-x, whose cwd looks like its own
+    project. Its board lives in the MAIN checkout — otherwise the worker reads an
+    empty board, and a write would create a phantom one that dies with the worktree.
+    git-common-dir points at the main repo's .git from any linked worktree."""
+    try:
+        r = subprocess.run(["git", "-C", p, "rev-parse", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            common = pathlib.Path(r.stdout.strip())
+            if not common.is_absolute():
+                common = pathlib.Path(p) / common
+            return str(common.resolve().parent)
+    except Exception:
+        pass
+    return p
+
+
 def root(project: str | None = None) -> pathlib.Path:
     p = project or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    return pathlib.Path(p) / ".claude" / "teamlead"
+    return pathlib.Path(_main_checkout(p)) / ".claude" / "teamlead"
 
 
 def _paths(project=None):

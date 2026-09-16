@@ -71,6 +71,15 @@ grep -q 'drifted' "$T/bout" && ok "  drift names the cause" || bad "  drift name
 check "render repairs the drift" "$(bcmd render)" 0
 check "check passes again" "$(bcmd check)" 0
 
+echo "== board resolves a worktree to the main checkout =="
+python3 "$B" add --project $bp --task "main-only" --agent tl-sonnet-low --owns src/zz >/dev/null 2>&1
+git -C $bp init -q 2>/dev/null; git -C $bp config user.email t@t.t; git -C $bp config user.name t
+echo x > $bp/f.txt; git -C $bp add -A >/dev/null 2>&1; git -C $bp commit -qm init 2>/dev/null
+git -C $bp worktree add -q $bp/.claude/worktrees/agent-x -b wtx 2>/dev/null
+main_open=$(python3 "$B" list --project $bp | python3 -c 'import json,sys;print(json.load(sys.stdin)["open"])')
+wt_open=$(cd $bp/.claude/worktrees/agent-x && python3 "$B" list | python3 -c 'import json,sys;print(json.load(sys.stdin)["open"])')
+check "worker in a worktree sees the main board" "$wt_open" "$main_open"
+
 echo "== board MCP server =="
 mcpout=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
