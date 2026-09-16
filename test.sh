@@ -80,6 +80,16 @@ main_open=$(python3 "$B" list --project $bp | python3 -c 'import json,sys;print(
 wt_open=$(cd $bp/.claude/worktrees/agent-x && python3 "$B" list | python3 -c 'import json,sys;print(json.load(sys.stdin)["open"])')
 check "worker in a worktree sees the main board" "$wt_open" "$main_open"
 
+echo "== only the lead writes to the board =="
+BF="$H/board-fence.sh"
+bf(){ out=$(echo "$1" | "$BF"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
+W='"agent_id":"w1","agent_type":"teamlead:tl-sonnet-low",'
+check "lead may write"            "$(bf '{"tool_name":"mcp__teamlead-board__board_update"}')" allow
+check "worker write refused"      "$(bf '{'"$W"'"tool_name":"mcp__teamlead-board__board_update"}')" deny
+check "worker add refused"        "$(bf '{'"$W"'"tool_name":"mcp__teamlead-board__board_add"}')" deny
+check "worker may still read"     "$(bf '{'"$W"'"tool_name":"mcp__teamlead-board__board_list"}')" allow
+check "unrelated tool untouched"  "$(bf '{'"$W"'"tool_name":"Bash"}')" allow
+
 echo "== board MCP server =="
 mcpout=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \

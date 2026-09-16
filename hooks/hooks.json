@@ -20,6 +20,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": ".*board_(add|update).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/board-fence.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SubagentStop": [

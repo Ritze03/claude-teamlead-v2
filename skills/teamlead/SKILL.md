@@ -45,6 +45,11 @@ tools:
 | `board_add` | Decompose a request into tasks — call this *before* dispatching. Takes several at once. |
 | `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
+**You are the only one who writes to the board.** Workers cannot — the write tools
+are refused for them. They report their results to you, and *you* check the work
+off. That is the point of `returned`: a task is not done because a worker said so,
+it is done because you looked at what came back and moved it on.
+
 States: `queued` → `running` → `returned` → `merged`, plus `blocked`.
 **`returned` means the worker finished and you have not yet acted on it** — that is
 where work goes missing, so move tasks out of it promptly.
