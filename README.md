@@ -4,11 +4,12 @@ A [Claude Code](https://code.claude.com) plugin that turns the main agent into a
 it splits work into a tracked task list, dispatches sub-agent workers, picks the model and
 effort for each, and keeps the state on disk so nothing is lost when context is compacted.
 
-> 🚧 **Work in progress.** Rework of [claude-teamlead](https://github.com/Ritze03/claude-teamlead)
-> from a skill into a plugin. Core orchestration is built and tested; plan, brainstorm and
-> superdoc modes are built but not yet exercised end-to-end. See
-> [`docs/plan.md`](docs/plan.md) for the design and [`docs/enforcement.md`](docs/enforcement.md)
-> for what the harness can mechanically enforce.
+> 🚧 **Ready for human testing, not yet battle-tested.** Rework of
+> [claude-teamlead](https://github.com/Ritze03/claude-teamlead) from a skill into a plugin.
+> Every mode has been exercised end-to-end against real projects — orchestration, plan mode
+> (both gates, live editor watching), brainstorm, superdoc, greenfield, and an adversarial
+> run. 94 unit tests. See [`docs/plan.md`](docs/plan.md) for the design and every bug the
+> testing found.
 
 ## Core idea
 
@@ -35,6 +36,12 @@ impossible to break rather than merely discouraged:
 - **Worker fence** — a worker can only write inside its own worktree. Claude Code already
   refuses writes into the shared checkout; this closes everywhere else on disk.
 - **Restore** — after `/clear` or a compaction, open state is re-injected automatically.
+- **Merged means merged** — a task marked merged whose branch still has unmerged commits is
+  caught against git, not taken on trust.
+
+Workers are tracked by agent id, so a worker is followed however long it runs, and a worktree
+is only flagged once its worker has actually **finished** — a check that fires during normal
+work teaches you to ignore it.
 
 A `Stop` hook can only block once per turn, so the worst case is a forced second look, never
 a stuck session.
@@ -74,6 +81,14 @@ Then say `/teamlead` — or just ask it to act as a team lead. Activation is per
 | **`/teamlead plan <topic>`** | Interactive planning in a file you keep open in your editor. Scouts first, asks second, never decides the plan is finished — you type "Go". |
 | **`/teamlead brainstorm <agents> <iterations> <topic>`** | N independent thinkers × M rounds, overlapping lenses, questions back to you between rounds, a final Opus verify. |
 | **`/teamlead superdoc`** | Sets up / audits the agent-facing knowledge base in `superdoc/`. `docs/` stays user-facing. |
+
+## Seeing what's happening
+
+```bash
+python3 <plugin>/scripts/board.py status --project "$PWD"
+```
+
+Open tasks, workers still out, and anything the checks would flag.
 
 ## State
 
