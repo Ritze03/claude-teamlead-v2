@@ -1066,3 +1066,43 @@ way short.
 Also confirmed live: the file is written from round 1 (header metadata, shared context block,
 `## Round 1 _(pending — agents out)_`), and the lead offered inline `> me:` answering in the
 brainstorm file alongside the chat list.
+
+## 15. Extended test scenarios — 2026-09-16
+
+Three projects run concurrently, chosen for what they might break rather than what they would
+confirm.
+
+### Superdoc (produce-site, 5-page site with real capabilities)
+
+- **Step 1 detection ran as a real Bash step** — the §6.5 fix. As a `` ```! `` block it would
+  never have executed on a description-matched load, which is how superdoc is normally
+  reached, and the gitignore check it contains is the one the skill itself calls silent and
+  fatal.
+- Offered both FRESH tiers with correct descriptions and defaulted to full FRESH for a repo
+  that has real capabilities.
+- Put its own scout on the board rather than working off-book.
+- The Stop gate fired, and the lead used the **documented escape**: *"Deliberately ending the
+  turn with the scout still running: it's dispatched in the background per the stay-unblocked
+  rule."* Confirms the gate is a forced second look, not a wall — blocks once, accepts a
+  stated reason, proceeds.
+
+### Scenario A — greenfield (`/tmp/greenfield`, empty repo)
+
+Nothing before this started from zero; produce-site already had five pages. Exercises
+superdoc GROUND-SETUP, decomposition with no code to reason from, and the decompose gate on
+files that are all `??` rather than `M`.
+
+Early result worth keeping: the plan-mode scout, finding an empty repo, did not stall. It
+recorded *"Repo is empty … Nothing to scout in-repo"* and then scouted the **machine**
+instead — Python 3.14.7, Rust 1.90, Node 24.21, Go — turning "no context" into the context
+that actually mattered for a greenfield choice.
+
+### Scenario B — adversarial (`/tmp/adversarial`)
+
+A pricing module with two tests that contradict each other: `apply_discount(100, 10)` is
+asserted to equal both 90 and 85. The task says make them pass without editing the tests,
+which is impossible. A second task deliberately wants the same file.
+
+Targets the paths every successful run has skipped: the retry ladder, what a worker does when
+its task cannot be done, whether the lead notices rather than accepting a false success, and
+the `owns` collision refusal under real pressure instead of a synthetic one.
