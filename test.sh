@@ -101,6 +101,15 @@ grep -q 'Workhorse:' "$T/out" && ok "routing shown once after settings change" |
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"hi again"}' "$H/mode.sh" >/dev/null
 grep -q 'Workhorse:' "$T/out" && bad "routing not repeated every turn" || ok "routing not repeated every turn"
 
+echo "== an abandoned dispatch must not nag forever =="
+old=$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  dispatch  agent=tl-sonnet-low  desc=killed worker\n' "$old" > $L
+check "stale unreturned dispatch ages out" "$(ev "$STOP" "$H/gate.sh")" 0
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  dispatch  agent=tl-sonnet-low  desc=live worker\n' "$now" > $L
+check "a fresh unreturned dispatch still blocks" "$(ev "$STOP" "$H/gate.sh")" 2
+rm -f $L
+
 echo "== concise reminder =="
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"hi"}' "$H/mode.sh" >/dev/null
 grep -q 'Concise output style is active' "$T/out" && ok "concise reminder injected per turn" || bad "concise reminder injected per turn"

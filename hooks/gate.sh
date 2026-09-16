@@ -16,11 +16,22 @@ problems=""
 
 # 1. Outstanding dispatches. (Ledger checks only run once a ledger exists —
 # a project that has not dispatched yet must still get checks 3 and 4.)
-# Counts are global, not per-turn: a background worker dispatched three turns
-# ago still returns into this same ledger.
+# Counts span turns, because a background worker dispatched three turns ago still
+# returns into this same ledger. But they must NOT span all time: a worker that is
+# killed or interrupted never emits SubagentStop, so its dispatch has no return and
+# a lifetime counter stays permanently unbalanced — the gate then cries wolf every
+# turn forever and the lead learns to dismiss it. Observed exactly that.
+# So only the recent window counts; anything older is presumed finished or dead.
 if [ -f "$TL_EVENTS" ]; then
-d=$(grep -c '  dispatch  ' "$TL_EVENTS" 2>/dev/null) || d=0
-r=$(grep -c '  return    ' "$TL_EVENTS" 2>/dev/null) || r=0
+cut_s=$(date -u -d "-${TL_WINDOW_MIN:-20} minutes" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || cut_s=""
+if [ -n "$cut_s" ]; then
+  recent=$(awk -v c="$cut_s" '$1 >= c' "$TL_EVENTS")   # ISO-8601 UTC sorts lexically
+else
+  recent=$(cat "$TL_EVENTS")
+fi
+d=$(printf '%s\n' "$recent" | grep -c '  dispatch  ') || d=0
+r=$(printf '%s\n' "$recent" | grep -c '  return    ') || r=0
+[ "$r" -gt "$d" ] && r=$d    # a return whose dispatch fell outside the window
 if [ "$d" -gt "$r" ]; then
   problems+=$'\n'"- $((d - r)) dispatched worker(s) have not returned yet. Wait for them, or say why you are proceeding without them."
 fi
