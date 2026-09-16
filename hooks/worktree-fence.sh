@@ -16,7 +16,8 @@ set -uo pipefail
 in=$(cat)
 j() { jq -r "$1 // empty" <<<"$in" 2>/dev/null; }
 [ -n "$(j .agent_id)" ] || exit 0                 # the lead is not a worker
-case "$(j .agent_type)" in tl-*) ;; *) exit 0 ;; esac
+# Namespaced when installed as a plugin: "teamlead:tl-sonnet-low".
+case "$(j .agent_type)" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
 cwd=$(j .cwd); fp=$(j .tool_input.file_path); [ -n "$fp" ] || fp=$(j .tool_input.notebook_path)
 [ -n "$cwd" ] && [ -n "$fp" ] || exit 0
 

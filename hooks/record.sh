@@ -14,16 +14,17 @@ case "$ev" in
   PreToolUse)
     [ "$(tl_json .tool_name)" = "Agent" ] || exit 0
     at=$(tl_json .tool_input.subagent_type)
-    # ponytail: only our own workers. Verified in Phase 0 — the harness runs
-    # internal agents with an empty agent_type, and counting those as teamlead
-    # dispatches would corrupt every reconcile check.
-    case "$at" in tl-*) ;; *) exit 0 ;; esac
+    # Only our own workers. The harness runs internal agents with an empty
+    # agent_type, and counting those would corrupt every reconcile check.
+    # Installed as a plugin the type is NAMESPACED ("teamlead:tl-sonnet-low"),
+    # so a bare tl-* test silently matches nothing and the ledger stays empty.
+    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
     desc=$(tl_json .tool_input.description | tr '\n' ' ' | cut -c1-100)
     tl_event "dispatch  agent=$at  prompt=$(tl_json .prompt_id)  desc=$desc"
     ;;
   SubagentStop)
     at=$(tl_json .agent_type)
-    case "$at" in tl-*) ;; *) exit 0 ;; esac
+    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
     msg=$(tl_json .last_assistant_message | tr '\n' ' ' | cut -c1-200)
     tl_event "return    agent=$at  id=$(tl_json .agent_id)  msg=$msg"
     ;;

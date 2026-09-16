@@ -36,6 +36,14 @@ ev "$D" "$H/record.sh" >/dev/null
 ev "$INT" "$H/record.sh" >/dev/null
 L=.claude/teamlead/.state/events.log
 check "dispatch recorded" "$(grep -c 'dispatch' $L)" 1
+# Installed as a plugin, subagent_type/agent_type arrive namespaced.
+NSD='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"Agent","prompt_id":"p2","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"ns"}}'
+ev "$NSD" "$H/record.sh" >/dev/null
+check "namespaced dispatch recorded" "$(grep -c 'dispatch' $L)" 2
+NSR='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-high","agent_id":"w9","last_assistant_message":"ok"}'
+ev "$NSR" "$H/record.sh" >/dev/null
+check "namespaced return recorded" "$(grep -c 'return' $L)" 1
+printf 'x  dispatch  a\n' > $L
 check "internal agent ignored" "$(grep -c 'return' $L)" 0
 check "outstanding worker blocks" "$(ev "$STOP" "$H/gate.sh")" 2
 check "loop guard releases" "$(ev "$LOOP" "$H/gate.sh")" 0
@@ -101,6 +109,7 @@ check "lead is never fenced"          "$(fence '{"cwd":"/wt","tool_input":{"file
 check "internal agent is not fenced"  "$(fence '{"cwd":"/wt","agent_id":"i","agent_type":"","tool_input":{"file_path":"/elsewhere/x"}}')" allow
 check "worker: inside worktree"       "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"/wt/src/x"}}')" allow
 check "worker: relative path"         "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"src/x"}}')" allow
+check "worker: namespaced type is fenced" "$(fence '{"cwd":"/wt","agent_id":"w1","agent_type":"teamlead:tl-sonnet-low","tool_input":{"file_path":"/home/u/other/x"}}')" deny
 check "worker: ../ escape"            "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"../main/x"}}')" deny
 check "worker: absolute elsewhere"    "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"/home/u/other/x"}}')" deny
 check "worker: session scratchpad allowed" "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"/tmp/claude-1000/sess/scratchpad/n.md"}}')" allow
