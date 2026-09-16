@@ -156,6 +156,48 @@ check "worker: session scratchpad allowed" "$(fence '{"cwd":"/wt",'"$W"',"tool_i
 check "worker: other /tmp still denied"   "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"/tmp/elsewhere/x"}}')" deny
 check "worker: notebook_path too"     "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"notebook_path":"/home/u/n.ipynb"}}')" deny
 
+echo "== plan-lint stage awareness =="
+PL="$H/plan-lint.sh"
+mkplan(){ cat > "$T/pl.md" <<PEOF
+# T
+
+> **Stage $1** — working it out · started 2026-09-16
+
+## Goal
+G
+
+## Context
+C
+
+## Decisions
+- **D1** a call — *why.*
+
+## Open questions
+1. A question?
+$2
+
+### Answered
+
+## Notes from me
+
+## Implementation plan
+$3
+PEOF
+"$PL" "$T/pl.md" >"$T/plout" 2>&1; echo $?; }
+TBL='*Built from D1 · decisions:XX*
+
+| Wave | ID | Task | Agent | Owns | After |
+|:----:|:--:|------|-------|------|-------|
+| 1 | I1 | do it — **D1** | `tl-sonnet-low` | src/a/ | — |'
+check "stage 3 with no impl plan is clean" "$(mkplan 3 '' '')" 0
+check "empty '> me:' placeholder is not an answer" "$(mkplan 3 '   > me:' '')" 0
+check "a real '> me:' answer is flagged" "$(mkplan 3 '   > me: yes do it' '')" 1
+grep -q 'promote it to a Decision' "$T/plout" && ok "  says to promote it" || bad "  says to promote it"
+check "unreferenced decision flagged once a plan exists" "$(mkplan 4 '' '| Wave | ID | Task | Agent | Owns | After |
+|:----:|:--:|------|-------|------|-------|
+| 1 | I1 | unrelated work | `tl-sonnet-low` | src/a/ | — |')" 1
+grep -q 'D1 is decided but no implementation step' "$T/plout" && ok "  names the orphaned decision" || bad "  names the orphaned decision"
+
 echo "== routing resolution =="
 mkdir -p .claude/teamlead
 printf 'effort: xlow\nopus: never\n' > .claude/teamlead/settings.md

@@ -54,14 +54,18 @@ if [ -n "$rows" ]; then
   [ -n "$dupes" ] && add "two steps in the same wave write the same path: $(tr '\n' ';' <<<"$dupes")"
 fi
 
-# 5. every decision appears in a task
-for d in $(grep -oE '^- \*\*D[0-9]+\*\*' "$f" | grep -oE 'D[0-9]+' || true); do
-  # Match the ID as a word: "**D1 D2**" is as valid as "**D1** **D2**".
-  grep -qE "(^|[^A-Za-z0-9])$d([^0-9]|\$)" <<<"$rows" || add "$d is decided but no implementation step references it"
-done
+# 5. every decision appears in a task — only once an implementation plan exists.
+# Before stage 4 the table is legitimately empty and every decision would flag.
+if [ -n "$rows" ]; then
+  for d in $(grep -oE '^- \*\*D[0-9]+\*\*' "$f" | grep -oE 'D[0-9]+' || true); do
+    # Match the ID as a word: "**D1 D2**" is as valid as "**D1** **D2**".
+    grep -qE "(^|[^A-Za-z0-9])$d([^0-9]|\$)" <<<"$rows" || add "$d is decided but no implementation step references it"
+  done
+fi
 
 # 6. inline user answer never promoted
-awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Notes from me/{o=0} o && /^ *> me:/{print NR}' "$f" \
+awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Notes from me/{o=0}
+     o && /^ *> me:[[:space:]]*[^[:space:]]/{print NR}' "$f" \
   | grep -q . && add "an inline '> me:' answer is still under an open question — promote it to a Decision and strike the question"
 
 # 7. no TBD once at stage 4

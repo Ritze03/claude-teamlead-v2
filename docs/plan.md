@@ -985,3 +985,31 @@ Why it stays viable:
 - A cheaper intermediate step: keep JSON authoritative and write-through to a central SQLite
   purely as a **derived index** for cross-project queries, rebuildable by scanning project
   dirs. No data loss if it is lost, and no sync bug that matters.
+
+
+## 12. Plan mode — first real run, 2026-09-16
+
+Exercised stages 1–3 against the produce-site test project. The mechanism works: the file was
+created at `.claude/teamlead/plan/<slug>.md`, its absolute path printed, and
+`.state/active-plan` written (both of the §6.5 fixes confirmed live).
+
+The scout wave earned its place. It found that the nav is duplicated byte-for-byte across all
+5 pages, that links are root-absolute, that the working tree has uncommitted edits the plan
+must build on rather than the last commit — and, unprompted, **that open board task #1 already
+owns those same 5 files**, so it sequenced the nav change to run after that task merges.
+Cross-subsystem reasoning about the `Owns` rule was not something the skill asked for.
+
+**Two linter false positives, both of which fired on every stage-3 plan:**
+
+1. **Check 5 ran with no implementation plan.** Before stage 4 the table is legitimately empty,
+   so every decision was reported as "decided but no implementation step references it". A
+   plan was therefore failing lint from the moment it was created. Now gated on the table
+   existing.
+2. **An empty `> me:` placeholder counted as an un-promoted answer.** The lead writes those as
+   an invitation for the user to type into — good UX it invented on its own — and lint read
+   each one as an unanswered promotion. Only a `> me:` with actual text after it is flagged
+   now.
+
+Both are the cry-wolf failure again, and the third instance of it in this project: a check
+that fires when nothing is wrong trains the model to ignore it. Worth treating as a standing
+review question for any new check — *when does this fire on a correct state?*
