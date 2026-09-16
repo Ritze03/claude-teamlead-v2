@@ -82,6 +82,65 @@ Then say `/teamlead` — or just ask it to act as a team lead. Activation is per
 | **`/teamlead brainstorm <agents> <iterations> <topic>`** | N independent thinkers × M rounds, overlapping lenses, questions back to you between rounds, a final Opus verify. |
 | **`/teamlead superdoc`** | Sets up / audits the agent-facing knowledge base in `superdoc/`. `docs/` stays user-facing. |
 
+## What a session looks like
+
+```
+$ claude
+> act as teamlead for this project
+✅ TEAMLEAD ACTIVATED
+```
+
+First run in a project asks four questions once (effort, hard cap, Opus policy, prompting)
+and never asks again. Then give it work:
+
+```
+> every page needs an intro paragraph and a meta description
+```
+
+It writes the task list to the board *before* dispatching, fans out one worker per
+independent unit in its own git worktree, and reports back when they land. Ask it something
+else meanwhile — the main thread never blocks.
+
+```
+> /teamlead status
+teamlead — 2 open task(s), 1 worker(s) out
+  #3   running   Intro + meta for seasonal.html, about.html [wt/task-3]
+  #4   blocked   QC over 3
+```
+
+## Dials
+
+Asked once per project, stored in `.claude/teamlead/settings.md`, changeable anytime.
+Running any of these with no argument re-opens the picker.
+
+| | |
+|---|---|
+| `/teamlead effort <level>` | `low` · `xlow` · **`medium`** · `xmedium` · `high` · `xhigh` — biases which worker tier gets reached for first. The `x` levels are hard caps, not just a bias. |
+| `/teamlead opus <mode>` | **`on-demand`** (Opus only after a Sonnet worker actually fails) · `role-dependant` (Opus first-choice when the role calls for it) · `never` (no Opus workers at all — a stuck worker reports its blocker and the lead reasons through it) |
+| `/teamlead prompting <mode>` | **`sequential`** · `qc` — how briefs are written when a dispatch fans out |
+
+**Vision is exempt from both dials.** Anything whose input is an image goes to
+`tl-opus-medium` automatically — Opus reads images materially better and there's no Sonnet
+fallback worth having — but capped below high effort so the exemption stays cheap.
+
+## Planning mode
+
+The mode worth trying first, because it's the one that isn't just delegation.
+
+`/teamlead plan <topic>` opens a file, prints its **absolute path**, and leaves it to you to
+open in your own editor. It scouts the repo before asking you anything, then asks. You can
+answer in chat *or* type into the file and save — it watches the file and picks up your edit,
+promotes it into a decision, and strikes the question.
+
+It never decides the plan is finished. Every turn ends with the same fixed line:
+
+```
+Type "Go" if you want me to plan the implementation.
+```
+
+"Go" advances exactly one stage — first to the implementation plan, where it **stops again**,
+then to execution. Your plan of *what*, and its plan of *how*, are separate approvals.
+
 ## Seeing what's happening
 
 ```bash
@@ -102,6 +161,25 @@ Open tasks, workers still out, and anything the checks would flag.
 ```
 
 Nothing is stored in your home folder. Everything is per project.
+
+## Troubleshooting
+
+**The gate blocked me and I disagree.** Say so plainly — *"skipping the worktree check, that
+branch is deliberate"* — and it proceeds. It blocks once per turn, never traps a session. If
+you're dismissing it repeatedly for the same reason, that's a bug in the check; file it.
+
+**`board.md` looks wrong.** It's generated from `.claude/teamlead/.state/board.json`. Don't
+hand-edit it — `board.py render` rebuilds it, and `board.py check` will tell you if the two
+have drifted.
+
+**A worker couldn't write somewhere.** Workers are fenced to their own worktree. That's
+deliberate: the refusal message tells them to report to the lead instead.
+
+**I edited the plan file and nothing happened.** The watcher is armed at stage 2 of plan
+mode. If the session was restarted since, re-enter plan mode on that topic.
+
+**`CLAUDE_PLUGIN_ROOT` is empty in a shell.** It isn't set in the agent's shell, only in
+hooks. The absolute path is in `.claude/teamlead/.state/plugin-root`.
 
 ## License
 

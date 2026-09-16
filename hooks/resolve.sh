@@ -41,7 +41,12 @@ else
 fi
 echo "Vision (images/screenshots/diagrams): $vision — always, exempt from the Opus policy and the effort dial. Never tl-opus-high for vision. Brief it to return a short finding, not a description of the whole image."
 [ -n "$ban" ] && echo "BANNED, never dispatch: $ban (vision is the one exception)"
-if [ "$opus" = "on-demand" ]; then
-  echo "Opus is escalation-only: every task starts on Sonnet, Opus only after a Sonnet worker actually fails."
-fi
+case "$opus" in
+  on-demand)
+    echo "Opus is escalation-only: every task starts on Sonnet, Opus only after a Sonnet worker actually fails." ;;
+  role-dependant)
+    # Without this line the setting produced output identical to the default, so
+    # choosing it had no visible effect and the lead behaved as if on-demand.
+    echo "Opus may be dispatched FIRST-CHOICE when the role calls for it — genuine architecture/design calls, ambiguous cross-system debugging — as well as via the retry ladder. Ordinary execution still starts on Sonnet." ;;
+esac
 exit 0

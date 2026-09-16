@@ -111,6 +111,44 @@ python3 "$B" add --project $bp --task "do a thing — I9" --agent tl-sonnet-low 
 n=$(grep -o '— I9' $bp/.claude/teamlead/board.md | wc -l)
 check "plan ref not duplicated" "$n" 1
 
+echo "== help command exists and is accurate =="
+SK="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
+grep -q '/teamlead help' "$SK" && ok "help is in the commands table" || bad "help is in the commands table"
+grep -q '## Help text' "$SK" && ok "help text block exists" || bad "help text block exists"
+# every command the help advertises must be real
+for c in "/teamlead plan" "/teamlead brainstorm" "/teamlead superdoc" "/teamlead status" "stop teamlead"; do
+  grep -q -- "$c" "$SK" || bad "help advertises '$c' but the skill does not define it"
+done
+ok "advertised commands all defined"
+# the dials it names must match resolve.sh
+for lvl in low xlow xmedium high xhigh; do
+  grep -q "  $lvl)" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "help names effort level '$lvl' that resolve.sh lacks"
+done
+grep -q 'effort=medium' "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "medium is not the default in resolve.sh"
+ok "effort levels in help match resolve.sh"
+for m in on-demand role-dependant never; do
+  grep -q "$m" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "help names opus mode '$m' that resolve.sh lacks"
+done
+ok "opus modes in help match resolve.sh"
+
+# every opus mode must produce a distinguishable guidance line
+rdp=$T/rd; mkdir -p $rdp/.claude/teamlead
+for m in on-demand role-dependant never; do
+  printf 'effort: medium\nopus: %s\n' "$m" > $rdp/.claude/teamlead/settings.md
+  "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $rdp > "$T/r-$m"
+done
+if diff -q "$T/r-on-demand" "$T/r-role-dependant" >/dev/null; then
+  bad "role-dependant is indistinguishable from on-demand"
+else ok "each opus mode gives distinct guidance"; fi
+
+echo "== README documents what exists =="
+RM="$CLAUDE_PLUGIN_ROOT/README.md"
+for sec in "## Dials" "## Planning mode" "## Troubleshooting" "## Install"; do
+  grep -q "$sec" "$RM" || bad "README missing $sec"
+done
+ok "README has install, dials, planning, troubleshooting"
+grep -q 'board.py status' "$RM" && ok "README documents status" || bad "README documents status"
+
 echo "== core skill keeps the stage plan =="
 grep -q '## Stage plan' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" && ok "stage plan section present" || bad "stage plan section present"
 

@@ -234,6 +234,58 @@ first time.
 | `/teamlead brainstorm <agents> <iterations> <topic>` | See the `teamlead-brainstorm` skill. |
 | `/teamlead superdoc` | See the `teamlead-superdoc` skill. |
 | `/teamlead effort\|opus\|prompting [value]` | Set a dial. No argument re-opens the picker. |
+| `/teamlead help` | Print the **Help text** below, verbatim. |
+| `/teamlead status` | Run `board.py status` and show its output. |
+
+
+## Help text (print verbatim for `/teamlead help`)
+
+```
+TEAMLEAD — you think, cheap workers implement.
+
+Mode is per project and persists across sessions until you say "stop teamlead".
+
+COMMANDS
+  /teamlead                        activate for this project
+  stop teamlead                    deactivate ("normal mode" also works)
+  /teamlead help                   this text
+  /teamlead status                 open tasks, workers out, problems
+  /teamlead plan <topic>           work a plan out with me, in a file you keep open
+  /teamlead brainstorm <n> <r> <t> n thinkers over r rounds, then an Opus verify
+  /teamlead superdoc               set up / audit the agent-facing docs in superdoc/
+
+DIALS (asked once per project, change anytime; no argument re-opens the picker)
+  /teamlead effort <level>         low | xlow | medium | xmedium | high | xhigh
+                                   biases which worker tier I reach for first
+  /teamlead opus <mode>            on-demand | role-dependant | never
+                                   on-demand (default): Opus only after Sonnet fails
+                                   never: no Opus workers; I reason through blockers myself
+  /teamlead prompting <mode>       sequential | qc
+  Vision is exempt from both: images always go to tl-opus-medium.
+
+PLAN MODE
+  Stage 1  I ask what we're planning and make the file
+  Stage 2  I print its absolute path — open it in YOUR editor; I never open it
+  Stage 3  I scout first, then ask. Answer in chat, or type into the file and save
+           (I'm watching it, and I'll pick up your edit)
+  Stage 4  "Go" -> I write the implementation plan, then STOP again
+  Stage 5  "Go" -> I translate it to the board and start work
+  "Go" always advances exactly one stage. I never decide the plan is finished.
+
+WHAT I WILL NOT DO
+  - implement it myself when it should go to a worker
+  - end a turn with a finished worker's work left unmerged
+  - mark something merged that git says was not
+  - let two workers write the same path
+  - change the board from inside a worker (workers report; I record)
+
+WHERE THINGS LIVE (all per project, nothing in your home folder)
+  .claude/teamlead/board.md        generated — read it, don't edit it
+  .claude/teamlead/plan/*.md       plan files; yours to edit
+  .claude/teamlead/settings.md     the dials
+  .claude/teamlead/.state/         mine; gitignored automatically
+  superdoc/                        agent-facing docs (docs/ stays yours)
+```
 
 ## Project setup (first run only)
 
