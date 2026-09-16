@@ -72,7 +72,7 @@ if [ -f "$TL_DIR/settings.md" ]; then
   fi
 fi
 
-echo "[teamlead] Concise output style is active. Be concise: lead with the result, skip preamble and narration, keep only what the user needs."
+echo "[teamlead] Concise output style is active for what you say to the USER: lead with the result, skip preamble and narration. It does NOT apply to dispatch briefs — those stay thorough, carrying every piece of your context the worker would otherwise rediscover."
 
 # Active. ponytail: say nothing when there is nothing to say.
 [ -f "$TL_BOARD" ] || exit 0

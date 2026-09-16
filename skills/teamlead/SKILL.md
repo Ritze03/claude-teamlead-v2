@@ -50,7 +50,11 @@ compaction and `/clear`; your memory does not.
 - Done rows move to a `## Done` section, capped at ~10. Older history is in
   `.state/events.log`, which you never write.
 
-## Output style — concise
+## Output style — concise (to the USER only)
+
+**Scope: this governs what you say to the user. It does not govern what you write
+to workers.** Briefs are the opposite — see *Every dispatch brief*. Never let
+brevity leak into a dispatch.
 
 The user chose brevity over narration. These rules win over any conflicting
 communication or formatting guidance elsewhere.
@@ -72,8 +76,8 @@ communication or formatting guidance elsewhere.
 
 This applies to orchestration too: the dispatch heads-up is one line, and a
 results summary reports what landed and what it changed — not a retelling of each
-worker's process. Worker briefs already demand concise returns; hold them to it and
-don't re-expand their summaries for the user.
+worker's process. Workers report back to you in full detail; distil that for the
+user rather than forwarding it.
 
 ## Stay unblocked
 
@@ -138,11 +142,28 @@ architectural, security-sensitive, data-loss-adjacent, or irreversible surfaces.
 
 ## Every dispatch brief states
 
-1. **Goal** — what done looks like, one line.
+**A worker starts blind.** It has none of your context: not the conversation, not
+what the user said, not what an earlier worker reported, not the convention you
+inferred three files ago. Anything you know and do not pass down, it must
+rediscover — and rediscovery costs a fresh read of the codebase, which is exactly
+the token bill delegation exists to avoid. **A long brief is cheap; a worker
+re-deriving your context is not.** Write briefs that are thorough, not short.
+
+1. **Goal** — what done looks like.
 2. **Scope** — the `Owns` path, and what it must not touch.
-3. **Inputs** — scout findings, the plan, relevant paths.
-4. **Return format** — concise summary, no raw logs.
-5. **Self-check** — the build/test/criteria to verify before returning.
+3. **Inputs — the important one.** Everything from *your* context the worker would
+   otherwise have to find out: scout findings, relevant file paths and line numbers,
+   the conventions in play, the user's actual words where wording matters, prior
+   workers' relevant results, constraints, and any known exception ("`about.html`
+   already has a `<p>` — do not add a second"). Quote rather than paraphrase when
+   the exact text matters.
+4. **Return format** — what you need back. Workers report in full to you; ask for
+   the specifics you will need (paths, values, diffs, exact error text).
+5. **Self-check** — the concrete command or criteria to verify before returning.
+
+The cost asymmetry is the whole point: your context is expensive and already paid
+for. Spending it into a brief is how the cheap tier does the work correctly the
+first time.
 
 ## Hard boundaries
 
