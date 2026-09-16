@@ -955,3 +955,33 @@ row still marked `running`, and a row with no agent passed the gate cleanly.
 Check 6 is the point. "Two rows in flight must never share an `Owns` path" was enforced for
 *plans* and not for *execution*, which is backwards — planning is where the rule is stated,
 execution is where the collision happens.
+
+## 11. Storage — **DECIDED: per-project JSON, revisit later**
+
+A central SQLite in a shared directory (projects table, issues, a cross-project HTML
+dashboard) was considered and **deferred**. `.state/board.json` stays the truth.
+
+Why not now:
+
+- It reverses §6's invariant (*nothing in the home folder*), which exists for a good reason
+  and should only be undone deliberately.
+- Per-project JSON travels with the repo. A central store would mean a fresh clone has no
+  board — weak for a tool whose thesis is that state survives.
+- **Project identity is the hard part**, not the schema. Path-based keys break on rename or
+  move, and break *immediately* on our own worker worktrees, since `.claude/worktrees/agent-x`
+  reads as a different project. Any future version needs a UUID at
+  `.state/project-id`, with worktrees resolved back to the main checkout first, and path
+  stored only as a display hint.
+
+Why it stays viable:
+
+- **The MCP boundary makes storage a swap.** The agent calls `board_add`; where that lands is
+  invisible to it. Changing stores touches `scripts/board.py` and nothing else — no skill
+  edits, no agent changes.
+- If it happens, split by **lifetime**, not location: long-lived user-managed *issues* in a
+  central DB (the GitHub-issues layer, writable from a dashboard), in-flight *tasks* in
+  per-project JSON (the sprint board, already capped and deferring history to `events.log`).
+  Pulling an issue into a session copies it onto the local board and writes the outcome back.
+- A cheaper intermediate step: keep JSON authoritative and write-through to a central SQLite
+  purely as a **derived index** for cross-project queries, rebuildable by scanning project
+  dirs. No data loss if it is lost, and no sync bug that matters.
