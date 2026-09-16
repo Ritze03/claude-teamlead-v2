@@ -874,3 +874,57 @@ brainstorm run, and any superdoc run.
 - ~~Brainstorm: ledger vs stage plan~~ — **decided (§5).** Neither. v1's design is kept
   wholesale; stage plan stays a cost preview, board unused during rounds, `events.log` gates
   outstanding dispatches.
+
+---
+
+## 9. Real-install findings — 2026-09-16
+
+Everything before this was tested with `--plugin-dir`. Installing the plugin properly
+(`claude plugin marketplace add ./` + `install`) surfaced three failures that path cannot show.
+
+**1. `plugin.json` must not declare `hooks`.** `hooks/hooks.json` is loaded automatically;
+declaring it as well is a duplicate and the plugin **fails to load entirely**
+(`Duplicate hooks file detected`). `--plugin-dir` tolerates it.
+
+**2. Plugin agents are namespaced.** `subagent_type` and `agent_type` arrive as
+`teamlead:tl-sonnet-low`, not `tl-sonnet-low`. Every filter tested bare `tl-*`, so on a real
+install **the ledger recorded nothing and the worker fence never fired at all** — both
+silently dead, no error anywhere. Earlier testing hid this because the `tl-*` agents were
+still installed user-level from v1, where they are unnamespaced. All filters now accept
+`tl-*|*:tl-*`.
+
+**3. Routing was never re-injected after first-run setup.** Settings are written *after*
+activation, so the activation state block said `settings: MISSING` and the lead had no
+resolved worker names for the rest of the session. Observed live: it announced
+"Escalate tl-opus-low" where `medium` resolves to `tl-opus-medium`. `mode.sh` now re-emits
+the resolved routing whenever `settings.md` is newer than `.state/routing-shown` — once per
+change, not per turn.
+
+### Also fixed in this pass
+
+- `${CLAUDE_PLUGIN_ROOT}` is **unset in the lead's Bash tool** (it is set in hooks). The plan
+  and superdoc skills invoked `plan-lint.sh`, `watch-plan.sh` and the superdoc playbook
+  through it, so all three were unreachable — plan mode could not have worked. Hooks now pin
+  the path to `.state/plugin-root`, and the skills read it from there.
+- Reconcile matched `| running` anywhere on a row, so a task whose text began with "running"
+  tripped the gate on a merged row. It now reads the State column by field position.
+- Superdoc's gitignore check lived in a `` ```! `` block, which only runs on an explicit
+  namespaced slash invocation — the check the skill itself calls "silent and fatal" was
+  itself silently skipped. Now an ordinary Bash step.
+- `.state/active-plan` was read by `state.sh` but never written by anything; plan mode writes
+  it at stage 2.
+- `state.sh` labelled every worktree "leftover", including ones with live workers.
+- `plan-lint` check 5 required each decision individually bolded, so `**D1 D2 D3**` failed;
+  and the row regex `I[0-9]+` made a suffixed ID like `I4b` invisible to every check. The
+  shipped example plan failed its own linter — it now passes.
+- Worker fence carves out the session scratchpad (`/tmp/claude-*/`), nothing else.
+- Concise output style: six rules in the core skill plus a per-turn reminder from `mode.sh`.
+- Vision: all image work routes to `tl-opus-medium` automatically, exempt from the Opus
+  policy and the effort dial, capped below high effort.
+
+### Environment note
+
+`@playwright/mcp` defaults to a **headed** browser; there was no "show the window" config to
+remove. `--headless` is now explicit in `~/.config/mcp/mcp.json` and in every cached
+`claude-plugins-official/playwright/*/.mcp.json`. The plugin-cache copies are overwritten on
+plugin update, so that part needs redoing if playwright updates.
