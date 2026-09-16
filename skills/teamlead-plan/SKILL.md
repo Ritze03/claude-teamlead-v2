@@ -70,7 +70,10 @@ their work.
 Write the plan's absolute path to `.claude/teamlead/.state/active-plan` at stage 2, so a
 session that resumes after a compaction is told which plan is live.
 
-**Start the watcher at stage 2** with the Monitor tool, `persistent: true`:
+**Start the watcher at stage 2** with the **Monitor** tool. Monitor is usually a
+*deferred* tool — `ToolSearch("select:Monitor")` first, or the call will fail. Give
+it the longest `timeout_ms` allowed (1800000) and re-arm on expiry; there is no
+`persistent` parameter:
 
 ```
 $(cat .claude/teamlead/.state/plugin-root)/hooks/watch-plan.sh "$PWD" <plan-file>

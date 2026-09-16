@@ -1013,3 +1013,28 @@ Cross-subsystem reasoning about the `Owns` rule was not something the skill aske
 Both are the cry-wolf failure again, and the third instance of it in this project: a check
 that fires when nothing is wrong trains the model to ignore it. Worth treating as a standing
 review question for any new check — *when does this fire on a correct state?*
+
+
+## 13. Interactive editor mode — verified live, 2026-09-16
+
+The last unverified path. Earlier runs were `claude -p`, where the watcher process existed
+but its Monitor died with the one-shot session, so the *notification* half was never
+exercised.
+
+Run in an interactive session: the lead armed the watcher itself (`ToolSearch("select:Monitor")`
+→ `Monitor(watch-plan.sh …, timeout_ms: 1800000)`), and an atomic `mv`-style save — what vim
+and VS Code actually do — woke it mid-conversation. It then **promoted the note into two new
+decisions (D3, D4), struck the question that note answered, and revised its own recommendation
+in light of D4**. The whole second-input-channel loop, end to end.
+
+Two corrections it surfaced:
+
+- **`persistent: true` does not exist** on this Monitor. The plan skill said to pass it; the
+  lead correctly used `timeout_ms` instead. Skill now says to use the maximum timeout and
+  re-arm, and warns that Monitor is a deferred tool needing `ToolSearch` first — which the
+  lead figured out on its own but should not have to.
+- **The MCP server is long-lived and holds the code it started with.** Editing
+  `scripts/board.py` mid-session leaves the server rendering with the old function while the
+  CLI `check` uses the new one, which surfaces as a spurious `board.md has drifted` from the
+  Stop gate. A dev-loop artifact, not a product bug — but restart the session after editing
+  `board.py`, or expect one confusing drift report.
