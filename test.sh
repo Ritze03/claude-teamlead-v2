@@ -290,7 +290,7 @@ n=$(wc -l < $rl)
 [ -f $proj/.claude/teamlead/.state/events.archive.log ] && ok "  old lines archived" || bad "  old lines archived"
 rm -f $rl $proj/.claude/teamlead/.state/events.archive.log
 
-echo "== runtime state is gitignored on activation =="
+echo "== runtime state is gitignored =="
 rm -rf $proj/.claude $proj/.gitignore
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
 grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "state dir ignored" || bad "state dir ignored"
@@ -298,6 +298,13 @@ grep -qxF '.claude/teamlead/board.md' $proj/.gitignore && ok "board.md ignored" 
 before=$(wc -l < $proj/.gitignore)
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
 check "not duplicated on re-activation" "$(wc -l < $proj/.gitignore)" "$before"
+# A project activated by an older version has the flag but no gitignore entries.
+rm -f $proj/.gitignore
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
+grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "backfilled on an ordinary turn" || bad "backfilled on an ordinary turn"
+rm -f $proj/.gitignore
+ev '{"hook_event_name":"SessionStart","cwd":"'$proj'","source":"startup"}' "$H/restore.sh" >/dev/null
+grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "backfilled on session restore" || bad "backfilled on session restore"
 
 echo "== routing resolution =="
 mkdir -p .claude/teamlead

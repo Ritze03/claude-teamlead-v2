@@ -29,6 +29,19 @@ tl_pin_root() {
     || printf '%s\n' "$CLAUDE_PLUGIN_ROOT" > "$TL_STATE/plugin-root"
 }
 
+# Runtime state must never be committed. A worker running `git add -A` otherwise
+# captures board.json onto its branch, and checking back to main deletes it — the
+# board silently vanishes. Idempotent, so it is safe to call on every turn; it must
+# NOT live only in the activation path, or a project activated by an older version
+# never gets it.
+tl_ensure_gitignore() {
+  git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  local gi="$TL_PROJECT/.gitignore" pat
+  for pat in ".claude/teamlead/.state/" ".claude/teamlead/board.md"; do
+    grep -qxF "$pat" "$gi" 2>/dev/null || printf '%s\n' "$pat" >> "$gi"
+  done
+}
+
 tl_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Append one event line. Short appends are atomic, so concurrent workers
