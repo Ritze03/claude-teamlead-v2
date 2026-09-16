@@ -60,6 +60,18 @@ fi
 if [ -f "$TL_BOARD" ]; then date -r "$TL_BOARD" +%s%N > "$TL_STATE/turn-board-mtime" 2>/dev/null || true
 else echo 0 > "$TL_STATE/turn-board-mtime"; fi
 
+# Re-inject routing whenever settings change (or were written after activation,
+# which is the first-run case: at activation settings.md did not exist yet, so the
+# state block said MISSING and the lead had no resolved names for the rest of the
+# session — and invented them).
+if [ -f "$TL_DIR/settings.md" ]; then
+  shown="$TL_STATE/routing-shown"
+  if [ ! -f "$shown" ] || [ "$TL_DIR/settings.md" -nt "$shown" ]; then
+    "$HERE/resolve.sh" "$TL_PROJECT"
+    touch "$shown"
+  fi
+fi
+
 # Active. ponytail: say nothing when there is nothing to say.
 [ -f "$TL_BOARD" ] || exit 0
 open=$(grep -cE '^\| +\|' "$TL_BOARD" 2>/dev/null) || open=0
