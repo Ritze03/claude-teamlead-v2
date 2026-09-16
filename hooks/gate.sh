@@ -2,10 +2,16 @@
 # Stop gate. Blocks ONCE per turn (stop_hook_active guards the loop), so the
 # worst case is a forced second look, never a stuck session.
 #
-# Three checks, cheapest first:
-#   1. outstanding  — dispatched workers that never returned
-#   2. reconcile    — events.log says returned, board still says running
-#   3. worktrees    — worker branches with unmerged or uncommitted work
+# Checks, cheapest first:
+#   1. outstanding  — workers still running, paired by agent id
+#   2. reconcile    — a worker returned but the board still says running
+#   2b. board       — internal validity, drift, and whether "merged" is true in git
+#   3. decompose    — the tree changed but no task list was ever written
+#   4. worktrees    — work left behind by a worker that has FINISHED
+#
+# Rule learned the hard way, four times over: a check that fires on a correct
+# state is worse than no check. Every condition here must be false during normal
+# mid-flight work.
 set -uo pipefail
 source "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/lib.sh"
 tl_init
@@ -14,48 +20,36 @@ tl_init
 
 problems=""
 
-# 1. Outstanding dispatches. (Ledger checks only run once a ledger exists —
-# a project that has not dispatched yet must still get checks 3 and 4.)
-# Counts span turns, because a background worker dispatched three turns ago still
-# returns into this same ledger. But they must NOT span all time: a worker that is
-# killed or interrupted never emits SubagentStop, so its dispatch has no return and
-# a lifetime counter stays permanently unbalanced — the gate then cries wolf every
-# turn forever and the lead learns to dismiss it. Observed exactly that.
-# So only the recent window counts; anything older is presumed finished or dead.
-if [ -f "$TL_EVENTS" ]; then
-cut_s=$(date -u -d "-${TL_WINDOW_MIN:-20} minutes" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || cut_s=""
-if [ -n "$cut_s" ]; then
-  recent=$(awk -v c="$cut_s" '$1 >= c' "$TL_EVENTS")   # ISO-8601 UTC sorts lexically
-else
-  recent=$(cat "$TL_EVENTS")
-fi
-d=$(printf '%s\n' "$recent" | grep -c '  dispatch  ') || d=0
-res=$(printf '%s\n' "$recent" | grep -c '  resume    ') || res=0
-d=$((d + res))          # a resumed worker is out again until it stops
-r=$(printf '%s\n' "$recent" | grep -c '  return    ') || r=0
-[ "$r" -gt "$d" ] && r=$d    # a return whose dispatch fell outside the window
-if [ "$d" -gt "$r" ]; then
-  problems+=$'\n'"- $((d - r)) dispatched worker(s) have not returned yet. Wait for them, or say why you are proceeding without them."
-fi
-
-# 2. Returned but never acted on. A task the board still calls 'running' while
-# the ledger recorded its return is exactly the work that used to evaporate.
-# Counted from board.json, the source of truth — never by grepping the rendered
-# markdown, which was how a task whose text merely began with "running" once
-# tripped this check.
+# State counted from board.json, never by grepping rendered markdown.
 tl_state_count() {
   python3 "${CLAUDE_PLUGIN_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}/scripts/board.py" \
     list --project "$TL_PROJECT" 2>/dev/null \
   | python3 -c "import json,sys;print(len(json.load(sys.stdin)['by_state'].get('$1',[])))" 2>/dev/null || echo 0
 }
-if [ -f "$TL_STATE/board.json" ] && [ "$r" -gt 0 ] && [ "$(tl_state_count running)" -gt 0 ]; then
-  running=$(tl_state_count running)
-  outstanding=$((d - r))
-  if [ "$running" -gt "$outstanding" ]; then
-    problems+=$'\n'"- board.md marks $running task(s) 'running' but only $outstanding worker(s) are still out. Update the returned ones to 'returned' or 'merged'."
-  fi
+
+# Workers still out, by id. Counting dispatches against returns drifted two ways:
+# a resumed worker fires no dispatch, and a killed one fires no return. Pairing
+# start/resume against return by agent id is exact, and it does not care how long
+# a worker runs — observed runs reach ~1.5h.
+BOARD_PY="${CLAUDE_PLUGIN_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}/scripts/board.py"
+lg=$(python3 "$BOARD_PY" ledger --project "$TL_PROJECT" 2>/dev/null) || lg=""
+out_ids=$(printf '%s' "$lg" | python3 -c "
+import json,sys
+try: print(' '.join(json.load(sys.stdin)['outstanding']))
+except Exception: pass" 2>/dev/null)
+npend=$(printf '%s' "$lg" | python3 -c "
+import json,sys
+try: print(json.load(sys.stdin).get('pending',0))
+except Exception: print(0)" 2>/dev/null) || npend=0
+nout=$(( $(printf '%s' "$out_ids" | wc -w) + ${npend:-0} ))
+
+if [ "$nout" -gt 0 ]; then
+  problems+=$'\n'"- $nout worker(s) still running. Wait for them, or say why you are proceeding without them."
 fi
 
+# 2. Returned but never acted on — the window where work used to evaporate.
+if [ -f "$TL_STATE/board.json" ] && [ "$(tl_state_count running)" -gt "$nout" ]; then
+  problems+=$'\n'"- board.json marks $(tl_state_count running) task(s) 'running' but only $nout worker(s) are still out. Move the returned ones to 'returned' or 'merged'."
 fi
 
 # 2b. Board integrity. board.md is the one durable artefact the MODEL writes, so
@@ -80,21 +74,26 @@ if [ -f "$TL_STATE/turn-baseline" ] && git -C "$TL_PROJECT" rev-parse --is-insid
   fi
 fi
 
-# 4. Worktrees holding work.
+# 4. Worktrees holding work — but only once their worker has FINISHED.
+# A worktree with a live worker in it is normal mid-flight, not a finding. Flagging
+# those trained the lead to answer every block with "deliberately proceeding",
+# which is how a gate stops being read.
 if git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   dirty=""
   main=$(git -C "$TL_PROJECT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
   while read -r w; do
     [ -n "$w" ] || continue
     [ "$w" = "$TL_PROJECT" ] && continue
+    # .claude/worktrees/agent-<id> — skip it while that worker is still out.
+    wid=$(basename "$w"); wid=${wid#agent-}
+    case " $out_ids " in *" $wid "*) continue ;; esac
     note=""
     [ -n "$(git -C "$w" status --porcelain 2>/dev/null)" ] && note="uncommitted changes"
-    # "never merged back" is the other half: commits that exist only on this branch.
     n=$(git -C "$w" rev-list --count "$main..HEAD" 2>/dev/null) || n=0
     [ "${n:-0}" -gt 0 ] && note="${note:+$note, }$n commit(s) not in $main"
-    [ -n "$note" ] && dirty+="  $w — $note"$'\n' 
+    [ -n "$note" ] && dirty+="  $w — $note"$'\n'
   done < <(git -C "$TL_PROJECT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
-  [ -n "$dirty" ] && problems+=$'\n'"- worker worktrees still hold work:"$'\n'"$dirty"
+  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"$dirty"
 fi
 
 [ -z "$problems" ] && exit 0

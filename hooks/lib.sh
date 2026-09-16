@@ -36,6 +36,15 @@ tl_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 tl_event() {
   mkdir -p "$TL_STATE"
   printf '%s  %s\n' "$(tl_now)" "$*" >> "$TL_EVENTS"
+  # The gate reads this file every Stop, and it only ever grew. Keep the recent
+  # tail live and roll the rest off; history nobody reads is not history.
+  local n
+  n=$(wc -l < "$TL_EVENTS" 2>/dev/null) || return 0
+  if [ "${n:-0}" -gt 4000 ]; then
+    tail -n 2000 "$TL_EVENTS" > "$TL_EVENTS.tmp" 2>/dev/null &&
+      cat "$TL_EVENTS" >> "$TL_STATE/events.archive.log" 2>/dev/null &&
+      mv "$TL_EVENTS.tmp" "$TL_EVENTS"
+  fi
 }
 
 # Block the turn with a message (Stop/PreToolUse deny both read stderr).

@@ -45,6 +45,9 @@ tools:
 | `board_add` | Decompose a request into tasks — call this *before* dispatching. Takes several at once. |
 | `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
+A task marked `merged` is **verified against git**: if its branch still has commits
+not in `HEAD`, the gate says so. Do not mark something merged until it is.
+
 **You are the only one who writes to the board.** Workers cannot — the write tools
 are refused for them. They report their results to you, and *you* check the work
 off. That is the point of `returned`: a task is not done because a worker said so,
@@ -63,6 +66,10 @@ wrong: narrow the scopes or sequence the tasks.
 When you merge a task, set `notes` to **how it was solved**, not what was asked.
 That is the part worth having in three weeks, and it is rendered into the board's
 "How it was solved" section.
+
+`board.py status --project "$PWD"` prints everything at a glance — open tasks,
+workers still out, and any problem the checks would raise. Use it instead of
+reading the files.
 
 If the board tools are unavailable, the same operations exist as a CLI:
 `python3 <plugin-root>/scripts/board.py add|update|list|check --project "$PWD" …`

@@ -1185,3 +1185,51 @@ Also confirmed in the same run: the reconcile and worktree checks fired together
 unconstructed discrepancy — ledger `outstanding: 0`, board still `running`, worker branch
 holding an unmerged commit. Those are the two originally reported failures ("worker returns,
 result evaporates" and "work never merged back") occurring at once, and both were caught.
+
+
+## 16. Hardening pass — 2026-09-16
+
+Six improvements, driven by what the live runs actually showed rather than by a checklist.
+
+**1. Gate fatigue (the important one).** Across the produce-site session the lead answered
+block after block with "deliberately proceeding" / "deliberately skipping" — every instance
+correctly reasoned, which is exactly the problem. The gate was firing on states that are
+normal mid-flight: a background worker still running, a worktree holding work QC had not
+verified yet.
+
+Fixed by making the worktree check **liveness-aware**: a worktree is only flagged once its
+worker has actually finished. `.claude/worktrees/agent-<id>` maps to a ledger id, so "is this
+worker still out?" is answerable exactly.
+
+This was the fourth cry-wolf bug in the project (phantom outstanding worker, stale board
+counter, two plan-lint false positives). The rule is now written at the top of `gate.sh`:
+**a check that fires on a correct state is worse than no check** — every condition must be
+false during normal work.
+
+**2. `merged` is verified against git.** The board validated itself but never asked git
+anything, so a task marked merged whose branch still had unmerged commits — the reported
+"work never merged back" — was undetectable. `check_git` now runs `rev-list --count HEAD..<branch>`
+for every merged task carrying a branch.
+
+**3. Liveness replaces the clock.** Outstanding workers are paired by agent id
+(`SubagentStart`/`resume` against `SubagentStop`) instead of counting dispatches against
+returns, which drifted in both directions. A worker is tracked however long it runs — the
+user reports real runs reaching ~1.5h, so the abandoned-worker age-out sits at 4h and only
+catches ids that never stopped at all. A short pending window covers the gap between dispatch
+and `SubagentStart`, since a dispatch carries no id.
+
+**4. `board.py status`** — open tasks, workers out, and any check failures in one command.
+
+**5. `events.log` rotation** — the gate reads it every Stop and it only ever grew. Tail stays
+live at 2000 lines, the rest rolls into `events.archive.log`.
+
+**6. Malformed ledger lines are ignored** — a corrupt timestamp sorts unpredictably against a
+real one and skewed every recency comparison.
+
+### Found while testing the above
+
+**Runtime state must be gitignored, and teamlead now guarantees it.** A worker running
+`git add -A` captured `board.json` onto its branch; checking back to main then deleted it and
+the board silently vanished. Activation now appends `.claude/teamlead/.state/` and
+`.claude/teamlead/board.md` to the project `.gitignore` (idempotently). This was not
+hypothetical — it happened during this pass, to me, and looked exactly like data loss.

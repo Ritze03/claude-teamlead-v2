@@ -37,6 +37,11 @@ case "$ev" in
     sm=$(tl_json .tool_input.summary | tr '\n' ' ' | cut -c1-100)
     tl_event "resume    id=$to  summary=$sm"
     ;;
+  SubagentStart)
+    at=$(tl_json .agent_type)
+    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    tl_event "start     agent=$at  id=$(tl_json .agent_id)"
+    ;;
   SubagentStop)
     at=$(tl_json .agent_type)
     case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac

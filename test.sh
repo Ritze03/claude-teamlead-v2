@@ -5,6 +5,7 @@
 set -uo pipefail
 export CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")" && pwd)"
 H="$CLAUDE_PLUGIN_ROOT/hooks"
+B="$CLAUDE_PLUGIN_ROOT/scripts/board.py"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 pass=0; fail=0
 ok()   { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
@@ -28,31 +29,35 @@ printf 'effort: medium\nopus: on-demand\nprompting: sequential\n' > .claude/team
 echo "== gate on a clean, empty project =="
 check "no ledger, no changes -> silent" "$(ev "$STOP" "$H/gate.sh")" 0
 
-echo "== ledger =="
-D='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"Agent","prompt_id":"p1","tool_input":{"subagent_type":"tl-sonnet-high","description":"work"}}'
-R='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"tl-sonnet-high","agent_id":"w1","last_assistant_message":"done"}'
+echo "== ledger: workers paired by id, not counted =="
+D='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"Agent","prompt_id":"p1","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"work"}}'
+S1='{"hook_event_name":"SubagentStart","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-high","agent_id":"w1"}'
+R1='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-high","agent_id":"w1","last_assistant_message":"done"}'
 INT='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"","agent_id":"x","last_assistant_message":"internal"}'
-ev "$D" "$H/record.sh" >/dev/null
+L=$proj/.claude/teamlead/.state/events.log
+rm -f $L
+ev "$D" "$H/record.sh" >/dev/null; ev "$S1" "$H/record.sh" >/dev/null
 ev "$INT" "$H/record.sh" >/dev/null
-L=.claude/teamlead/.state/events.log
-check "dispatch recorded" "$(grep -c 'dispatch' $L)" 1
-# Installed as a plugin, subagent_type/agent_type arrive namespaced.
-NSD='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"Agent","prompt_id":"p2","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"ns"}}'
-ev "$NSD" "$H/record.sh" >/dev/null
-check "namespaced dispatch recorded" "$(grep -c 'dispatch' $L)" 2
-NSR='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-high","agent_id":"w9","last_assistant_message":"ok"}'
-ev "$NSR" "$H/record.sh" >/dev/null
-check "namespaced return recorded" "$(grep -c 'return' $L)" 1
-printf 'x  dispatch  a\n' > $L
-check "internal agent ignored" "$(grep -c 'return' $L)" 0
-check "outstanding worker blocks" "$(ev "$STOP" "$H/gate.sh")" 2
-check "loop guard releases" "$(ev "$LOOP" "$H/gate.sh")" 0
-ev "$R" "$H/record.sh" >/dev/null
-check "return recorded, gate clears" "$(ev "$STOP" "$H/gate.sh")" 0
+check "dispatch recorded"        "$(grep -c 'dispatch' $L)" 1
+check "start recorded"           "$(grep -c '  start ' $L)" 1
+check "internal agent ignored"   "$(grep -c 'return' $L)" 0
+outn(){ python3 "$B" ledger --project $proj | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["outstanding"]))'; }
+check "one worker outstanding"   "$(outn)" 1
+check "running worker blocks"    "$(ev "$STOP" "$H/gate.sh")" 2
+check "loop guard releases"      "$(ev "$LOOP" "$H/gate.sh")" 0
+ev "$R1" "$H/record.sh" >/dev/null
+check "return clears it"         "$(outn)" 0
+check "gate clear"               "$(ev "$STOP" "$H/gate.sh")" 0
 
+echo "== a long-running worker is never aged out =="
+rm -f $L
+printf '2000-01-01T00:00:00Z  start     agent=tl-sonnet-high  id=slow\n' > $L
+check "a 25-year-old start IS treated as abandoned" "$(outn)" 0
+printf '%s  start     agent=tl-sonnet-high  id=slow2\n' "$(date -u -d '-90 minutes' +%Y-%m-%dT%H:%M:%SZ)" >> $L
+check "a 90-minute run is still outstanding" "$(outn)" 1
+rm -f $L
 
 echo "== board: JSON is the truth, md is rendered =="
-B="$CLAUDE_PLUGIN_ROOT/scripts/board.py"
 bp=$T/bp; mkdir -p $bp
 bcmd(){ python3 "$B" "$@" --project $bp >"$T/bout" 2>&1; echo $?; }
 check "add a task" "$(bcmd add --task A --agent tl-sonnet-low --owns src/a)" 0
@@ -147,7 +152,8 @@ mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active   # re-arm
 git -C "$T/wt" reset -q --hard 2>/dev/null; rm -f "$T/wt/new.txt" 2>/dev/null
 rm -f .claude/teamlead/.state/board.json
 python3 "$B" add --project $proj --task "running the migration script" --agent tl-sonnet-low --owns src/x >/dev/null
-printf 'x  dispatch  a\nx  return    a\n' > .claude/teamlead/.state/events.log
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf "$NOW  dispatch  agent=tl-sonnet-low\n$NOW  start     agent=tl-sonnet-low  id=q1\n$NOW  return    agent=tl-sonnet-low  id=q1  msg=x\n" > .claude/teamlead/.state/events.log
 check "a task whose TEXT starts with 'running' is not counted" "$(ev "$STOP" "$H/gate.sh")" 0
 python3 "$B" update --project $proj --id 1 --state running --branch wt1 >/dev/null
 check "a real running task with 0 out blocks" "$(ev "$STOP" "$H/gate.sh")" 2
@@ -168,7 +174,8 @@ grep -q 'Workhorse:' "$T/out" && bad "routing not repeated every turn" || ok "ro
 
 echo "== retry ladder: a resumed worker is tracked =="
 mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active
-printf 'x  dispatch  agent=tl-sonnet-high\nx  return    agent=tl-sonnet-high  id=w7  msg=done\n' > $L
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf "$NOW  dispatch  agent=tl-sonnet-high\n$NOW  start     agent=tl-sonnet-high  id=w7\n$NOW  return    agent=tl-sonnet-high  id=w7  msg=done\n" > $L
 check "after return, nothing outstanding" "$(ev "$STOP" "$H/gate.sh")" 0
 SM='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"SendMessage","tool_input":{"to":"w7","summary":"one correction"}}'
 ev "$SM" "$H/record.sh" >/dev/null
@@ -188,7 +195,9 @@ printf '%s  dispatch  agent=tl-sonnet-low  desc=killed worker\n' "$old" > $L
 check "stale unreturned dispatch ages out" "$(ev "$STOP" "$H/gate.sh")" 0
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '%s  dispatch  agent=tl-sonnet-low  desc=live worker\n' "$now" > $L
-check "a fresh unreturned dispatch still blocks" "$(ev "$STOP" "$H/gate.sh")" 2
+check "a just-dispatched worker (no start yet) still blocks" "$(ev "$STOP" "$H/gate.sh")" 2
+printf '%s  start     agent=tl-sonnet-low  id=z1\n' "$now" >> $L
+check "once started, it is tracked by id not by pending" "$(python3 "$B" ledger --project $proj | python3 -c 'import json,sys;d=json.load(sys.stdin);print(str(len(d["outstanding"]))+","+str(d["pending"]))')" "1,0"
 rm -f $L
 
 echo "== concise reminder =="
@@ -251,6 +260,44 @@ check "unreferenced decision flagged once a plan exists" "$(mkplan 4 '' '| Wave 
 |:----:|:--:|------|-------|------|-------|
 | 1 | I1 | unrelated work | `tl-sonnet-low` | src/a/ | — |')" 1
 grep -q 'D1 is decided but no implementation step' "$T/plout" && ok "  names the orphaned decision" || bad "  names the orphaned decision"
+
+echo "== 'merged' is verified against git, not trusted =="
+gp=$T/gp; mkdir -p $gp; cd $gp; git init -q; git config user.email t@t.t; git config user.name t
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
+echo base > a.txt; git add -A >/dev/null; git commit -qm init
+python3 "$B" add --project $gp --task w --agent tl-sonnet-high --owns src/x >/dev/null
+git checkout -q -b feat; echo work > b.txt; git add -A >/dev/null; git commit -qm work; git checkout -q master
+python3 "$B" update --project $gp --id 1 --state merged --branch feat >/dev/null
+python3 "$B" check --project $gp >"$T/gout" 2>&1; rc=$?
+check "false 'merged' is caught" "$rc" 1
+grep -q 'not actually merged back' "$T/gout" && ok "  names the unmerged branch" || bad "  names the unmerged branch"
+git merge -q feat
+check "true 'merged' passes" "$(python3 "$B" check --project $gp >/dev/null 2>&1; echo $?)" 0
+python3 "$B" update --project $gp --id 1 --branch "" >/dev/null 2>&1 || true
+cd $proj
+
+echo "== status command =="
+python3 "$B" status --project $gp > "$T/st" 2>&1
+grep -q 'teamlead —' "$T/st" && ok "status prints a summary line" || bad "status prints a summary line"
+
+echo "== events.log rotation =="
+rl=$proj/.claude/teamlead/.state/events.log
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+for i in $(seq 1 4100); do printf '%s  start     agent=tl-sonnet-low  id=r%s\n' "$NOW" "$i"; done > $rl
+ev '{"hook_event_name":"SubagentStart","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-low","agent_id":"rot"}' "$H/record.sh" >/dev/null
+n=$(wc -l < $rl)
+[ "$n" -le 2100 ] && ok "log rotated (now $n lines)" || bad "log rotated (got $n)"
+[ -f $proj/.claude/teamlead/.state/events.archive.log ] && ok "  old lines archived" || bad "  old lines archived"
+rm -f $rl $proj/.claude/teamlead/.state/events.archive.log
+
+echo "== runtime state is gitignored on activation =="
+rm -rf $proj/.claude $proj/.gitignore
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
+grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "state dir ignored" || bad "state dir ignored"
+grep -qxF '.claude/teamlead/board.md' $proj/.gitignore && ok "board.md ignored" || bad "board.md ignored"
+before=$(wc -l < $proj/.gitignore)
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
+check "not duplicated on re-activation" "$(wc -l < $proj/.gitignore)" "$before"
 
 echo "== routing resolution =="
 mkdir -p .claude/teamlead

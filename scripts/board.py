@@ -13,7 +13,7 @@ Validation happens at WRITE time, so a bad board cannot exist rather than being
 detected afterwards.
 """
 from __future__ import annotations
-import json, os, sys, datetime, pathlib, subprocess
+import json, os, re, sys, datetime, pathlib, subprocess
 
 STATES = ("queued", "running", "returned", "merged", "blocked")
 
@@ -72,6 +72,37 @@ def _overlap(a: str, b: str) -> bool:
     if a == b:
         return True
     return (a + "/").startswith(b + "/") or (b + "/").startswith(a + "/")
+
+
+def _git(project, *args):
+    try:
+        r = subprocess.run(["git", "-C", str(project), *args],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def check_git(db: dict, project=None) -> list[str]:
+    """The board validates itself; nothing asked git whether 'merged' was true.
+    A task marked merged whose commits are not in HEAD is exactly the reported
+    'work never merged back', and was undetectable."""
+    proj = pathlib.Path(_main_checkout(project or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+    if _git(proj, "rev-parse", "--is-inside-work-tree") != "true":
+        return []
+    problems = []
+    for t in db["tasks"]:
+        br = (t.get("branch") or "").strip()
+        if t["state"] != "merged" or not br or br in ("-", "—"):
+            continue
+        if _git(proj, "rev-parse", "--verify", "--quiet", br) is None:
+            continue                      # branch already deleted after merging: fine
+        n = _git(proj, "rev-list", "--count", f"HEAD..{br}")
+        if n and n != "0":
+            problems.append(
+                f"task {t['id']} is marked merged but branch {br} has {n} commit(s) "
+                f"not in HEAD — it was not actually merged back")
+    return problems
 
 
 def validate(db: dict) -> list[str]:
@@ -184,6 +215,71 @@ def summary(db):
     return {"open": len(live),
             "by_state": {k: v for k, v in sorted(by.items())},
             "tasks": live}
+
+
+# ---- ledger -----------------------------------------------------------------
+
+# Only for workers that started and never stopped at all — a killed or crashed
+# agent fires no SubagentStop, so its start would otherwise sit outstanding
+# forever. Live workers are tracked by id, not by clock, so this only needs to
+# exceed the longest plausible real run. Observed: workers can run ~1.5h, so this
+# is deliberately well clear of that.
+LEDGER_STALE_MIN = 240
+
+
+def _events(project=None):
+    f = root(project) / ".state" / "events.log"
+    if not f.exists():
+        return []
+    out = []
+    for line in f.read_text(errors="replace").splitlines():
+        parts = line.split(None, 1)
+        # Only well-formed lines. A corrupt or hand-edited timestamp sorts
+        # unpredictably against a real one and would skew every recency test.
+        if len(parts) == 2 and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", parts[0]):
+            out.append((parts[0], parts[1]))
+    return out
+
+
+def ledger(project=None) -> dict:
+    """Which workers are actually still out, by id — not by counting.
+
+    Counting dispatches against returns breaks two ways: a resumed worker fires no
+    dispatch, and a killed worker fires no return, so the count drifts permanently.
+    Pairing start/resume against return by agent id is exact. The age-out only
+    catches ids that never stopped at all.
+    """
+    live, seen = {}, {}
+    disp = starts = 0
+    recent = (datetime.datetime.now(datetime.UTC)
+              - datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for ts, rest in _events(project):
+        # A dispatch carries no agent id — the id only exists once SubagentStart
+        # fires. That leaves a short window where a worker is real but unpairable,
+        # so recent unmatched dispatches count as pending.
+        if ts >= recent:
+            if rest.startswith("dispatch"):
+                disp += 1
+            elif rest.startswith("start"):
+                starts += 1
+    for ts, rest in _events(project):
+        tok = dict(p.split("=", 1) for p in rest.split("  ") if "=" in p)
+        aid = tok.get("id")
+        if not aid:
+            continue
+        if rest.startswith(("start", "resume")):
+            live[aid] = ts
+            seen[aid] = tok.get("agent", seen.get(aid, "?"))
+        elif rest.startswith("return"):
+            live.pop(aid, None)
+            seen[aid] = tok.get("agent", seen.get(aid, "?"))
+    cutoff = (datetime.datetime.now(datetime.UTC)
+              - datetime.timedelta(minutes=LEDGER_STALE_MIN)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    outstanding = {a: t for a, t in live.items() if t >= cutoff}
+    abandoned = {a: t for a, t in live.items() if t < cutoff}
+    pending = max(0, disp - starts)
+    return {"outstanding": sorted(outstanding), "pending": pending,
+            "abandoned": sorted(abandoned), "known": sorted(seen), "agents": seen}
 
 
 # ---- MCP (stdio JSON-RPC, no dependencies) ----------------------------------
@@ -313,11 +409,25 @@ def main(argv):
         print(json.dumps(mutate(op_add, project=proj, **kw), indent=2))
     elif cmd == "update":
         print(json.dumps(mutate(op_update, project=proj, **kw), indent=2))
+    elif cmd == "status":
+        db, lg = load(proj), ledger(proj)
+        live = [t for t in db["tasks"] if t["state"] != "merged"]
+        print(f"teamlead — {len(live)} open task(s), {len(lg['outstanding'])} worker(s) out")
+        for t in live:
+            b = f" [{t['branch']}]" if t.get("branch") else ""
+            print(f"  #{t['id']:<3} {t['state']:<9} {t['task'][:64]}{b}")
+        if lg["abandoned"]:
+            print(f"  abandoned worker ids (started, never stopped): {', '.join(lg['abandoned'])}")
+        probs = validate(db) + check_git(db, proj)
+        for p_ in probs:
+            print(f"  ! {p_}")
+    elif cmd == "ledger":
+        print(json.dumps(ledger(proj), indent=2))
     elif cmd == "render":                       # re-render md from json
         save(load(proj), proj); print("rendered")
     elif cmd == "check":                        # drift + validity, for the Stop gate
         db = load(proj)
-        probs = validate(db)
+        probs = validate(db) + check_git(db, proj)
         _, m = _paths(proj)
         if m.exists() and m.read_text() != render(db):
             probs.append("board.md has drifted from board.json — it is generated; "

@@ -30,6 +30,15 @@ if [ ! -f "$TL_STATE/active" ]; then
       mkdir -p "$TL_STATE"
       : > "$TL_STATE/active"
       tl_pin_root
+      # Runtime state must never be committed. Without this a worker's `git add -A`
+      # captures board.json onto its branch, and checking back to main deletes it —
+      # the board silently vanishes. Observed in testing.
+      gi="$TL_PROJECT/.gitignore"
+      if git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        for pat in ".claude/teamlead/.state/" ".claude/teamlead/board.md"; do
+          grep -qxF "$pat" "$gi" 2>/dev/null || printf '%s\n' "$pat" >> "$gi"
+        done
+      fi
       # Seed through the script: board.json is the truth, board.md is rendered.
       [ -f "$TL_STATE/board.json" ] || \
         python3 "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/scripts/board.py" render --project "$TL_PROJECT" >/dev/null 2>&1
