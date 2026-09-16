@@ -30,6 +30,8 @@ else
   recent=$(cat "$TL_EVENTS")
 fi
 d=$(printf '%s\n' "$recent" | grep -c '  dispatch  ') || d=0
+res=$(printf '%s\n' "$recent" | grep -c '  resume    ') || res=0
+d=$((d + res))          # a resumed worker is out again until it stops
 r=$(printf '%s\n' "$recent" | grep -c '  return    ') || r=0
 [ "$r" -gt "$d" ] && r=$d    # a return whose dispatch fell outside the window
 if [ "$d" -gt "$r" ]; then

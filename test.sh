@@ -166,6 +166,22 @@ grep -q 'Workhorse:' "$T/out" && ok "routing shown once after settings change" |
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"hi again"}' "$H/mode.sh" >/dev/null
 grep -q 'Workhorse:' "$T/out" && bad "routing not repeated every turn" || ok "routing not repeated every turn"
 
+echo "== retry ladder: a resumed worker is tracked =="
+mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active
+printf 'x  dispatch  agent=tl-sonnet-high\nx  return    agent=tl-sonnet-high  id=w7  msg=done\n' > $L
+check "after return, nothing outstanding" "$(ev "$STOP" "$H/gate.sh")" 0
+SM='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"SendMessage","tool_input":{"to":"w7","summary":"one correction"}}'
+ev "$SM" "$H/record.sh" >/dev/null
+grep -q '  resume    id=w7' $L && ok "resume recorded" || bad "resume recorded"
+check "resumed worker counts as outstanding" "$(ev "$STOP" "$H/gate.sh")" 2
+R7='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-high","agent_id":"w7","last_assistant_message":"fixed"}'
+ev "$R7" "$H/record.sh" >/dev/null
+check "its return clears the gate again" "$(ev "$STOP" "$H/gate.sh")" 0
+SMX='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"SendMessage","tool_input":{"to":"not-our-agent","summary":"hi"}}'
+ev "$SMX" "$H/record.sh" >/dev/null
+grep -q 'not-our-agent' $L && bad "ignores agents not ours" || ok "ignores agents not ours"
+rm -f $L
+
 echo "== an abandoned dispatch must not nag forever =="
 old=$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)
 printf '%s  dispatch  agent=tl-sonnet-low  desc=killed worker\n' "$old" > $L

@@ -1156,3 +1156,32 @@ One false alarm worth recording: an intermediate `find` showed `features/` missi
 board already said W3 merged, which looked like a task closed without its output. It was a
 mid-merge read — all 8 files were in `HEAD`. The board was right. Worth remembering that
 checking the working tree during a fast-forward can manufacture a phantom discrepancy.
+
+
+### Scenario A result — the retry ladder fired, and exposed a ledger hole
+
+Declared untested one message earlier, then fired on its own. QC on `unitconv.py` found a
+genuine edge case — `-0.00001 mm km` printing `-0 km` — and the lead sent **one correction to
+the same worker**, which is the ladder's first rung exactly as written.
+
+It did that by **resuming** the worker (`SendMessage to: a20af64…`), and that exposed a real
+bug in the ledger: `record.sh` only recorded `PreToolUse(Agent)`, so a resumed worker fired
+nothing. `outstanding` read 0 while a worker was genuinely running — and since resumption is
+*how the retry ladder works*, the ledger under-counted precisely when tracking matters most.
+
+The lead diagnosed it itself, in its own words: *"the gate's worker count doesn't track
+resumed agents."*
+
+Fixed: `record.sh` records a `resume` line on `SendMessage` to an agent id already in our own
+ledger (ignoring messages to anything else), and `gate.sh` counts a resume as outstanding
+again until that worker's `SubagentStop`.
+
+**How this surfaced is the point.** No test caught it. The gate reported a discrepancy it
+could not explain, the lead reasoned about *why* the gate was wrong, and said so plainly
+instead of dismissing it. A gate that is honest about its own state made its own blind spot
+findable.
+
+Also confirmed in the same run: the reconcile and worktree checks fired together on a real,
+unconstructed discrepancy — ledger `outstanding: 0`, board still `running`, worker branch
+holding an unmerged commit. Those are the two originally reported failures ("worker returns,
+result evaporates" and "work never merged back") occurring at once, and both were caught.
