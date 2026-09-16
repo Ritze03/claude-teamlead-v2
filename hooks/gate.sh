@@ -51,10 +51,11 @@ fi
 
 fi
 
-# 2b. Board format. The row checks above are worthless against an invented
-# format, and the model will invent one given the chance.
-if [ -f "$TL_BOARD" ] && ! grep -q '^| ✓ | ID | Task |' "$TL_BOARD"; then
-  problems+=$'\n'"- board.md is not in the required table format (| ✓ | ID | Task | Agent | Owns | State | Branch |). Rewrite it as that table."
+# 2b. Board integrity. board.md is the one durable artefact the MODEL writes, so
+# it is the one that can be wrong. events.log is hook-written and cannot lie.
+if [ -f "$TL_BOARD" ]; then
+  bl=$("$(dirname "${BASH_SOURCE[0]}")/board-lint.sh" "$TL_BOARD" 2>/dev/null) || true
+  [ -n "$bl" ] && problems+=$'\n'"$(printf '%s' "$bl" | sed 's/^  - /- /')"
 fi
 
 # 3. Decompose. The reported failure "ignores its own task list" starts one step

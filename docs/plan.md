@@ -928,3 +928,30 @@ change, not per turn.
 remove. `--headless` is now explicit in `~/.config/mcp/mcp.json` and in every cached
 `claude-plugins-official/playwright/*/.mcp.json`. The plugin-cache copies are overwritten on
 plugin update, so that part needs redoing if playwright updates.
+
+
+## 10. Board integrity — 2026-09-16
+
+The ledger's split (§2) said `board.md` is model-owned and `events.log` is hook-owned, and
+that the gap between them catches lost work. What went unnoticed is that **only the
+hook-owned half was ever validated**. Plan files got `plan-lint.sh` with eight checks; the
+board — the artefact the model actually writes, and therefore the only one that can be
+wrong — got a single grep for its header.
+
+Demonstrated: a board with a duplicate id, two in-flight rows owning the same path, a ticked
+row still marked `running`, and a row with no agent passed the gate cleanly.
+
+`hooks/board-lint.sh` now runs on every Stop:
+
+1. Table format (moved out of `gate.sh`).
+2. Duplicate task ids.
+3. Unknown or missing State.
+4. `✓` and State must agree — a ticked row claiming `running`, or a `merged` row left
+   unticked, means the board is lying about what is finished.
+5. An unfinished row with no agent assigned.
+6. **No two unfinished rows may own overlapping paths**, parent/child included — `src/`
+   overlaps `src/router/`. Finished rows may share freely; read-only rows never collide.
+
+Check 6 is the point. "Two rows in flight must never share an `Owns` path" was enforced for
+*plans* and not for *execution*, which is backwards — planning is where the rule is stated,
+execution is where the collision happens.

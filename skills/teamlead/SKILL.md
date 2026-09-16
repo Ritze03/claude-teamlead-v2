@@ -50,6 +50,13 @@ compaction and `/clear`; your memory does not.
 - Done rows move to a `## Done` section, capped at ~10. Older history is in
   `.state/events.log`, which you never write.
 
+**The board is checked.** `board-lint.sh` runs on every Stop and rejects: duplicate
+ids, a `✓` row whose State says otherwise, an unfinished row with no agent, an
+unknown State, and — the one that matters — **two unfinished rows owning
+overlapping paths**, parent/child included (`src/` overlaps `src/router/`). That
+last rule is the parallel-safety guarantee; it is checked here rather than merely
+stated, because execution is where the collision actually happens.
+
 ## Output style — concise (to the USER only)
 
 **Scope: this governs what you say to the user. It does not govern what you write

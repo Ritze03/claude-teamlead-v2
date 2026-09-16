@@ -56,6 +56,29 @@ check "invented format blocks" "$(ev "$STOP" "$H/gate.sh")" 2
 printf '# Board\n\n| ✓ | ID | Task | Agent | Owns | State | Branch |\n|:-:|:--:|---|---|---|---|---|\n' > .claude/teamlead/board.md
 check "table format passes" "$(ev "$STOP" "$H/gate.sh")" 0
 
+echo "== board integrity (board-lint) =="
+BL="$H/board-lint.sh"
+bl(){ printf '%s' "$1" > "$T/b.md"; "$BL" "$T/b.md" >"$T/blout" 2>&1; echo $?; }
+HDR='# Board
+
+| ✓ | ID | Task | Agent | Owns | State | Branch |
+|:-:|:--:|------|-------|------|-------|--------|
+'
+check "clean board passes" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/a/ | running | w1 |
+| x | 2 | b | \`tl-sonnet-low\` | src/b/ | merged | — |")" 0
+check "duplicate id caught" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/a/ | running | w1 |
+|   | 1 | b | \`tl-sonnet-low\` | src/b/ | running | w2 |")" 1
+check "overlapping in-flight Owns caught" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/ | running | w1 |
+|   | 2 | b | \`tl-sonnet-low\` | src/deep/ | running | w2 |")" 1
+grep -q 'overlapping paths' "$T/blout" && ok "  names the overlap" || bad "  names the overlap"
+check "tick/state mismatch caught" "$(bl "$HDR| x | 1 | a | \`tl-sonnet-low\` | src/a/ | running | w1 |")" 1
+check "missing agent caught" "$(bl "$HDR|   | 1 | a |  | src/a/ | running | w1 |")" 1
+check "unknown state caught" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | src/a/ | wibble | w1 |")" 1
+check "finished rows may share a path" "$(bl "$HDR| x | 1 | a | \`tl-sonnet-low\` | src/a/ | merged | — |
+| x | 2 | b | \`tl-sonnet-low\` | src/a/ | merged | — |")" 0
+check "read-only rows never collide" "$(bl "$HDR|   | 1 | a | \`tl-sonnet-low\` | *(read-only)* | running | — |
+|   | 2 | b | \`tl-sonnet-low\` | *(read-only)* | running | — |")" 0
+
 echo "== decompose =="
 echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"go"}' | "$H/mode.sh" >/dev/null
 echo x >> src/a.py
@@ -82,10 +105,10 @@ ev "$S" "$H/mode.sh" >/dev/null
 echo "== reconcile reads the State column, not the line =="
 mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active   # re-arm: the block above deactivated
 git -C "$T/wt" reset -q --hard 2>/dev/null; rm -f "$T/wt/new.txt" 2>/dev/null   # clear the worktree noise
-printf '# Board\n\n| ✓ | ID | Task | Agent | Owns | State | Branch |\n|:-:|:--:|---|---|---|---|---|\n| x | 1 | running the migration script | `tl-sonnet-low` | src/x | merged | — |\n' > .claude/teamlead/board.md
+printf '# Board\n\n| ✓ | ID | Task | Agent | Owns | State | Branch |\n|:-:|:--:|---|---|---|---|---|\n|   | 1 | running the migration script | `tl-sonnet-low` | src/x | queued | — |\n' > .claude/teamlead/board.md
 printf 'x  dispatch  a\nx  return    a\n' > .claude/teamlead/.state/events.log
 check "task text starting 'running' is not a state" "$(ev "$STOP" "$H/gate.sh")" 0
-sed -i 's/| merged | — |/| running | wt1 |/' .claude/teamlead/board.md
+sed -i 's/| queued | — |/| running | wt1 |/' .claude/teamlead/board.md
 check "a real running row with 0 out blocks" "$(ev "$STOP" "$H/gate.sh")" 2
 rm -f .claude/teamlead/.state/events.log
 
