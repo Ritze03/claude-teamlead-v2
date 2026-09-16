@@ -1056,7 +1056,9 @@ thinkers still out, and the Stop gate blocked:
       proceeding without them.
 
 The lead then said plainly: *"the round summary won't be written until every one has
-returned."* That is the reported "loses returned work" failure being prevented in the exact
+returned."* It fired **three times** across the round — at 3, 2 and 1 outstanding, once per
+turn as each thinker landed — and the lead held every time, naming which lens it was still
+waiting on. The loop guard meant it never stuck; each block cost one forced second look. That is the reported "loses returned work" failure being prevented in the exact
 habitat predicted for it — the most fan-out-heavy mode, where the lead is re-invoked by the
 *first* agent to land and nothing else would have stopped it summarising three-thirds of the
 way short.
