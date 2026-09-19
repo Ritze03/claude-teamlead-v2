@@ -6,8 +6,20 @@ description: Use for /teamlead plan <topic>, or when the user wants to work out 
 # Plan mode
 
 Interactive. You and the user work out a plan **in a file they keep open in their
-own editor**. You print its absolute path once so it can be copy-pasted. You never
-try to open it for them.
+own editor**. You never try to open it for them.
+
+**Present the path as a single-cell table**, so it stands out from the surrounding
+prose instead of being one more line to scan past:
+
+```markdown
+| 📄 Open this in your editor |
+|---|
+| `/abs/path/to/.claude/teamlead/plan/<topic>.md` |
+```
+
+Always the **full absolute path**, in backticks so it stays monospace. Show it at
+stage 2, and again whenever the user could have lost it — after a compaction, a
+`/clear`, or a long gap.
 
 Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 
@@ -16,7 +28,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | Stage | What happens |
 |---|---|
 | **1 Topic** | Ask what's being planned. Derive the filename. If the file exists, offer to **continue** it — never silently overwrite. |
-| **2 Open it** | Create the near-empty plan, print the **full absolute path**, record it to `.claude/teamlead/.state/active-plan`, start the watcher. |
+| **2 Open it** | Create the near-empty plan, present the **full absolute path** in the single-cell table above, record it to `.claude/teamlead/.state/active-plan`, start the watcher. |
 | **3 Work it out** | Scout first, then ask. Back-and-forth until the user says Go. |
 | **4 Implementation plan** | You alone write the wave table. Then **stop again**. |
 | **5 Go** | Translate into `board.md` and execute. |

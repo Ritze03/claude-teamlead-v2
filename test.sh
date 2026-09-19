@@ -201,6 +201,13 @@ out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
 grep -q '⚠' <<<"$out" && bad "  ⚠ clears when fixed" || ok "  ⚠ clears when fixed"
 cd $proj
 
+echo "== plan skill presents the path prominently =="
+PS="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
+grep -q 'single-cell table' "$PS" && ok "instructs a single-cell table" || bad "instructs a single-cell table"
+grep -q '📄 Open this in your editor' "$PS" && ok "  gives the exact markup" || bad "  gives the exact markup"
+grep -q 'never try to open it for them' "$PS" && ok "  still forbids opening it itself" || bad "  still forbids opening it itself"
+grep -q 'after a compaction' "$PS" && ok "  re-shows the path after context loss" || bad "  re-shows the path after context loss"
+
 echo "== README documents what exists =="
 RM="$CLAUDE_PLUGIN_ROOT/README.md"
 for sec in "## Dials" "## Planning mode" "## Troubleshooting" "## Install"; do
