@@ -68,6 +68,19 @@ Each round's summary lands the moment that round closes.
    are open-ended. The user may answer in chat, or inline in the file under each
    question with a `> me: ` line (one trailing space, left empty for them to type
 into); both work, and partial answers are fine.
+
+   **Each question carries a recommendation.** Add a `*Suggest:*` line — what you'd
+   do and why in one line, plus the real alternative — or `*Your call:*` when it is
+   genuinely theirs. The agents just argued both sides; distil that into a position
+   instead of forwarding the open question. A list of bare questions is a quiz, and
+   it is answered like one — thinly, or with "you decide".
+
+   ```
+   3. Ship the offline cache in v1?
+      *Suggest:* no — *two of five agents flagged the sync conflicts as a week of
+      work on their own.* *Or:* yes, read-only, which skips the conflict problem.
+      > me: 
+   ```
 6. **Write the round summary** into the file, combining every agent's ideas with
    the answers. It feeds the next round.
 

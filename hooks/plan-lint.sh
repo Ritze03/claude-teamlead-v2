@@ -89,6 +89,23 @@ if grep -qi '^> \*\*Stage 4\*\*' "$f"; then
   fi
 fi
 
+# 9. a question with no recommendation. The lead has read the code and the user has
+# not; a bare question hands the thinking to whoever has less context, and comes back
+# as "I don't know, what do you think?". '*Your call:*' is the honest opt-out.
+bare=$(awk '
+  /^## Open questions/{o=1;next}
+  /^### Answered/{o=0}
+  /^## /{o=0}
+  o {
+    if ($0 ~ /^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]+[^[:space:]]/) {
+      if (q && !s) n++
+      # a short question may carry its suggestion on the same line
+      q=1; s=($0 ~ /\*(Suggest|Your call):\*/)
+    } else if ($0 ~ /\*(Suggest|Your call):\*/) s=1
+  }
+  END { if (q && !s) n++; print n+0 }' "$f")
+[ "$bare" -gt 0 ] && add "$bare open question(s) have no '*Suggest:*' line — say what you would do and why, or mark it '*Your call:*' if it is genuinely theirs to decide"
+
 # 8. staleness — the implementation plan must be stamped with the decisions it was built from
 stamp=$(grep -oE 'decisions:[0-9a-f]{4}' "$f" | head -1 | cut -d: -f2)
 if [ -n "$rows" ]; then

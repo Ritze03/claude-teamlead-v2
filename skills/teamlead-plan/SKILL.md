@@ -194,6 +194,7 @@ Constraints, what exists, what must not break. Scout findings land here.
 
 ## Open questions
 1. The question?
+   *Suggest:* what you'd do — *why, in one line.* *Or:* the real alternative and its cost.
    > me: 
 
 ### Answered
@@ -222,6 +223,30 @@ avoiding. Read-only steps own nothing and are always safe to fan out.
 Leave each question a `> me: ` line to answer on — **with one trailing space**, so
 the cursor lands in the right place when the user clicks at the end of it. Write it
 empty; an empty one is a placeholder, not an answer.
+
+## Never ask a bare question
+
+Every open question carries what **you** would do about it. You have read the code
+and they have not; a question with no recommendation hands the thinking back to the
+person with less context, and the usual answer to one is *"I don't know, what do you
+think?"* — a whole round trip to get to where you should have started.
+
+```
+1. Rate limit per API key or per IP?
+   *Suggest:* per key — *most traffic is server-side and shares IPs, so per-IP would
+   throttle unrelated customers together.* *Or:* per IP if you expect browser traffic.
+```
+
+- **`*Suggest:*`** — your pick and the one-line reason. Add **`*Or:*`** when there is
+  a real alternative, with what it costs. Say so when it is just convention:
+  *"usually done as X"* is useful information.
+- **`*Your call:*`** — for the questions you genuinely cannot answer: their
+  priorities, their deadline, something only they know. Say what you'd need to
+  decide it yourself. Use it honestly; a suggestion you made up to fill the slot is
+  worse than admitting the question is theirs.
+
+This is a suggestion, not a decision. Do not write it into `## Decisions` and carry
+on as though it were answered — it stays an open question until they answer it.
 
 ## Decide "done" while planning, not at the end
 

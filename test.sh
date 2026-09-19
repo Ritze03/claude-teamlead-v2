@@ -375,11 +375,11 @@ mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Done when\n- [x
   sed -i "s/decisions:XX/decisions:$fh/" "$T/fin.md"
   "$PL" "$T/fin.md" >"$T/finout" 2>&1; echo $?; }
 check "stage 4, both inboxes empty" "$(mkfin 4 '*(none open)*' '')" 0
-check "stage 4 with an open question" "$(mkfin 4 '1. unanswered?' '')" 1
+check "stage 4 with an open question" "$(mkfin 4 '1. unanswered?\n   *Suggest:* x — *y.*' '')" 1
 grep -q 'fold each answer into a Decision' "$T/finout" && ok "  says to fold it into a Decision" || bad "  says to fold it"
 check "stage 4 with a leftover note" "$(mkfin 4 '*(none)*' 'remember billing')" 1
 grep -q "left in 'Notes from me'" "$T/finout" && ok "  names the leftover note" || bad "  names the leftover note"
-check "stage 3 may hold both" "$(mkfin 3 '1. open?' 'a note')" 0
+check "stage 3 may hold both" "$(mkfin 3 '1. open?\n   *Suggest:* x — *y.*' 'a note')" 0
 grep -q 'inboxes, not storage' "$PS2" && ok "  the skill states the invariant" || bad "  skill states the invariant"
 grep -q 'can raise something new' "$PS2" && ok "  answers may spawn new questions" || bad "  answers may spawn new questions"
 
@@ -552,6 +552,7 @@ C
 
 ## Open questions
 1. A question?
+   *Suggest:* this one — *because.*
 $2
 
 ### Answered
@@ -631,6 +632,23 @@ grep -q 'Workhorse: tl-sonnet-medium' <<<"$r" && ok "xlow lowers the workhorse" 
 grep -q 'tl-opus-\*' <<<"$r" && ok "never bans Opus" || bad "never bans Opus"
 grep -q 'Vision.*tl-opus-medium' <<<"$r" && ok "vision survives opus:never + xlow" || bad "vision survives opus:never + xlow"
 grep -q 'Never tl-opus-high for vision' <<<"$r" && ok "vision capped below high" || bad "vision capped below high"
+
+echo "== a question carries the lead's recommendation =="
+mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Done when\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n\n## Implementation plan\n' "$1" "${2:-}" > "$T/q.md"
+  "$PL" "$T/q.md" >"$T/qout" 2>&1; echo $?; }
+check "a bare question fails" "$(mkq '1. Per key or per IP?\n   > me: ')" 1
+grep -q 'Your call' "$T/qout" && ok "  offers the honest opt-out" || bad "  offers the opt-out"
+check "'*Suggest:*' satisfies it" "$(mkq '1. Per key or per IP?\n   *Suggest:* per key — *shared IPs.*\n   > me: ')" 0
+check "'*Your call:*' satisfies it" "$(mkq '1. Your deadline?\n   *Your call:* only you know.\n   > me: ')" 0
+check "a one-line question may carry it inline" "$(mkq '1. Per key or per IP? *Suggest:* per key.\n   > me: ')" 0
+check "counts every bare one" "$(mkq '1. A?\n   *Suggest:* x.\n2. B?\n3. C?')" 1
+grep -q '2 open question' "$T/qout" && ok "  counts 2 of 3" || bad "  counts 2 of 3"
+# Struck questions under ### Answered already have their answer — demanding a
+# suggestion there would fire on a correct plan.
+check "an answered question needs none" "$(mkq '*(none open)*' '- ~~Old one?~~ → yes → **D1**')" 0
+grep -q 'Never ask a bare question' "$PS2" && ok "  the plan skill says why" || bad "  plan skill says why"
+grep -q 'Never ask a bare question' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" && ok "  and it applies in chat too" || bad "  applies in chat too"
+grep -q 'Suggest:' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-brainstorm/SKILL.md" && ok "  brainstorm asks the same way" || bad "  brainstorm asks the same way"
 
 # The shipped docs are the reference a lead copies from. The example drifted out of
 # spec once already (stage 4 with a full 'Notes from me') because nothing checked it.

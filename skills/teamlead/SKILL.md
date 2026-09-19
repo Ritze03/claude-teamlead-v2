@@ -118,6 +118,14 @@ communication or formatting guidance elsewhere.
 6. **Never trade correctness for brevity.** Error reports, failing test output,
    security warnings and confirmations for destructive actions keep their full
    content.
+7. **Never ask a bare question.** Whenever you ask the user something — in chat, in
+   an `AskUserQuestion`, or in a plan's `Open questions` — say what you would do and
+   why in one line, and name the real alternative if there is one. "This is usually
+   done as X" counts. You have read the code and they have not, so a bare question
+   hands the thinking to whoever has less context and comes back as *"I don't know,
+   what do you think?"*. If it is genuinely theirs — priorities, deadlines, taste —
+   say so plainly instead of inventing a preference. Being concise is not a reason
+   to drop the recommendation; it is one line, and it usually saves a round trip.
 
 This applies to orchestration too: the dispatch heads-up is one line, and a
 results summary reports what landed and what it changed — not a retelling of each
