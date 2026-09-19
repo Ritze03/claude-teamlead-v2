@@ -11,10 +11,14 @@ in=$(cat 2>/dev/null)
 proj=$(printf '%s' "$in" | jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
 [ -n "$proj" ] || proj=$PWD
 
-# Resolve a worktree back to the main checkout, or a worker's pane shows nothing.
-common=$(git -C "$proj" rev-parse --git-common-dir 2>/dev/null) || exit 0
-case "$common" in /*) ;; *) common="$proj/$common" ;; esac
-root=$(cd "$(dirname "$common")" 2>/dev/null && pwd) || exit 0
+# Resolve a worktree back to the main checkout so a worker's pane reads the same.
+# Best-effort only: teamlead supports non-git projects, so a git failure must fall
+# through to the plain cwd rather than silence the segment.
+root="$proj"
+if common=$(git -C "$proj" rev-parse --git-common-dir 2>/dev/null); then
+  case "$common" in /*) ;; *) common="$proj/$common" ;; esac
+  r=$(cd "$(dirname "$common")" 2>/dev/null && pwd) && root="$r"
+fi
 
 [ -f "$root/.claude/teamlead/.state/active" ] || exit 0
 

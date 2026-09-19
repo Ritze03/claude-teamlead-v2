@@ -161,6 +161,12 @@ out=$(cd /tmp && echo '{}' | bash "$SL" 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && [ -z "$out" ]; } && ok "  empty input outside a project: silent, no error" || bad "  empty input outside a project (rc=$rc out=$out)"
 out=$(echo 'not json' | bash "$SL" 2>&1); rc=$?
 [ "$rc" -eq 0 ] && ok "  survives malformed input" || bad "  survives malformed input (rc=$rc)"
+# teamlead supports non-git projects; the segment must not require git.
+ngp=$T/nogit; mkdir -p $ngp/.claude/teamlead/.state; : > $ngp/.claude/teamlead/.state/active
+echo "$CLAUDE_PLUGIN_ROOT" > $ngp/.claude/teamlead/.state/plugin-root
+python3 "$B" add --project $ngp --task ng --agent tl-sonnet-low --owns src/n >/dev/null
+out=$(echo '{"workspace":{"current_dir":"'$ngp'"}}' | bash "$SL")
+grep -q '1 open' <<<"$out" && ok "  works in a NON-git teamlead project" || bad "  works in a NON-git teamlead project (got: $out)"
 cd $proj
 
 echo "== README documents what exists =="
