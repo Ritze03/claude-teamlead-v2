@@ -400,6 +400,18 @@ task.
 The `@`-force-load set is **exactly** `superdoc/meta/TERMINOLOGY.md` plus every file under
 `superdoc/claude-instructions/` — nothing else, ever. Every other doc (`overview.md`,
 every capability page, `STYLING-GUIDE.md`, `README.md`) is a plain on-demand link.
+
+**Why the set is this small.** `@` does not suggest a file, it *pastes* it — the whole
+contents enter context on every turn of every session in this project, whether or not the
+task has anything to do with it. A plain link costs nothing until an agent chooses to read
+it, and an agent that needs `STYLING-GUIDE.md` will find it from the overview. So each `@`
+is a permanent tax levied on every future task, paid to avoid one lookup. It is worth
+paying only where *not* knowing would make an agent act wrongly on work unrelated to the
+document — which is true of project vocabulary and of the documentation rules themselves,
+and of essentially nothing else.
+
+The failure this prevents is quiet: nobody notices a bloated `@`-set, they notice that
+sessions fill up faster and every task costs more.
 Force-loading spends context budget on every session; keep the set small on purpose.
 
 **Merge algorithm, in order:**

@@ -269,6 +269,13 @@ printf 'terms\n' > $sdp/superdoc/meta/TERMINOLOGY.md
 miss=$(cd $sdp && grep -oE '@superdoc/[^ )`]+' CLAUDE.md | sed 's/^@//' | while read -r f; do test -f "$f" || echo "$f"; done)
 check "flags exactly the missing ref" "$miss" "superdoc/meta/GONE.md"
 
+echo "== the @-budget rule keeps its reasoning =="
+PB="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md"
+grep -q 'nothing else, ever' "$PB" && ok "the exact set is still mandated" || bad "the exact set is still mandated"
+grep -q 'does not suggest a file, it \*pastes\* it' "$PB" && ok "  explains @ pastes the file" || bad "  explains @ pastes the file"
+grep -q 'every turn of every' "$PB" && ok "  names the per-turn cost" || bad "  names the per-turn cost"
+grep -q 'permanent tax' "$SD" && ok "  the lead is told to hold the line at QC" || bad "  lead told to hold the line"
+
 echo "== the skill is self-sufficient for its own tooling =="
 SKC="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
 for c in "board.py render" "board.py check" "board.py forget" "board.py status"; do

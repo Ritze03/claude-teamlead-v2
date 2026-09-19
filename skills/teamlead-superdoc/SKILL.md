@@ -86,6 +86,12 @@ and dated design-spec docs for big decisions — all under `superdoc/`. Wire a t
 `CLAUDE.md` via the guarded markers, `@`-force-loading only TERMINOLOGY and
 `claude-instructions/*`.
 
+**Hold that line at QC.** `@` pastes a file's whole contents into every turn of every
+session in the project, so each one is a permanent tax on all future work. Anything
+else — `overview.md`, capability pages, the styling guide — is a plain link an agent
+reads when it needs it. A worker that force-loads more has made every task in this
+repo more expensive; send it back.
+
 ## Step 3 — HEALTH-CHECK
 
 Dispatch workers to audit the existing tree against the playbook: missing pages,
