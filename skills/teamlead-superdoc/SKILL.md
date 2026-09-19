@@ -108,3 +108,9 @@ knowledge would die at the next clone — silently. And feature pages carry inli
 **Why:** notes that a human occasionally wants; buried under `.claude/` nobody
 browsing the repo finds them. At the root it is committed by default and stays
 discoverable, while `docs/` vs `superdoc/` still does the intended work.
+
+**Do not also copy it into `.claude/`.** Agents do not find superdoc by location —
+they find it because `CLAUDE.md` force-loads the mandatory set, and that works from
+the repo root and every worktree below it. A second copy under `.claude/` would
+reintroduce the gitignore risk this placement exists to avoid, and leave two copies
+to drift apart when being current is the entire value.
