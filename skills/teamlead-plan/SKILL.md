@@ -25,13 +25,32 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 
 ## Stages
 
-| Stage | What happens |
-|---|---|
-| **1 Topic** | Ask what's being planned. Derive the filename. If the file exists, offer to **continue** it — never silently overwrite. |
-| **2 Open it** | Create the near-empty plan, present the **full absolute path** in the single-cell table above, record it to `.claude/teamlead/.state/active-plan`, start the watcher. |
-| **3 Work it out** | Scout first, then ask. Back-and-forth until the user says Go. |
-| **4 Implementation plan** | You alone write the wave table. Then **stop again**. |
-| **5 Go** | Translate into `board.md` and execute. |
+| Stage | What happens | Ends when |
+|---|---|---|
+| **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
+| **2 Create and show** | Create the near-empty plan with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
+| **3 Work it out** | Scout, then ask. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
+| **4 Implementation plan** | You alone write the wave table. Then **stop again**. | The user says "Go" |
+| **5 Go** | Translate into `board.md` and execute. | — |
+
+### Order inside the first turn
+
+Stage 2 is short and must not be buried. In one turn, in this order:
+
+1. Create the file and **say the path, in the table, as your first output** — before
+   any slow work. Scouting takes a minute or more; the user should be opening the
+   file *during* it, not waiting to learn where it is.
+2. Start the watcher and write `.state/active-plan`.
+3. *Then* dispatch the scout and move to stage 3.
+
+Getting this backwards — scouting first and mentioning the path in the same message
+as the findings and questions — is the observed failure. It looks like the plan
+jumped from stage 1 straight to stage 3, and the user has no chance to open the
+file while there is still something to watch it for.
+
+The header tracks this: the file says `Stage 2` while the scout runs (the status
+line then reads *"open it in your editor"*, which is exactly the thing to do), and
+becomes `Stage 3` when you post the questions and are genuinely waiting on them.
 
 **"Go" advances exactly one stage.** From 3 it means *write the implementation
 plan, then stop*. From 4 it means *start implementing*. One word, never a skip
@@ -81,6 +100,11 @@ A static line is not you judging readiness; it is the command staying visible.
 Before asking the user anything, dispatch scouts to gather what the repo can
 answer. Findings go in `## Context`. Research first, questions second — never ask
 what you could have looked up.
+
+The scout runs **after** the path is on screen, never before it (see *Order inside
+the first turn*). An empty repo is not a reason to skip scouting — scout the
+machine instead: language runtimes, build tools, what is actually installed. That
+is the context a greenfield choice turns on.
 
 ## Sharing the file with the user
 

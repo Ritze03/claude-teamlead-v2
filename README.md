@@ -127,8 +127,9 @@ fallback worth having — but capped below high effort so the exemption stays ch
 
 The mode worth trying first, because it's the one that isn't just delegation.
 
-`/teamlead plan <topic>` opens a file, prints its **absolute path**, and leaves it to you to
-open in your own editor. It scouts the repo before asking you anything, then asks. You can
+`/teamlead plan <topic>` creates the file and shows you its **absolute path first** — before
+it starts scouting, so you can open it while that runs rather than waiting to find out where
+it is. Passing the topic in the command skips the "what are we planning" step entirely. It scouts the repo before asking you anything, then asks. You can
 answer in chat *or* type into the file and save — it watches the file and picks up your edit,
 promotes it into a decision, and strikes the question.
 

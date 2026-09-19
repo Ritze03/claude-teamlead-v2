@@ -297,6 +297,19 @@ ok "every CLI remedy is in the skill, not only the README"
 grep -q 'never read the plugin.s source' "$SKC" && ok "  tells it not to reverse-engineer" || bad "  tells it not to reverse-engineer"
 grep -q 'plan-watch\|plugin-root' "$SKC" && ok "  says where the plugin root is" || bad "  says where the plugin root is"
 
+echo "== plan stages: path first, scout second =="
+PS2="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
+grep -q 'Order inside the first turn' "$PS2" && ok "spells out the order in turn one" || bad "spells out the order"
+grep -q 'as your first output' "$PS2" && ok "  path before any slow work" || bad "  path before slow work"
+grep -q 'Skip it entirely when the topic came with the command' "$PS2" && ok "  stage 1 is skippable" || bad "  stage 1 skippable"
+grep -q 'Ends when' "$PS2" && ok "  each stage has an exit condition" || bad "  each stage has an exit condition"
+# the statusline must have a sensible label for the transient stage 2
+sed -i 's/Stage [0-9]/Stage 2/' $pf 2>/dev/null
+echo "$pf" > $slp/.claude/teamlead/.state/active-plan
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q 'stage 2/5 open it in your editor' <<<"$out" && ok "  stage 2 tells the user to open it" || bad "  stage 2 label ($out)"
+sed -i 's/Stage [0-9]/Stage 3/' $pf 2>/dev/null
+
 echo "== plan skill presents the path prominently =="
 PS="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 grep -q 'single-cell table' "$PS" && ok "instructs a single-cell table" || bad "instructs a single-cell table"
