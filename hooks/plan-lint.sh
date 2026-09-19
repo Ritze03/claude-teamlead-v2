@@ -13,8 +13,8 @@ add() { fail+="  - $1"$'\n'; }
 # 2 dependency waves, 3 Owns overlap, 4 agent tier, 5 decisions covered,
 # 6 unpromoted answers, 7 TBD at stage 4, 8 staleness stamp)
 order=$(grep -n '^## ' "$f" | sed 's/^[0-9]*:## //')
-want=$'Goal\nContext\nDecisions\nOpen questions\nNotes from me\nImplementation plan'
-[ "$order" = "$want" ] || add "sections wrong or out of order. Want: Goal, Context, Decisions, Open questions, Notes from me, Implementation plan"
+want=$'Goal\nDone when\nContext\nDecisions\nOpen questions\nNotes from me\nImplementation plan'
+[ "$order" = "$want" ] || add "sections wrong or out of order. Want: Goal, Done when, Context, Decisions, Open questions, Notes from me, Implementation plan"
 
 # table rows: | wave | id | task | agent | owns | after |
 # ID may carry a suffix (I4b); without [a-z]? such a row is silently invisible.
@@ -77,6 +77,16 @@ if grep -qi '^> \*\*Stage 4\*\*' "$f"; then
   [ "$q" -gt 0 ] && add "stage 4 reached with $q open question(s) still unanswered — fold each answer into a Decision and strike the question into ### Answered"
   n=$(awk '/^## Notes from me/{o=1;next} /^## /{o=0} o' "$f" | grep -cE '\S') || n=0
   [ "$n" -gt 0 ] && add "stage 4 reached with $n line(s) left in 'Notes from me' — fold each into a Decision (or the Goal) and remove it"
+  # Acceptance criteria must exist and say who checks each one, decided while
+  # planning — settling it at the end is how everything becomes 'agent checks it'.
+  dw=$(awk '/^## Done when/{o=1;next} /^## /{o=0} o' "$f")
+  c=$(printf '%s' "$dw" | grep -cE '^[[:space:]]*-[[:space:]]*\[.\]') || c=0
+  if [ "$c" -eq 0 ]; then
+    add "stage 4 reached with no criteria under 'Done when' — say what must be true for this to be finished, as '- [ ] ...' items"
+  else
+    v=$(printf '%s' "$dw" | grep -cE 'verified by:[[:space:]]*(agent|user)') || v=0
+    [ "$v" -lt "$c" ] && add "$((c - v)) of $c 'Done when' item(s) do not say who verifies them — mark each *verified by: agent* or *verified by: user*"
+  fi
 fi
 
 # 8. staleness — the implementation plan must be stamped with the decisions it was built from

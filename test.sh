@@ -329,8 +329,48 @@ grep -q '1.2.3' $ic/statusline.sh && ok "  a path with spaces stays pinned and q
 rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; printf '# mine\n' > $ic/statusline.sh
 run --combined >/dev/null; grep -q '^# mine' $ic/statusline.sh && ok "refuses to clobber a hand-written combiner" || bad "refuses to clobber"
 
+echo "== done-when criteria and archiving =="
+mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Done when\n%s\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" > "$T/dw.md"
+  dh=$(sed -n '/^## Decisions/,/^## Open questions/p' "$T/dw.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$dh/" "$T/dw.md"; "$PL" "$T/dw.md" >"$T/dwout" 2>&1; echo $?; }
+check "criteria with verifiers pass" "$(mkdw 4 '- [x] tests pass — *verified by: agent*')" 0
+check "no criteria at stage 4 fails" "$(mkdw 4 '')" 1
+grep -q "no criteria under 'Done when'" "$T/dwout" && ok "  says what to add" || bad "  says what to add"
+check "a criterion with no verifier fails" "$(mkdw 4 '- [ ] vague')" 1
+grep -q 'who verifies them' "$T/dwout" && ok "  demands agent or user" || bad "  demands agent or user"
+check "stage 3 needs none of it yet" "$(mkdw 3 '')" 0
+grep -q 'Done when' "$PS2" && ok "  the skill asks for it while planning" || bad "  skill asks while planning"
+grep -q 'Really run them' "$PS2" && ok "  demands the checks actually run" || bad "  demands checks actually run"
+
+ap=$T/arch; mkdir -p $ap/.claude/teamlead/{plan,.state/snap}; (cd $ap && git init -q)
+apf=$ap/.claude/teamlead/plan/topic.md
+# A confirmed plan: every 'Done when' box ticked. Archiving refuses anything less.
+DONE='# T\n\n## Done when\n- [x] it works — *verified by: agent*\n'
+printf "$DONE" > $apf
+echo "$apf" > $ap/.claude/teamlead/.state/active-plan
+: > $ap/.claude/teamlead/.state/plan-touched; cp $apf $ap/.claude/teamlead/.state/snap/topic.md
+bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap >/dev/null 2>&1
+d=$(date +%Y-%m-%d)
+[ -f "$ap/.claude/teamlead/plan/done/$d-topic.md" ] && ok "archives with a datestamp" || bad "archives with a datestamp"
+[ -f "$apf" ] && bad "  removes it from the active folder" || ok "  removes it from the active folder"
+[ -f "$ap/.claude/teamlead/.state/active-plan" ] && bad "  clears active-plan" || ok "  clears active-plan"
+[ -f "$ap/.claude/teamlead/.state/snap/topic.md" ] && bad "  clears the snapshot" || ok "  clears the snapshot"
+printf "$DONE" > $apf
+bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap >/dev/null 2>&1
+[ -f "$ap/.claude/teamlead/plan/done/$d-topic-2.md" ] && ok "  a same-day second plan does not overwrite" || bad "  same-day collision"
+
+# The 'confirm before retiring' rule is enforced here, not only in the skill text —
+# filing a plan away with work left in it is how the leftover work gets lost.
+arch(){ printf "$1" > $apf; bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap ${2:-} >"$T/arout" 2>&1; echo $?; }
+check "refuses a plan with an unticked box" "$(arch '# T\n\n## Done when\n- [x] a — *v: agent*\n- [ ] b — *v: user*\n')" 1
+grep -q '1 of 2' "$T/arout" && ok "  counts what is left" || bad "  counts what is left"
+grep -q '\- \[ \] b' "$T/arout" && ok "  names the unticked item" || bad "  names the unticked item"
+check "refuses a plan with no criteria at all" "$(arch '# T\n\n## Done when\n\n## Context\nc\n')" 1
+check "--abandon files a dropped plan anyway" "$(arch '# T\n\n## Done when\n- [ ] never done — *v: user*\n' --abandon)" 0
+[ -f "$ap/.claude/teamlead/plan/done/$d-abandoned-topic.md" ] && ok "  and marks it abandoned" || bad "  and marks it abandoned"
+
 echo "== a finished plan has empty inboxes =="
-mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" "$3" > "$T/fin.md"
+mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Done when\n- [x] it works — *verified by: agent*\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" "$3" > "$T/fin.md"
   fh=$(sed -n '/^## Decisions/,/^## Open questions/p' "$T/fin.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$fh/" "$T/fin.md"
   "$PL" "$T/fin.md" >"$T/finout" 2>&1; echo $?; }
@@ -501,6 +541,9 @@ mkplan(){ cat > "$T/pl.md" <<PEOF
 ## Goal
 G
 
+## Done when
+- [ ] it works — *verified by: agent*
+
 ## Context
 C
 
@@ -588,6 +631,16 @@ grep -q 'Workhorse: tl-sonnet-medium' <<<"$r" && ok "xlow lowers the workhorse" 
 grep -q 'tl-opus-\*' <<<"$r" && ok "never bans Opus" || bad "never bans Opus"
 grep -q 'Vision.*tl-opus-medium' <<<"$r" && ok "vision survives opus:never + xlow" || bad "vision survives opus:never + xlow"
 grep -q 'Never tl-opus-high for vision' <<<"$r" && ok "vision capped below high" || bad "vision capped below high"
+
+# The shipped docs are the reference a lead copies from. The example drifted out of
+# spec once already (stage 4 with a full 'Notes from me') because nothing checked it.
+echo "== shipped docs satisfy their own linter =="
+"$PL" "$CLAUDE_PLUGIN_ROOT/docs/example-plan.md" >/dev/null 2>&1 \
+  && ok "example-plan.md passes plan-lint" || bad "example-plan.md passes plan-lint"
+# The skill's template is what every new plan starts as, so its section order must
+# match the linter's. Extract it and compare headings directly.
+tpl=$(awk '/^## Goal$/{p=1} p&&/^## /{print}' "$PS2" | head -7 | sed 's/^## //')
+check "template section order matches the linter" "$tpl" "$(printf 'Goal\nDone when\nContext\nDecisions\nOpen questions\nNotes from me\nImplementation plan')"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"

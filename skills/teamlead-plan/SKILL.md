@@ -182,6 +182,10 @@ off.
 ## Goal
 One or two lines. `TBD` until stated.
 
+## Done when
+- [ ] A concrete, checkable condition — *verified by: agent* (`pytest -q` passes)
+- [ ] Something only a person can judge — *verified by: user*
+
 ## Context
 Constraints, what exists, what must not break. Scout findings land here.
 
@@ -218,6 +222,57 @@ avoiding. Read-only steps own nothing and are always safe to fan out.
 Leave each question a `> me: ` line to answer on — **with one trailing space**, so
 the cursor lands in the right place when the user clicks at the end of it. Write it
 empty; an empty one is a placeholder, not an answer.
+
+## Decide "done" while planning, not at the end
+
+`## Done when` is settled in stage 1–2, alongside the Goal, and every item names
+**who verifies it**:
+
+| verifier | for | example |
+|---|---|---|
+| `agent` | anything with an objective answer | tests pass, the endpoint returns 200, every page has a meta description |
+| `user` | anything needing judgement or eyes | it reads well, the layout looks right, this is the behaviour I meant |
+
+Ask for this when you ask about the goal — *"how will we know this is done, and is
+that something I can check or something you need to look at?"* Deciding it at the
+end is how everything becomes "agent checks it": by then both of you want to be
+finished, and the honest answer is whatever closes the task.
+
+**Prefer `agent`, but do not fake it.** If a criterion cannot be checked
+mechanically, marking it `agent` does not make it verified — it makes the
+verification a guess with a tick next to it. Say `user` and let it wait.
+
+## Confirming the plan is actually implemented
+
+When the board is empty and every implementation step has merged, confirm before
+declaring anything finished:
+
+1. **Run the `agent` criteria.** Really run them — a command, a fetch, a test. Do
+   not reason about whether they would pass.
+2. **Report each one** with its evidence, ticking the boxes in `## Done when`.
+3. **Ask about the `user` criteria.** List them and wait. This is the second place
+   in plan mode where you stop and the user is the only way forward.
+4. Anything that fails goes back on the board as a task — not into a caveat.
+
+Only when every box is ticked is the plan implemented.
+
+## Retiring a finished plan
+
+Then archive it — never delete it. A plan is the record of *why* the code looks the
+way it does, and that outlives the work:
+
+```
+$(cat .claude/teamlead/.state/plugin-root)/scripts/plan-archive.sh <plan-file> --project "$PWD"
+```
+
+It datestamps the file into `.claude/teamlead/plan/done/YYYY-MM-DD-<topic>.md`,
+stops the watcher, and clears `active-plan` and the snapshot. Say where it went.
+
+It **refuses** a plan with an unticked `Done when` box, or with no criteria at all —
+step 1–3 above are not optional, and filing a plan away is exactly how the last
+unfinished item gets lost. If the user drops a plan instead of finishing it, pass
+`--abandon`; it files it as `YYYY-MM-DD-abandoned-<topic>.md` so the history says
+which it was.
 
 ## Everything ends up in Decisions
 

@@ -7,6 +7,14 @@
 Every public API endpoint enforces a per-key request budget, returns `429` with a
 `Retry-After` header when exceeded, and never rate-limits internal service-to-service calls.
 
+Out of scope: the billing endpoints — an open contract question with legal, and entangling
+the two would block both.
+
+## Done when
+- [x] `pytest tests/limits/` passes, including the boundary-burst and Redis-down cases — *verified by: agent*
+- [x] `/health` and `/metrics` still answer under load — *verified by: agent*
+- [ ] A 429 response reads sensibly to a customer integrating against it — *verified by: user*
+
 ## Context
 - 34 public endpoints across `api/routes/*.py`, all behind one `@app.route` decorator stack —
   so there is a single place to hook, not 34. *(scout, 2026-08-28)*
@@ -44,11 +52,6 @@ Every public API endpoint enforces a per-key request budget, returns `429` with 
 - ~~Per-IP or per-key?~~ → Per-key. → **D4**
 
 ## Notes from me
-Don't touch the billing endpoints yet — that's a separate contract question with legal and
-I don't want it entangled with this.
-
-Also: whatever the default is, it needs to match what's on the pricing page. Check before
-picking a number.
 
 ## Implementation plan
 *Built from D1–D8 · decisions:a4ea*
