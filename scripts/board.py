@@ -412,7 +412,7 @@ def main(argv):
     elif cmd == "status":
         db, lg = load(proj), ledger(proj)
         live = [t for t in db["tasks"] if t["state"] != "merged"]
-        print(f"teamlead — {len(live)} open task(s), {len(lg['outstanding'])} worker(s) out")
+        print(f"teamlead — {len(live)} open task(s), {len(lg['outstanding'])} worker(s) working")
         for t in live:
             b = f" [{t['branch']}]" if t.get("branch") else ""
             print(f"  #{t['id']:<3} {t['state']:<9} {t['task'][:64]}{b}")

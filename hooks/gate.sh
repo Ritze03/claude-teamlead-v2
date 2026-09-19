@@ -44,12 +44,12 @@ except Exception: print(0)" 2>/dev/null) || npend=0
 nout=$(( $(printf '%s' "$out_ids" | wc -w) + ${npend:-0} ))
 
 if [ "$nout" -gt 0 ]; then
-  problems+=$'\n'"- $nout worker(s) still running. Wait for them, or say why you are proceeding without them."
+  problems+=$'\n'"- $nout worker(s) still working. Wait for them, or say why you are proceeding without them."
 fi
 
 # 2. Returned but never acted on — the window where work used to evaporate.
 if [ -f "$TL_STATE/board.json" ] && [ "$(tl_state_count running)" -gt "$nout" ]; then
-  problems+=$'\n'"- board.json marks $(tl_state_count running) task(s) 'running' but only $nout worker(s) are still out. Move the returned ones to 'returned' or 'merged'."
+  problems+=$'\n'"- board.json marks $(tl_state_count running) task(s) 'running' but only $nout worker(s) are still working. Move the returned ones to 'returned' or 'merged'."
 fi
 
 # 2b. Board integrity. board.md is the one durable artefact the MODEL writes, so

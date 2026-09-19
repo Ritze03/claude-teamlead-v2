@@ -74,6 +74,9 @@ echo "[teamlead] Concise output style is active for what you say to the USER: le
 open=$(python3 "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/scripts/board.py" list --project "$TL_PROJECT" 2>/dev/null \
        | python3 -c 'import json,sys; print(json.load(sys.stdin)["open"])' 2>/dev/null) || open=0
 [ "${open:-0}" -eq 0 ] && exit 0
-d=$(grep -c '  dispatch  ' "$TL_EVENTS" 2>/dev/null) || d=0
-r=$(grep -c '  return    ' "$TL_EVENTS" 2>/dev/null) || r=0
-echo "[teamlead] board.md: $open open task(s), $((d - r)) worker(s) still out. You orchestrate; workers implement."
+# Paired by agent id, same as the gate. Counting dispatches against returns
+# drifts on a resumed worker (no dispatch) and a killed one (no return), so this
+# line used to disagree with the gate about how many workers were live.
+nw=$(python3 "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/scripts/board.py" ledger --project "$TL_PROJECT" 2>/dev/null \
+     | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d["outstanding"])+d.get("pending",0))' 2>/dev/null) || nw=0
+echo "[teamlead] board.md: $open open task(s), ${nw:-0} worker(s) working. You orchestrate; workers implement."

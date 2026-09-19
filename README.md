@@ -147,7 +147,7 @@ A plugin **cannot** install a main status line — only your `settings.json` can
 a segment and leaves the slot alone rather than claiming it:
 
 ```
-⚑ teamlead ✎ recipes-section S3 · 3 open · 1 out · 1 returned ⚠
+⚑ teamlead ✎ recipes-section S3 · 3 open · 1 working · 1 returned ⚠
 ```
 
 Each part appears only when it applies, so the line is short almost always and grows exactly
@@ -157,7 +157,7 @@ when something needs you:
 |---|---|
 | `✎ <plan> S3` | Planning mode, and which stage. Driven by the plan file's own stage header, so it disappears at handoff rather than sticking around. |
 | `N open` | Unfinished tasks. |
-| `N out` | Workers actually running, paired by agent id — accurate however long they run. |
+| `N working` | Workers actually running, paired by agent id — accurate however long they run. Deliberately not called `running`: the board has a `running` state, and when the two disagree that divergence is the bug the reconcile gate catches. |
 | `N returned` | **A worker came back and you have not acted on it.** The window where work used to evaporate; amber because it is the one number worth chasing. |
 | `N blocked` | Tasks that cannot proceed. |
 | `⚠` | A real problem: board/JSON drift, a `merged` task git says is not merged, or two unfinished tasks owning the same path. |

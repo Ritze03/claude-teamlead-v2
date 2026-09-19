@@ -69,7 +69,7 @@ PY
   [ -n "${open:-}" ] || { open=0 out=0 returned=0 blocked=0; }
 
   [ "${open:-0}" -gt 0 ] && seg+=" $(c $DIM '·') $open open"
-  [ "${out:-0}" -gt 0 ]  && seg+=" $(c $DIM '·') $(c $TEAL "$out out")"
+  [ "${out:-0}" -gt 0 ]  && seg+=" $(c $DIM '·') $(c $TEAL "$out working")"
   # Returned = a worker came back and the lead has not acted. The window where
   # work used to evaporate, and the number most worth seeing.
   [ "${returned:-0}" -gt 0 ] && seg+=" $(c $DIM '·') $(c $AMBER "$returned returned")"

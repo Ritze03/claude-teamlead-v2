@@ -290,6 +290,20 @@ printf '%s  start     agent=tl-sonnet-low  id=z1\n' "$now" >> $L
 check "once started, it is tracked by id not by pending" "$(python3 "$B" ledger --project $proj | python3 -c 'import json,sys;d=json.load(sys.stdin);print(str(len(d["outstanding"]))+","+str(d["pending"]))')" "1,0"
 rm -f $L
 
+echo "== vocabulary is consistent: 'working', never 'out'/'running' =="
+NOW2=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  start     agent=tl-sonnet-high  id=v1\n' "$NOW2" > $L
+ev "$STOP" "$H/gate.sh" >/dev/null
+grep -q 'worker(s) still working' "$T/out" && ok "gate says working" || bad "gate says working ($(cat $T/out))"
+grep -qE 'worker\(s\) (still )?out\b' "$T/out" && bad "gate still says 'out'" || ok "gate no longer says 'out'"
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"hi"}' "$H/mode.sh" >/dev/null
+grep -q 'worker(s) working' "$T/out" && ok "per-turn line says working" || ok "per-turn line quiet (no open tasks)"
+# the per-turn count must come from id-pairing, not dispatch-minus-return
+printf '%s  dispatch  agent=tl-sonnet-high\n%s  start     agent=tl-sonnet-high  id=v2\n%s  return    agent=tl-sonnet-high  id=v2  msg=x\n%s  resume    id=v2  summary=fix\n' "$NOW2" "$NOW2" "$NOW2" "$NOW2" > $L
+n=$(python3 "$B" ledger --project $proj | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d["outstanding"]))')
+check "a resumed worker counts as working" "$n" 1
+rm -f $L
+
 echo "== concise reminder =="
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"hi"}' "$H/mode.sh" >/dev/null
 grep -q 'Concise output style is active' "$T/out" && ok "concise reminder injected per turn" || bad "concise reminder injected per turn"
