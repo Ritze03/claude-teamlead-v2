@@ -66,7 +66,8 @@ Each round's summary lands the moment that round closes.
    **Err toward asking too many, never too few.**
 5. **Ask as a plain numbered list in free text — NEVER `AskUserQuestion`.** These
    are open-ended. The user may answer in chat, or inline in the file under each
-   question with a `> me:` line; both work, and partial answers are fine.
+   question with a `> me: ` line (one trailing space, left empty for them to type
+into); both work, and partial answers are fine.
 6. **Write the round summary** into the file, combining every agent's ideas with
    the answers. It feeds the next round.
 

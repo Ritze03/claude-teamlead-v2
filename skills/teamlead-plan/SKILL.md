@@ -101,7 +101,7 @@ Constraints, what exists, what must not break. Scout findings land here.
 
 ## Open questions
 1. The question?
-   > me: (the user may answer inline here)
+   > me: 
 
 ### Answered
 - ~~Old question~~ → answer → **D1**
@@ -125,6 +125,10 @@ a dependency column plus a prose note is two sources of truth that can disagree.
 worker. Without it "parallel" is an assertion, not a proof — two steps both
 writing `api/routes/` is the one-writer-per-file violation everything rests on
 avoiding. Read-only steps own nothing and are always safe to fan out.
+
+Leave each question a `> me: ` line to answer on — **with one trailing space**, so
+the cursor lands in the right place when the user clicks at the end of it. Write it
+empty; an empty one is a placeholder, not an answer.
 
 When an inline `> me:` answer appears, promote it to a Decision and strike the
 question into `### Answered`.

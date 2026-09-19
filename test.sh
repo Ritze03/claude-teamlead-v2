@@ -366,6 +366,8 @@ TBL='*Built from D1 · decisions:XX*
 | 1 | I1 | do it — **D1** | `tl-sonnet-low` | src/a/ | — |'
 check "stage 3 with no impl plan is clean" "$(mkplan 3 '' '')" 0
 check "empty '> me:' placeholder is not an answer" "$(mkplan 3 '   > me:' '')" 0
+check "the written form '> me: ' (trailing space) is not an answer" "$(mkplan 3 '   > me: ' '')" 0
+check "several trailing spaces still not an answer" "$(mkplan 3 '   > me:   ' '')" 0
 check "a real '> me:' answer is flagged" "$(mkplan 3 '   > me: yes do it' '')" 1
 grep -q 'promote it to a Decision' "$T/plout" && ok "  says to promote it" || bad "  says to promote it"
 check "unreferenced decision flagged once a plan exists" "$(mkplan 4 '' '| Wave | ID | Task | Agent | Owns | After |
