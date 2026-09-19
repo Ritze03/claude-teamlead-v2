@@ -231,6 +231,18 @@ printf '%s  start     agent=teamlead:tl-sonnet-low  id=k2\n%s  start     agent=t
 python3 "$B" forget k2 --project $fp >/dev/null
 check "forget <id> closes only that one" "$(nout)" 1
 
+echo "== a save is recorded; a read is not =="
+tp=$T/touch; mkdir -p $tp/.claude/teamlead/plan
+tpf=$tp/.claude/teamlead/plan/t.md; printf 'a\n' > $tpf
+setsid nohup bash "$H/watch-plan.sh" $tp $tpf >/dev/null 2>&1 </dev/null & disown 2>/dev/null
+sleep 2
+cat $tpf >/dev/null; bash "$H/plan-lint.sh" $tpf >/dev/null 2>&1; sleep 2
+[ -f $tp/.claude/teamlead/.state/plan-touched ] && bad "reading the file must not count as the user touching it" || ok "reads and lint do not mark it touched"
+printf 'a\nuser edit\n' > $tpf; sleep 4
+[ -f $tp/.claude/teamlead/.state/plan-touched ] && ok "a real save marks it touched" || bad "a real save marks it touched"
+tw=$(cat $tp/.claude/teamlead/.state/plan-watch.pid 2>/dev/null); [ -n "$tw" ] && kill "$tw" 2>/dev/null; true
+grep -q 'Do not block on the user opening the file' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "skill forbids gating on 'opened'" || bad "skill forbids gating on 'opened'"
+
 echo "== 👀 tells you whether edits are being watched =="
 wq=$T/eye; mkdir -p $wq/.claude/teamlead/{plan,.state}
 : > $wq/.claude/teamlead/.state/active

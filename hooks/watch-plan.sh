@@ -46,6 +46,10 @@ inotifywait -m -q -e close_write,moved_to --format '%f' "$dir" | while read -r f
   # looks like a user edit. Waiting also collapses autosave bursts.
   sleep 2
   cmp -s "$plan" "$snap" && continue     # unchanged: our own write, or a repeat save
+  # A save is the one unambiguous sign the user has the file open and is using
+  # it. Opening cannot be detected — IN_OPEN fires for every tool that reads the
+  # file, including our own linter, and carries no PID.
+  : > "$proj/.claude/teamlead/.state/plan-touched"
   echo "--- $base changed on disk ---"
   diff -u "$snap" "$plan" | tail -n +3 | head -40
   "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/plan-lint.sh" "$plan" 2>&1 | grep -v '^plan-lint: ok$' || true

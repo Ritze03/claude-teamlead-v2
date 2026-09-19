@@ -38,6 +38,24 @@ plan, then stop*. From 4 it means *start implementing*. One word, never a skip
 straight to execution — your plan of *how* is separate work from their plan of
 *what*.
 
+### Do not block on the user opening the file
+
+You cannot tell whether they opened it. `IN_OPEN` fires for every process that
+reads the file — your own linter and watcher included — and carries no PID, so
+"the user opened it" is indistinguishable from "plan-lint ran". Do not wait on it,
+and do not ask them to confirm they opened it; the path is shown, and reading the
+plan in chat instead is a legitimate choice.
+
+What *is* unambiguous is a **save**: the watcher records
+`.state/plan-touched` the first time the file changes on disk. Use it once, as a
+nudge rather than a gate — if the user sends the first **"Go"** and that marker
+does not exist, say so in one line before writing the implementation plan:
+
+> You haven't edited the plan file — happy to proceed on what's there, or open it
+> first if you want to change anything.
+
+Then proceed if they say go again. Never hold the plan hostage to it.
+
 ## Never assume planning is finished
 
 The default state of a plan is **unfinished**. You do not decide it is done, and
