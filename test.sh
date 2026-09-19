@@ -257,6 +257,18 @@ echo "== plan skill hands the watcher off with control =="
 grep -q 'watcher follows who has control' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "documents the handoff" || bad "documents the handoff"
 grep -q 'plan-watch' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "  records the task id to survive compaction" || bad "  records the task id"
 
+echo "== superdoc stays at the root, and its @-refs are verified =="
+SD="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/SKILL.md"
+grep -q 'Do not also copy it into' "$SD" && ok "says not to duplicate into .claude/" || bad "says not to duplicate into .claude/"
+grep -q 'does not exist' "$SD" && ok "  detects a dangling @-ref" || bad "  detects a dangling @-ref"
+grep -q 'no longer exists' "$SD" && ok "  health-check audits @-refs too" || bad "  health-check audits @-refs"
+# the detection snippet itself must work
+sdp=$T/sdref; mkdir -p $sdp/superdoc/meta
+printf '@superdoc/meta/TERMINOLOGY.md and @superdoc/meta/GONE.md\n' > $sdp/CLAUDE.md
+printf 'terms\n' > $sdp/superdoc/meta/TERMINOLOGY.md
+miss=$(cd $sdp && grep -oE '@superdoc/[^ )`]+' CLAUDE.md | sed 's/^@//' | while read -r f; do test -f "$f" || echo "$f"; done)
+check "flags exactly the missing ref" "$miss" "superdoc/meta/GONE.md"
+
 echo "== the skill is self-sufficient for its own tooling =="
 SKC="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
 for c in "board.py render" "board.py check" "board.py forget" "board.py status"; do

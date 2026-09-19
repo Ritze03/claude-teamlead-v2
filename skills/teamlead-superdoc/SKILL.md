@@ -39,6 +39,11 @@ exists, have it read **first** — the version policy governs the whole run.
 test -d superdoc && echo "superdoc: present" || echo "superdoc: absent"
 test -f CLAUDE.md && grep -q 'superdoc:start' CLAUDE.md && echo "CLAUDE.md: wired" || echo "CLAUDE.md: not wired"
 git check-ignore -q superdoc 2>/dev/null && echo "⚠ GITIGNORED — superdoc must be committed or the knowledge dies at the next clone" || echo "git: superdoc is tracked"
+# A dangling @-ref loads NOTHING and says nothing about it — the docs look wired
+# while the agent silently gets none of them.
+grep -oE '@superdoc/[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | while read -r f; do
+  test -f "$f" || echo "⚠ CLAUDE.md force-loads $f — that file does not exist"
+done
 ```
 
 **If it reports `⚠ GITIGNORED`, fix that first.** The failure is silent: everything
@@ -84,7 +89,8 @@ and dated design-spec docs for big decisions — all under `superdoc/`. Wire a t
 ## Step 3 — HEALTH-CHECK
 
 Dispatch workers to audit the existing tree against the playbook: missing pages,
-stale content, broken structure, absent Why-notes, unwired CLAUDE.md. **Report
+stale content, broken structure, absent Why-notes, unwired CLAUDE.md, and any
+`@`-ref in `CLAUDE.md` pointing at a file that no longer exists. **Report
 findings. Do not fix.**
 
 ## Step 4 — REPAIR (only on explicit ask)
