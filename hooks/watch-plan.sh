@@ -25,9 +25,20 @@ mkdir -p "$(dirname "$snap")"
 # plan — as the user's first change.
 cp "$plan" "$snap" 2>/dev/null || : > "$snap"
 
+# Publish our PID so the status line can tell, truthfully, whether edits are being
+# watched right now. Removed on exit, so a crashed watcher stops claiming to run.
+pidf="$proj/.claude/teamlead/.state/plan-watch.pid"
+mkdir -p "$(dirname "$pidf")"; printf '%s\n' "$$" > "$pidf"
+# (trap installed below, once the child exists)
+
 command -v inotifywait >/dev/null 2>&1 || {
   echo "plan-watch: inotify-tools is required (Linux only, by design)"; exit 1; }
 
+# Run the watch loop in the background and wait on it. A foreground pipeline that
+# never ends defers every trap, so a TERM'd watcher would stay alive holding its
+# pid file and keep claiming to watch. `wait` is interruptible, so the trap fires
+# at once and takes the pipeline down with it.
+watch_loop() {
 inotifywait -m -q -e close_write,moved_to --format '%f' "$dir" | while read -r f; do
   [ "$f" = "$base" ] || continue
   # Settle before comparing. The lead writes the file and then updates the
@@ -40,3 +51,9 @@ inotifywait -m -q -e close_write,moved_to --format '%f' "$dir" | while read -r f
   "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/plan-lint.sh" "$plan" 2>&1 | grep -v '^plan-lint: ok$' || true
   cp "$plan" "$snap"
 done
+}
+
+watch_loop &
+child=$!
+trap 'rm -f "$pidf"; kill "$child" 2>/dev/null; pkill -P "$child" 2>/dev/null; exit 0' EXIT INT TERM
+wait "$child"

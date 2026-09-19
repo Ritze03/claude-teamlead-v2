@@ -51,6 +51,17 @@ if [ -f "$ap" ]; then
         4) desc="implementation plan" ;;
       esac
       seg+=" $(c $PLUM "📄 Planning: $(basename "$pf" .md) · stage $stage/5 $desc")"
+      # 👀 = your edits will actually be picked up right now. The watcher stops
+      # while the agent holds control, so its absence is real information.
+      # Keyed on a PID the watcher publishes and clears on exit: a pgrep pattern
+      # matched any command line mentioning the path (including the shell that
+      # launched it), and a plain marker file would outlive a crash.
+      pidf="$d/.state/plan-watch.pid"
+      if [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
+        seg+=" $(c $PLUM '👀')"
+      else
+        rm -f "$pidf" 2>/dev/null      # watcher died; stop claiming otherwise
+      fi
       # Stage 4 is finished and waiting on you specifically.
       [ "$stage" = "4" ] && seg+=" $(c $AMBER 'Go ⏎')"
     else

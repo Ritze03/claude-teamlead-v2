@@ -206,14 +206,36 @@ wp=$T/wre; mkdir -p $wp/.claude/teamlead/plan
 pfw=$wp/.claude/teamlead/plan/t.md
 printf 'before\n' > $pfw
 setsid nohup bash "$H/watch-plan.sh" $wp $pfw > $wp/o1 2>&1 </dev/null & disown 2>/dev/null
-sleep 1; pkill -f "watch-plan.sh $wp" 2>/dev/null; sleep 1
+sleep 1; w1pid=$(cat $wp/.claude/teamlead/.state/plan-watch.pid 2>/dev/null); [ -n "$w1pid" ] && kill "$w1pid" 2>/dev/null; sleep 1
 printf 'the agent rewrote everything\nwhile the watcher was off\n' > $pfw
 setsid nohup bash "$H/watch-plan.sh" $wp $pfw > $wp/o2 2>&1 </dev/null & disown 2>/dev/null
 sleep 4
 [ -s $wp/o2 ] && bad "restart replays the agent's own write ($(head -1 $wp/o2))" || ok "restart does not replay the agent's write"
 snapw=$wp/.claude/teamlead/.state/snap/t.md
 cmp -s $pfw $snapw && ok "  snapshot re-baselined to current content" || bad "  snapshot re-baselined"
-pkill -f "watch-plan.sh $wp" 2>/dev/null; true
+w2pid=$(cat $wp/.claude/teamlead/.state/plan-watch.pid 2>/dev/null); [ -n "$w2pid" ] && kill "$w2pid" 2>/dev/null; true
+
+echo "== 👀 tells you whether edits are being watched =="
+wq=$T/eye; mkdir -p $wq/.claude/teamlead/{plan,.state}
+: > $wq/.claude/teamlead/.state/active
+echo "$CLAUDE_PLUGIN_ROOT" > $wq/.claude/teamlead/.state/plugin-root
+pfq=$wq/.claude/teamlead/plan/q.md
+printf '# Q\n\n> **Stage 3** — working it out\n' > $pfq
+echo "$pfq" > $wq/.claude/teamlead/.state/active-plan
+eye(){ echo '{"workspace":{"current_dir":"'$wq'"}}' | bash "$SL"; }
+grep -q '👀' <<<"$(eye)" && bad "no watcher yet, must not claim watching" || ok "silent when no watcher"
+setsid nohup bash "$H/watch-plan.sh" $wq $pfq >/dev/null 2>&1 </dev/null & disown 2>/dev/null
+sleep 2
+grep -q '👀' <<<"$(eye)" && ok "shows 👀 while watching" || bad "shows 👀 while watching"
+# Kill by the recorded pid, not a pgrep pattern: -f matches any command line
+# containing the path, including this script's own.
+wpid=$(cat $wq/.claude/teamlead/.state/plan-watch.pid 2>/dev/null)
+[ -n "$wpid" ] && kill "$wpid" 2>/dev/null
+for _ in 1 2 3 4 5; do kill -0 "$wpid" 2>/dev/null || break; sleep 1; done
+grep -q '👀' <<<"$(eye)" && bad "must drop 👀 once the watcher stops" || ok "drops 👀 when the watcher stops"
+echo 999999 > $wq/.claude/teamlead/.state/plan-watch.pid
+grep -q '👀' <<<"$(eye)" && bad "a stale pid must not claim watching" || ok "a stale pid does not claim watching"
+[ -f $wq/.claude/teamlead/.state/plan-watch.pid ] && bad "  stale pid cleaned" || ok "  stale pid cleaned"
 
 echo "== plan skill hands the watcher off with control =="
 grep -q 'watcher follows who has control' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "documents the handoff" || bad "documents the handoff"
