@@ -50,7 +50,7 @@ if [ -f "$ap" ]; then
         3) desc="working it out" ;;
         4) desc="implementation plan" ;;
       esac
-      seg+=" $(c $PLUM "✎ planning $(basename "$pf" .md) · stage $stage/5 $desc")"
+      seg+=" $(c $PLUM "📄 Planning: $(basename "$pf" .md) · stage $stage/5 $desc")"
       # Stage 4 is finished and waiting on you specifically.
       [ "$stage" = "4" ] && seg+=" $(c $AMBER 'Go ⏎')"
     else

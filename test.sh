@@ -174,7 +174,7 @@ pf=$slp/.claude/teamlead/plan/topic.md
 printf '# T\n\n> **Stage 3** — working it out\n' > $pf
 echo "$pf" > $slp/.claude/teamlead/.state/active-plan
 out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
-grep -q 'planning topic' <<<"$out" && ok "  names planning mode and the plan" || bad "  names planning mode and the plan ($out)"
+grep -q "Planning: topic" <<<"$out" && ok "  names planning mode and the plan" || bad "  names planning mode and the plan ($out)"
 grep -q 'stage 3/5' <<<"$out" && ok "  shows stage out of total" || bad "  shows stage out of total"
 grep -q 'working it out' <<<"$out" && ok "  says what the stage is for" || bad "  says what the stage is for"
 # the label must follow the NUMBER, not stale header prose
