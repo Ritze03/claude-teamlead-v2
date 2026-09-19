@@ -141,6 +141,28 @@ if diff -q "$T/r-on-demand" "$T/r-role-dependant" >/dev/null; then
   bad "role-dependant is indistinguishable from on-demand"
 else ok "each opus mode gives distinct guidance"; fi
 
+echo "== status line segment =="
+SL="$H/statusline.sh"
+slp=$T/sl; mkdir -p $slp/.claude/teamlead/.state; cd $slp; git init -q
+git config user.email t@t.t; git config user.name t; echo x > f.txt; git add -A >/dev/null; git commit -qm init
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+check "silent when teamlead is inactive" "$out" ""
+: > $slp/.claude/teamlead/.state/active
+echo "$CLAUDE_PLUGIN_ROOT" > $slp/.claude/teamlead/.state/plugin-root
+python3 "$B" add --project $slp --task t1 --agent tl-sonnet-low --owns src/a >/dev/null
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q 'teamlead' <<<"$out" && ok "shows a segment when active" || bad "shows a segment when active"
+grep -q '1 open' <<<"$out" && ok "  counts open tasks" || bad "  counts open tasks ($out)"
+git -C $slp worktree add -q $slp/.claude/worktrees/agent-s -b ws 2>/dev/null
+out=$(echo '{"workspace":{"current_dir":"'$slp'/.claude/worktrees/agent-s"}}' | bash "$SL")
+grep -q '1 open' <<<"$out" && ok "  works from inside a worktree" || bad "  works from inside a worktree"
+# Empty input legitimately falls back to $PWD; it must not error either way.
+out=$(cd /tmp && echo '{}' | bash "$SL" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$out" ]; } && ok "  empty input outside a project: silent, no error" || bad "  empty input outside a project (rc=$rc out=$out)"
+out=$(echo 'not json' | bash "$SL" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && ok "  survives malformed input" || bad "  survives malformed input (rc=$rc)"
+cd $proj
+
 echo "== README documents what exists =="
 RM="$CLAUDE_PLUGIN_ROOT/README.md"
 for sec in "## Dials" "## Planning mode" "## Troubleshooting" "## Install"; do

@@ -141,6 +141,39 @@ Type "Go" if you want me to plan the implementation.
 "Go" advances exactly one stage — first to the implementation plan, where it **stops again**,
 then to execution. Your plan of *what*, and its plan of *how*, are separate approvals.
 
+## Status line (optional)
+
+A plugin **cannot** install a main status line — only your `settings.json` can. So this ships
+a segment and leaves the slot alone rather than claiming it:
+
+```
+⚑ teamlead 2 open · 1 out
+```
+
+It prints nothing unless teamlead is active in the current project, and resolves a worker's
+worktree back to the main checkout so it reads the same everywhere.
+
+If you have no status line yet:
+
+```json
+{ "statusLine": { "type": "command",
+    "command": "bash \"$HOME/.claude/plugins/cache/teamlead/teamlead/*/hooks/statusline.sh\"" } }
+```
+
+**If you already have one, compose — don't replace.** Point `statusLine` at a small script of
+your own that runs both and joins the output:
+
+```bash
+#!/usr/bin/env bash
+in=$(cat)
+a=$(printf '%s' "$in" | bash /path/to/your/existing/statusline.sh)
+b=$(printf '%s' "$in" | bash "$HOME"/.claude/plugins/cache/teamlead/teamlead/*/hooks/statusline.sh)
+printf '%s' "$a"; [ -n "$b" ] && printf ' · %s' "$b"
+```
+
+Note the glob instead of a pinned version directory: a hard-coded `.../4.7.0/...` path breaks
+silently the next time the plugin updates.
+
 ## Seeing what's happening
 
 ```bash
