@@ -68,9 +68,15 @@ awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Notes from me/{o=0}
      o && /^ *> me:[[:space:]]*[^[:space:]]/{print NR}' "$f" \
   | grep -q . && add "an inline '> me:' answer is still under an open question — promote it to a Decision and strike the question"
 
-# 7. no TBD once at stage 4
-if grep -qi '^> \*\*Stage 4\*\*' "$f" && grep -q 'TBD' "$f"; then
-  add "stage 4 reached but TBD markers remain"
+# 7. at stage 4 the inboxes must be empty — Open questions and Notes from me are
+# inboxes, not storage; a plan that still holds either is not finished planning.
+if grep -qi '^> \*\*Stage 4\*\*' "$f"; then
+  grep -q 'TBD' "$f" && add "stage 4 reached but TBD markers remain"
+  q=$(awk '/^## Open questions/{o=1;next} /^### Answered/{o=0} /^## /{o=0} o' "$f" \
+      | grep -cE '^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]+\S') || q=0
+  [ "$q" -gt 0 ] && add "stage 4 reached with $q open question(s) still unanswered — fold each answer into a Decision and strike the question into ### Answered"
+  n=$(awk '/^## Notes from me/{o=1;next} /^## /{o=0} o' "$f" | grep -cE '\S') || n=0
+  [ "$n" -gt 0 ] && add "stage 4 reached with $n line(s) left in 'Notes from me' — fold each into a Decision (or the Goal) and remove it"
 fi
 
 # 8. staleness — the implementation plan must be stamped with the decisions it was built from

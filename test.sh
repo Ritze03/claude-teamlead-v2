@@ -6,6 +6,9 @@ set -uo pipefail
 export CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")" && pwd)"
 H="$CLAUDE_PLUGIN_ROOT/hooks"
 B="$CLAUDE_PLUGIN_ROOT/scripts/board.py"
+PL="$H/plan-lint.sh"
+PS2="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
+SD="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/SKILL.md"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 pass=0; fail=0
 ok()   { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
@@ -270,7 +273,6 @@ grep -q 'watcher follows who has control' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-p
 grep -q 'plan-watch' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "  records the task id to survive compaction" || bad "  records the task id"
 
 echo "== superdoc stays at the root, and its @-refs are verified =="
-SD="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/SKILL.md"
 grep -q 'Do not also copy it into' "$SD" && ok "says not to duplicate into .claude/" || bad "says not to duplicate into .claude/"
 grep -q 'does not exist' "$SD" && ok "  detects a dangling @-ref" || bad "  detects a dangling @-ref"
 grep -q 'no longer exists' "$SD" && ok "  health-check audits @-refs too" || bad "  health-check audits @-refs"
@@ -297,8 +299,21 @@ ok "every CLI remedy is in the skill, not only the README"
 grep -q 'never read the plugin.s source' "$SKC" && ok "  tells it not to reverse-engineer" || bad "  tells it not to reverse-engineer"
 grep -q 'plan-watch\|plugin-root' "$SKC" && ok "  says where the plugin root is" || bad "  says where the plugin root is"
 
+echo "== a finished plan has empty inboxes =="
+mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" "$3" > "$T/fin.md"
+  fh=$(sed -n '/^## Decisions/,/^## Open questions/p' "$T/fin.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$fh/" "$T/fin.md"
+  "$PL" "$T/fin.md" >"$T/finout" 2>&1; echo $?; }
+check "stage 4, both inboxes empty" "$(mkfin 4 '*(none open)*' '')" 0
+check "stage 4 with an open question" "$(mkfin 4 '1. unanswered?' '')" 1
+grep -q 'fold each answer into a Decision' "$T/finout" && ok "  says to fold it into a Decision" || bad "  says to fold it"
+check "stage 4 with a leftover note" "$(mkfin 4 '*(none)*' 'remember billing')" 1
+grep -q "left in 'Notes from me'" "$T/finout" && ok "  names the leftover note" || bad "  names the leftover note"
+check "stage 3 may hold both" "$(mkfin 3 '1. open?' 'a note')" 0
+grep -q 'inboxes, not storage' "$PS2" && ok "  the skill states the invariant" || bad "  skill states the invariant"
+grep -q 'can raise something new' "$PS2" && ok "  answers may spawn new questions" || bad "  answers may spawn new questions"
+
 echo "== plan stages: path first, scout second =="
-PS2="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 grep -q 'Order inside the first turn' "$PS2" && ok "spells out the order in turn one" || bad "spells out the order"
 grep -q 'as your first output' "$PS2" && ok "  path before any slow work" || bad "  path before slow work"
 grep -q 'Skip it entirely when the topic came with the command' "$PS2" && ok "  stage 1 is skippable" || bad "  stage 1 skippable"
@@ -448,7 +463,6 @@ check "worker: other /tmp still denied"   "$(fence '{"cwd":"/wt",'"$W"',"tool_in
 check "worker: notebook_path too"     "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"notebook_path":"/home/u/n.ipynb"}}')" deny
 
 echo "== plan-lint stage awareness =="
-PL="$H/plan-lint.sh"
 mkplan(){ cat > "$T/pl.md" <<PEOF
 # T
 

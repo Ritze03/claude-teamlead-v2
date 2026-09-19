@@ -112,7 +112,9 @@ They have it open; you write to it between turns. Without discipline this eats
 their work.
 
 - **Targeted edits only, never full-file rewrites.** Re-read before every write.
-- **`## Notes from me` is theirs.** Never write there.
+- **`## Notes from me` is theirs to write.** Never add your own content there and
+  never reword a line; the only edit you make is removing a note once it is folded
+  into a Decision (see *Everything ends up in Decisions*).
 - After every write of yours, refresh the snapshot so the watcher stays quiet:
   `cp <plan> <project>/.claude/teamlead/.state/snap/<file>`
 - If the file changed since you last read it, they edited it — **merge first**.
@@ -194,7 +196,7 @@ Constraints, what exists, what must not break. Scout findings land here.
 - ~~Old question~~ → answer → **D1**
 
 ## Notes from me
-Theirs. Never write here.
+Theirs to write. You only ever remove a line once it is folded into a Decision.
 
 ## Implementation plan
 *Built from D1–D5 · decisions:a3f9*
@@ -217,8 +219,35 @@ Leave each question a `> me: ` line to answer on — **with one trailing space**
 the cursor lands in the right place when the user clicks at the end of it. Write it
 empty; an empty one is a placeholder, not an answer.
 
-When an inline `> me:` answer appears, promote it to a Decision and strike the
-question into `### Answered`.
+## Everything ends up in Decisions
+
+`Open questions` and `Notes from me` are **inboxes, not storage**. A finished plan
+has both empty, with every one of their contents folded into `## Decisions` (or, if
+it changes what is being built at all, into `## Goal`).
+
+| input | becomes |
+|---|---|
+| A `> me:` answer | a Decision, plus the question struck into `### Answered` pointing at it (`→ **D4**`) |
+| A chat answer | the same — the channel does not matter |
+| A line in `Notes from me` | a Decision (or a `Goal` edit), then **removed from Notes** once it is safely represented |
+
+**Folding is not transcription.** An answer or a note can raise something new — a
+constraint that conflicts with an existing decision, an assumption that turns out
+to be untested, a scope change. When it does, **write the new open question**.
+Questions going *up* after an answer is normal and good; it means the answer
+taught you something.
+
+**The one thing you may write in `Notes from me` is nothing.** Never add your own
+content there, never rewrite a note — but once a note is folded into a Decision,
+remove it, and say in one line which Decision it became. Do that when you are
+already editing in response to the user, never while they may be mid-sentence, and
+apply the usual re-read-before-write rule. A note you cannot fold yet stays put and
+becomes an open question instead.
+
+**Definition of done for the plan:** `Open questions` holds nothing unanswered,
+`Notes from me` is empty, `Goal` is not `TBD`, and every decision is referenced by
+an implementation step. `plan-lint` enforces all four at stage 4 — a plan that
+still has an inbox is not finished being planned.
 
 ## Lint before offering Go
 

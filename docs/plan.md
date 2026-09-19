@@ -1233,3 +1233,29 @@ real one and skewed every recency comparison.
 the board silently vanished. Activation now appends `.claude/teamlead/.state/` and
 `.claude/teamlead/board.md` to the project `.gitignore` (idempotently). This was not
 hypothetical — it happened during this pass, to me, and looked exactly like data loss.
+
+
+## 17. A finished plan has empty inboxes — 2026-09-19
+
+`Open questions` and `Notes from me` are **inboxes, not storage**. Everything in them ends
+up in `Decisions` (or `Goal`); a plan that still holds either is not finished being planned.
+
+| input | becomes |
+|---|---|
+| a `> me:` answer, or the same answer given in chat | a Decision, with the question struck into `### Answered` pointing at it |
+| a line in `Notes from me` | a Decision (or a `Goal` edit), then removed from Notes |
+
+**Folding is not transcription.** An answer or a note can raise a conflict with an existing
+decision, an untested assumption, or a scope change — and then it produces a *new* open
+question. Questions going up after an answer is the system working.
+
+This collided with an existing absolute: `Notes from me` was "never write here", which
+protected the user's typing from being clobbered. Resolved narrowly — the agent still never
+adds content there and never rewords a line; the only edit it may make is **removing a note
+once that note is safely represented as a Decision**, done while already editing in response
+to the user rather than while they may be mid-sentence, under the usual re-read-before-write
+rule. A note that cannot be folded yet stays, and becomes an open question instead.
+
+**Enforced, not hoped for.** `plan-lint` at stage 4 now requires: no `TBD`, no unanswered
+open question, nothing left in `Notes from me`, and every decision referenced by a step.
+Stage 3 may hold as much as it likes — the constraint is on *finished*, not on *in progress*.
