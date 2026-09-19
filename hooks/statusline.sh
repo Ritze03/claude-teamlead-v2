@@ -52,7 +52,7 @@ if [ -f "$ap" ]; then
       esac
       seg+=" $(c $PLUM "✎ planning $(basename "$pf" .md) · stage $stage/5 $desc")"
       # Stage 4 is finished and waiting on you specifically.
-      [ "$stage" = "4" ] && seg+=" $(c $AMBER '⏎Go')"
+      [ "$stage" = "4" ] && seg+=" $(c $AMBER 'Go ⏎')"
     else
       rm -f "$ap"            # handed off to the board; stop claiming planning
     fi
