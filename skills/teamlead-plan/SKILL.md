@@ -31,7 +31,12 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **2 Create and show** | Create the near-empty plan — the five sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | You alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again**. | The user says "Go" |
-| **5 Go** | Translate into `board.md` and execute. | — |
+| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**`. | Every task merged, board empty |
+| **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. | They all pass |
+| **7 User-Testing** | Hand the `verified by: user` criteria over and **wait**. | The user says it is good |
+
+Plan mode runs to the end of **7**, not to the handoff. The plan is not finished
+when the code is written; it is finished when it has been checked.
 
 ### Order inside the first turn
 
@@ -157,6 +162,7 @@ So hand the watcher back and forth with control:
 | User sends **"Go"** (→ stage 4) | **TaskStop** it, delete `.state/plan-watch` — you are writing now |
 | Stage 4 written, footer shown | **start** it again, record the new id — the user may want to change the plan |
 | User sends **"Go"** (→ stage 5) | **TaskStop** it, delete `.state/plan-watch` — planning is over |
+| Stages 5–7 | stays off — the plan is frozen intent now; findings go on the board |
 
 Stop it on leaving plan mode by any other route too; a monitor otherwise outlives
 the mode.
@@ -282,23 +288,43 @@ criterion you marked `agent` is one they want to look at themselves.
 mechanically, marking it `agent` does not make it verified — it makes the
 verification a guess with a tick next to it. Say `user` and let it wait.
 
-## Confirming the plan is actually implemented
+## Stage 6 — Agent-Testing
 
-When the board is empty and every implementation step has merged, confirm before
-declaring anything finished:
+When the board is empty and every implementation step has merged, set the header to
+`> **Stage 6**` and work the `verified by: agent` list:
 
-1. **Run the `agent` criteria.** Really run them — a command, a fetch, a test. Do
-   not reason about whether they would pass.
-2. **Report each one** with its evidence, ticking the boxes in `## Done when`.
-3. **Ask about the `user` criteria.** List them and wait. This is the second place
-   in plan mode where you stop and the user is the only way forward.
-4. Anything that fails goes back on the board as a task — not into a caveat.
+1. **Really run them.** A command, a request, a test — actually execute it. Do not
+   reason about whether it would pass; a criterion you argued your way through is
+   not verified, and the whole point of splitting `agent` from `user` was to make
+   this half mechanical.
+2. **Tick each box** in `## Done when` and report the evidence next to it — the
+   command and its output, not "confirmed".
+3. **A failure is a task, not a caveat.** Put it back on the board, return to stage
+   5, and come back. Do not carry a broken criterion forward as a footnote.
 
-Only when every box is ticked is the plan implemented.
+Only when every `agent` box is ticked does stage 6 end.
+
+## Stage 7 — User-Testing
+
+Set the header to `> **Stage 7**` and hand over the `verified by: user` list. Say
+what you already verified, then give them their list and **stop**.
+
+**This is the third place in plan mode where the user is the only way forward** —
+the same rule as the two "Go" gates, for the same reason. Never tick a `user` box
+yourself. Never read silence, a thumbs-up on something else, or your own confidence
+in the code as a pass. Never ask "shall I archive this now?" as a way of getting
+the answer — present the list and wait for them to actually report back.
+
+Whatever they find goes back on the board and the plan returns to stage 5. A plan
+can cycle 5 → 6 → 7 → 5 as many times as it takes; that is the mode working, not
+the mode failing.
+
+If a plan has no `user` criteria at all, stage 7 is still theirs: say the agent
+checks all passed, say there is nothing needing their eyes, and let them close it.
 
 ## Retiring a finished plan
 
-Then archive it — never delete it. A plan is the record of *why* the code looks the
+Once the user closes out stage 7, archive it — never delete it. A plan is the record of *why* the code looks the
 way it does, and that outlives the work:
 
 ```
@@ -363,9 +389,11 @@ authoritative while the ground under it has moved.
 Copy the wave table into `.claude/teamlead/board.md`, column for column. Each
 board row keeps `— I<n>` linking back to its plan step.
 
-**Clear `.claude/teamlead/.state/active-plan` once the board has the work** — that
-pointer is what tells the rest of the system a plan is still being worked out, and
-leaving it set keeps the status line claiming you are planning forever.
+**Leave `.claude/teamlead/.state/active-plan` set.** It used to be cleared here, and
+that is what made the session dangle: implementation would start, plan mode would
+quietly vanish, and a plan that was not actually finished looked like no plan at
+all. The pointer now survives stages 5–7 and is cleared by `plan-archive.sh` at the
+very end. Update the header to `> **Stage 5**` so the status line tracks it.
 
 **Plan is frozen intent; board is live state.** When execution diverges, record it
 on the board — never silently patch the plan. Losing the fact that reality

@@ -82,20 +82,24 @@ awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Notes from me/{o=0}
 
 # 7. at stage 4 the inboxes must be empty — Open questions and Notes from me are
 # inboxes, not storage; a plan that still holds either is not finished planning.
-if grep -qi '^> \*\*Stage 4\*\*' "$f"; then
-  grep -q 'TBD' "$f" && add "stage 4 reached but TBD markers remain"
-  [ -z "$rows" ] && add "stage 4 reached with no implementation plan — write the wave table above '## Open questions'"
+# Stage 4 onwards: the plan is finished being planned, and stays finished while it
+# is built (5), verified (6) and tested by the user (7). Keying on "== 4" would let
+# every one of these slide the moment the header ticked over.
+st=$(grep -m1 -oiE '^> \*\*Stage [0-9]+\*\*' "$f" | grep -oE '[0-9]+')
+if [ -n "$st" ] && [ "$st" -ge 4 ]; then
+  grep -q 'TBD' "$f" && add "stage $st reached but TBD markers remain"
+  [ -z "$rows" ] && add "stage $st reached with no implementation plan — write the wave table above '## Open questions'"
   q=$(awk '/^## Open questions/{o=1;next} /^### Answered/{o=0} /^## /{o=0} o' "$f" \
       | grep -cE '^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]+\S') || q=0
-  [ "$q" -gt 0 ] && add "stage 4 reached with $q open question(s) still unanswered — fold each answer into a Decision and strike the question into ### Answered"
+  [ "$q" -gt 0 ] && add "stage $st reached with $q open question(s) still unanswered — fold each answer into a Decision and strike the question into ### Answered"
   n=$(awk '/^## Notes from me/{o=1;next} /^## /{o=0} o' "$f" | grep -cE '\S') || n=0
-  [ "$n" -gt 0 ] && add "stage 4 reached with $n line(s) left in 'Notes from me' — fold each into a Decision (or the Goal) and remove it"
+  [ "$n" -gt 0 ] && add "stage $st reached with $n line(s) left in 'Notes from me' — fold each into a Decision (or the Goal) and remove it"
   # Acceptance criteria must exist and say who checks each one, decided while
   # planning — settling it at the end is how everything becomes 'agent checks it'.
   dw=$(awk '/^## Done when/{o=1;next} /^## /{o=0} o' "$f")
   c=$(printf '%s' "$dw" | grep -cE '^[[:space:]]*-[[:space:]]*\[.\]') || c=0
   if [ "$c" -eq 0 ]; then
-    add "stage 4 reached with no criteria under 'Done when' — add the section above '## Implementation plan' and say what must be true for this to be finished, as '- [ ] ...' items"
+    add "stage $st reached with no criteria under 'Done when' — add the section above '## Implementation plan' and say what must be true for this to be finished, as '- [ ] ...' items"
   else
     v=$(printf '%s' "$dw" | grep -cE 'verified by:[[:space:]]*(agent|user)') || v=0
     [ "$v" -lt "$c" ] && add "$((c - v)) of $c 'Done when' item(s) do not say who verifies them — mark each *verified by: agent* or *verified by: user*"

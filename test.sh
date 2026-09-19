@@ -178,7 +178,7 @@ printf '# T\n\n> **Stage 3** — working it out\n' > $pf
 echo "$pf" > $slp/.claude/teamlead/.state/active-plan
 out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
 grep -q "Planning: topic" <<<"$out" && ok "  names planning mode and the plan" || bad "  names planning mode and the plan ($out)"
-grep -q 'stage 3/5' <<<"$out" && ok "  shows stage out of total" || bad "  shows stage out of total"
+grep -q 'stage 3/7' <<<"$out" && ok "  shows stage out of total" || bad "  shows stage out of total"
 grep -q 'working it out' <<<"$out" && ok "  says what the stage is for" || bad "  says what the stage is for"
 # the label must follow the NUMBER, not stale header prose
 sed -i 's/Stage 3/Stage 4/' $pf
@@ -186,10 +186,20 @@ out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
 grep -q 'implementation plan' <<<"$out" && ok "  label tracks the number, not the prose" || bad "  label tracks the number ($out)"
 grep -q 'Go' <<<"$out" && ok "  stage 4 flags that it is waiting on you" || bad "  stage 4 flags waiting"
 sed -i 's/Stage 4/Stage 3/' $pf
-sed -i 's/Stage [0-9]/Stage 5/' $pf
-out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
-grep -q 'topic S' <<<"$out" && bad "  stage 5 should not read as planning" || ok "  stage 5 (handed off) is not planning"
-[ -f $slp/.claude/teamlead/.state/active-plan ] && bad "  pointer cleared at handoff" || ok "  pointer cleared at handoff"
+for n in 5:building\ it 6:verifying 7:your\ turn\ to\ test; do
+  sed -i "s/Stage [0-9]/Stage ${n%%:*}/" $pf
+  out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+  grep -q "stage ${n%%:*}/7 ${n#*:}" <<<"$out" && ok "  stage ${n%%:*} shows '${n#*:}'" || bad "  stage ${n%%:*} label ($out)"
+  # The pointer surviving the handoff is the whole fix: clearing it here is what
+  # made the session dangle once implementation started.
+  [ -f $slp/.claude/teamlead/.state/active-plan ] && ok "  stage ${n%%:*} keeps the plan active" || bad "  stage ${n%%:*} keeps the plan active"
+done
+grep -q 'Planning: topic' <<<"$out" && bad "  stage 7 should not still say Planning" || ok "  past stage 4 it reads 'Plan', not 'Planning'"
+grep -q 'Your turn' <<<"$out" && ok "  stage 7 flags that it is waiting on you" || bad "  stage 7 flags waiting"
+sed -i 's/Stage [0-9]/Stage 8/' $pf
+echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL" >/dev/null
+[ -f $slp/.claude/teamlead/.state/active-plan ] && bad "  a stage past 7 is dropped" || ok "  a stage past 7 is dropped"
+echo "$pf" > $slp/.claude/teamlead/.state/active-plan
 echo "$slp/.claude/teamlead/plan/gone.md" > $slp/.claude/teamlead/.state/active-plan
 echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL" >/dev/null
 [ -f $slp/.claude/teamlead/.state/active-plan ] && bad "  dangling pointer cleared" || ok "  dangling pointer cleared"
@@ -395,7 +405,7 @@ grep -q 'Ends when' "$PS2" && ok "  each stage has an exit condition" || bad "  
 sed -i 's/Stage [0-9]/Stage 2/' $pf 2>/dev/null
 echo "$pf" > $slp/.claude/teamlead/.state/active-plan
 out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
-grep -q 'stage 2/5 open it in your editor' <<<"$out" && ok "  stage 2 tells the user to open it" || bad "  stage 2 label ($out)"
+grep -q 'stage 2/7 open it in your editor' <<<"$out" && ok "  stage 2 tells the user to open it" || bad "  stage 2 label ($out)"
 sed -i 's/Stage [0-9]/Stage 3/' $pf 2>/dev/null
 
 echo "== plan skill presents the path prominently =="
@@ -671,6 +681,23 @@ check "a misspelled heading is caught" "$(printf '# T\n\n> **Stage 3** — x\n\n
 grep -q 'unexpected section' "$T/oout" && ok "  named as unexpected" || bad "  named as unexpected"
 grep -q 'missing section' "$T/oout" && ok "  and as missing" || bad "  and as missing"
 grep -q 'do not exist until stage 4' "$PS2" && ok "  the skill says when they appear" || bad "  skill says when"
+
+echo "== the plan stays finished through stages 5-7 =="
+# Keying the finished-plan checks on "== 4" would let every one of them slide the
+# moment the header ticked over to building.
+mkst(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:SS*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%b\n\n### Answered\n\n## Notes from me\n%b\n' "$1" "$2" "$3" > "$T/st.md"
+  sh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/st.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:SS/decisions:$sh/" "$T/st.md"; "$PL" "$T/st.md" >"$T/stout" 2>&1; echo $?; }
+for n in 4 5 6 7; do
+  check "stage $n is clean when the plan is finished" "$(mkst $n '*(none)*' '')" 0
+  check "stage $n still rejects a leftover note" "$(mkst $n '*(none)*' 'remember billing')" 1
+  grep -q "stage $n reached" "$T/stout" && ok "  names stage $n, not 4" || bad "  names stage $n, not 4"
+done
+check "stage 3 is still allowed to hold things" "$(mkst 3 '1. open?\n   *Suggest:* x — *y.*' 'a note')" 0
+grep -q '6 Agent-Testing' "$PS2" && ok "  the skill has stage 6" || bad "  skill has stage 6"
+grep -q '7 User-Testing' "$PS2" && ok "  the skill has stage 7" || bad "  skill has stage 7"
+grep -q 'Leave `.claude/teamlead/.state/active-plan` set' "$PS2" && ok "  handoff no longer clears the pointer" || bad "  handoff clears the pointer"
+grep -q 'Never tick a `user` box' "$PS2" && ok "  stage 7 belongs to the user" || bad "  stage 7 belongs to the user"
 
 # The shipped docs are the reference a lead copies from. The example drifted out of
 # spec once already (stage 4 with a full 'Notes from me') because nothing checked it.

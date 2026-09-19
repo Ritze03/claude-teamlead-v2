@@ -1290,3 +1290,38 @@ sections actually present — so a missing stage-4 section is fine, a renamed on
 "unexpected", a dropped required one is "missing", and a wave table below `Notes from me` is
 "out of order". At stage 4 both sections are required. The staleness stamp had to stop using
 `sed '/^## Decisions/,/^## Open questions/p'`, which now spans the implementation plan.
+
+## 19. Plan mode runs to the end of testing — 2026-09-19
+
+Two stages added: **6 Agent-Testing** and **7 User-Testing**. The mode is now
+1 Topic → 2 Create and show → 3 Work it out → 4 Done when + implementation plan →
+5 Build → 6 Agent-Testing → 7 User-Testing → archive.
+
+Reported from real use: *"the session isn't dangling, when the plan implementation may
+not be finished yet fully. Right now, it just switches back to normal mode and asks for
+me to verify."* Two places caused that, and they agreed with each other, which is why it
+looked deliberate. The skill said **"clear `.state/active-plan` once the board has the
+work"**, and the status line refused to render any stage `>= 5` and deleted the pointer
+itself — *"handed off to the board; stop claiming planning"*. So the moment implementation
+began, plan mode vanished and a half-finished plan was indistinguishable from no plan.
+
+Both reversed. The pointer now survives 5–7 and is cleared only by `plan-archive.sh`;
+the status line renders stages 1–7, says `Planning` for 1–4 and `Plan` after that, and
+carries an amber `Your turn ⏎` at 7 exactly as stage 4 carries `Go ⏎`.
+
+**Stage 7 is a third stop-and-wait gate**, alongside the two "Go" gates, and it inherits
+their rule from §4: never assume it has been passed. Not from silence, not from approval
+of something else, not from the lead's own confidence in the code, and not by asking
+"shall I archive this now?" to extract the answer. `verified by: user` boxes are the
+user's to tick.
+
+**Cycling is normal.** A failure at 6 or a complaint at 7 goes back on the board and the
+plan returns to 5. A plan may go 5 → 6 → 7 → 5 repeatedly; that is the mode working.
+
+**Enforced.** `plan-lint`'s finished-plan checks keyed on `Stage 4` exactly, so every one
+of them — no TBD, empty inboxes, criteria with verifiers, a stamped wave table — would
+have silently stopped applying the moment the header ticked to 5. They now run at stage
+>= 4 and name the real stage in the message. `plan-archive.sh` already refused a plan with
+unticked boxes (§18's mechanism), which is what makes stage 7 un-skippable: there is no
+path from "implemented" to "archived" that does not pass through the user's own checks.
+

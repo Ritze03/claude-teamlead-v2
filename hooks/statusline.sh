@@ -40,7 +40,11 @@ if [ -f "$ap" ]; then
   if [ -n "$pf" ] && [ -f "$pf" ]; then
     hdr=$(grep -m1 -E '^> \*\*Stage [0-9]+\*\*' "$pf" 2>/dev/null)
     stage=$(printf '%s' "$hdr" | grep -oE '[0-9]+' | head -1)
-    if [ -n "$stage" ] && [ "$stage" -lt 5 ]; then
+    # No upper cutoff: the plan stays active through building and both testing
+    # stages. Dropping it at stage 5 is what used to leave the session dangling —
+    # implementation would start and the mode would quietly vanish, so a plan that
+    # was not actually finished looked like no plan at all. Only archiving ends it.
+    if [ -n "$stage" ] && [ "$stage" -ge 1 ] && [ "$stage" -le 7 ]; then
       # Label keyed on the stage NUMBER, not the header prose. The two can
       # disagree — a stage bumped without rewording leaves a stale description —
       # and the number is the structured half.
@@ -49,8 +53,14 @@ if [ -f "$ap" ]; then
         2) desc="open it in your editor" ;;
         3) desc="working it out" ;;
         4) desc="implementation plan" ;;
+        5) desc="building it" ;;
+        6) desc="verifying" ;;
+        7) desc="your turn to test" ;;
       esac
-      seg+=" $(c $PLUM "📄 Planning: $(basename "$pf" .md) · stage $stage/5 $desc")"
+      # "Planning" only reads right for the first four; after that the plan is
+      # being executed and checked, and the label should say so.
+      [ "$stage" -le 4 ] && what="📄 Planning" || what="📄 Plan"
+      seg+=" $(c $PLUM "$what: $(basename "$pf" .md) · stage $stage/7 $desc")"
       # 👀 = your edits will actually be picked up right now. The watcher stops
       # while the agent holds control, so its absence is real information.
       # Keyed on a PID the watcher publishes and clears on exit: a pgrep pattern
@@ -62,8 +72,9 @@ if [ -f "$ap" ]; then
       else
         rm -f "$pidf" 2>/dev/null      # watcher died; stop claiming otherwise
       fi
-      # Stage 4 is finished and waiting on you specifically.
+      # The two stages that are finished and waiting on you specifically.
       [ "$stage" = "4" ] && seg+=" $(c $AMBER 'Go ⏎')"
+      [ "$stage" = "7" ] && seg+=" $(c $AMBER 'Your turn ⏎')"
     else
       rm -f "$ap"            # handed off to the board; stop claiming planning
     fi
