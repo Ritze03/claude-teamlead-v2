@@ -201,6 +201,24 @@ out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
 grep -q '⚠' <<<"$out" && bad "  ⚠ clears when fixed" || ok "  ⚠ clears when fixed"
 cd $proj
 
+echo "== watcher re-baselines on restart =="
+wp=$T/wre; mkdir -p $wp/.claude/teamlead/plan
+pfw=$wp/.claude/teamlead/plan/t.md
+printf 'before\n' > $pfw
+setsid nohup bash "$H/watch-plan.sh" $wp $pfw > $wp/o1 2>&1 </dev/null & disown 2>/dev/null
+sleep 1; pkill -f "watch-plan.sh $wp" 2>/dev/null; sleep 1
+printf 'the agent rewrote everything\nwhile the watcher was off\n' > $pfw
+setsid nohup bash "$H/watch-plan.sh" $wp $pfw > $wp/o2 2>&1 </dev/null & disown 2>/dev/null
+sleep 4
+[ -s $wp/o2 ] && bad "restart replays the agent's own write ($(head -1 $wp/o2))" || ok "restart does not replay the agent's write"
+snapw=$wp/.claude/teamlead/.state/snap/t.md
+cmp -s $pfw $snapw && ok "  snapshot re-baselined to current content" || bad "  snapshot re-baselined"
+pkill -f "watch-plan.sh $wp" 2>/dev/null; true
+
+echo "== plan skill hands the watcher off with control =="
+grep -q 'watcher follows who has control' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "documents the handoff" || bad "documents the handoff"
+grep -q 'plan-watch' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "  records the task id to survive compaction" || bad "  records the task id"
+
 echo "== plan skill presents the path prominently =="
 PS="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 grep -q 'single-cell table' "$PS" && ok "instructs a single-cell table" || bad "instructs a single-cell table"

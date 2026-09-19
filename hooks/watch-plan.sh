@@ -19,7 +19,11 @@ proj="${1:?project dir}"; plan="${2:?plan file}"
 dir=$(dirname "$plan"); base=$(basename "$plan")
 snap="$proj/.claude/teamlead/.state/snap/$base"
 mkdir -p "$(dirname "$snap")"
-[ -f "$snap" ] || cp "$plan" "$snap" 2>/dev/null || : > "$snap"
+# ALWAYS re-baseline at startup. Whatever the file says right now is, by
+# definition, not a user edit. Keeping a stale snapshot across a restart would
+# replay everything written while the watcher was off — the agent's own stage-4
+# plan — as the user's first change.
+cp "$plan" "$snap" 2>/dev/null || : > "$snap"
 
 command -v inotifywait >/dev/null 2>&1 || {
   echo "plan-watch: inotify-tools is required (Linux only, by design)"; exit 1; }

@@ -91,8 +91,36 @@ it the longest `timeout_ms` allowed (1800000) and re-arm on expiry; there is no
 $(cat .claude/teamlead/.state/plugin-root)/hooks/watch-plan.sh "$PWD" <plan-file>
 ```
 
-Each save emits a diff plus any lint failures. Stop it with TaskStop when plan
-mode ends — a persistent monitor otherwise outlives the mode.
+Each save emits a diff plus any lint failures.
+
+**Record the Monitor's task id** to `.claude/teamlead/.state/plan-watch` as soon as
+you start it, so you can still stop it after a compaction has wiped your memory of
+the id.
+
+### The watcher follows who has control
+
+The watcher exists to catch *the user's* edits. While **you** hold control there are
+none to catch, and your own multi-edit writes will trip it — writing a whole
+implementation plan takes several edits over more than the settle delay, so the
+watcher fires mid-write, compares against a snapshot you have not refreshed yet,
+and reports your own work as theirs.
+
+So hand the watcher back and forth with control:
+
+| moment | do |
+|---|---|
+| Stage 2, file created | **start** the watcher, record its task id |
+| User sends **"Go"** (→ stage 4) | **TaskStop** it, delete `.state/plan-watch` — you are writing now |
+| Stage 4 written, footer shown | **start** it again, record the new id — the user may want to change the plan |
+| User sends **"Go"** (→ stage 5) | **TaskStop** it, delete `.state/plan-watch` — planning is over |
+
+Stop it on leaving plan mode by any other route too; a monitor otherwise outlives
+the mode.
+
+**This does not weaken the safety net.** The watcher is convenience — the
+correctness rule is unchanged: re-read and compare before every write, and merge
+first if the file moved. That still catches a user edit made while the watcher is
+off.
 
 ## File structure — fixed, always this order
 
