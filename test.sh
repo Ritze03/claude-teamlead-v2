@@ -167,6 +167,30 @@ echo "$CLAUDE_PLUGIN_ROOT" > $ngp/.claude/teamlead/.state/plugin-root
 python3 "$B" add --project $ngp --task ng --agent tl-sonnet-low --owns src/n >/dev/null
 out=$(echo '{"workspace":{"current_dir":"'$ngp'"}}' | bash "$SL")
 grep -q '1 open' <<<"$out" && ok "  works in a NON-git teamlead project" || bad "  works in a NON-git teamlead project (got: $out)"
+
+# planning mode: driven by the plan file's stage header, not the pointer alone
+mkdir -p $slp/.claude/teamlead/plan
+pf=$slp/.claude/teamlead/plan/topic.md
+printf '# T\n\n> **Stage 3** — working it out\n' > $pf
+echo "$pf" > $slp/.claude/teamlead/.state/active-plan
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q 'topic S3' <<<"$out" && ok "  shows planning mode and stage" || bad "  shows planning mode and stage ($out)"
+sed -i 's/Stage 3/Stage 5/' $pf
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q 'topic S' <<<"$out" && bad "  stage 5 should not read as planning" || ok "  stage 5 (handed off) is not planning"
+[ -f $slp/.claude/teamlead/.state/active-plan ] && bad "  pointer cleared at handoff" || ok "  pointer cleared at handoff"
+echo "$slp/.claude/teamlead/plan/gone.md" > $slp/.claude/teamlead/.state/active-plan
+echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL" >/dev/null
+[ -f $slp/.claude/teamlead/.state/active-plan ] && bad "  dangling pointer cleared" || ok "  dangling pointer cleared"
+
+# colour + the ⚠ flag
+printf 'hand edited\n' >> $slp/.claude/teamlead/board.md
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q '⚠' <<<"$out" && ok "  flags a real problem" || bad "  flags a real problem"
+grep -q $'\033\[38;5;' <<<"$out" && ok "  emits colour" || bad "  emits colour"
+python3 "$B" render --project $slp >/dev/null
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q '⚠' <<<"$out" && bad "  ⚠ clears when fixed" || ok "  ⚠ clears when fixed"
 cd $proj
 
 echo "== README documents what exists =="

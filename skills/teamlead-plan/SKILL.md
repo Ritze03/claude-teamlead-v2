@@ -148,6 +148,10 @@ authoritative while the ground under it has moved.
 Copy the wave table into `.claude/teamlead/board.md`, column for column. Each
 board row keeps `— I<n>` linking back to its plan step.
 
+**Clear `.claude/teamlead/.state/active-plan` once the board has the work** — that
+pointer is what tells the rest of the system a plan is still being worked out, and
+leaving it set keeps the status line claiming you are planning forever.
+
 **Plan is frozen intent; board is live state.** When execution diverges, record it
 on the board — never silently patch the plan. Losing the fact that reality
 departed from the plan loses the interesting part.

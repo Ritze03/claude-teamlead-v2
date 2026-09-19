@@ -147,11 +147,24 @@ A plugin **cannot** install a main status line — only your `settings.json` can
 a segment and leaves the slot alone rather than claiming it:
 
 ```
-⚑ teamlead 2 open · 1 out
+⚑ teamlead ✎ recipes-section S3 · 3 open · 1 out · 1 returned ⚠
 ```
 
+Each part appears only when it applies, so the line is short almost always and grows exactly
+when something needs you:
+
+| | |
+|---|---|
+| `✎ <plan> S3` | Planning mode, and which stage. Driven by the plan file's own stage header, so it disappears at handoff rather than sticking around. |
+| `N open` | Unfinished tasks. |
+| `N out` | Workers actually running, paired by agent id — accurate however long they run. |
+| `N returned` | **A worker came back and you have not acted on it.** The window where work used to evaporate; amber because it is the one number worth chasing. |
+| `N blocked` | Tasks that cannot proceed. |
+| `⚠` | A real problem: board/JSON drift, a `merged` task git says is not merged, or two unfinished tasks owning the same path. |
+
 It prints nothing unless teamlead is active in the current project, and resolves a worker's
-worktree back to the main checkout so it reads the same everywhere.
+worktree back to the main checkout so it reads the same everywhere — including in non-git
+projects, where worktree resolution is skipped rather than fatal.
 
 If you have no status line yet:
 
