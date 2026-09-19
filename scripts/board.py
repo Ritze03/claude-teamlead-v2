@@ -207,6 +207,27 @@ def mutate(fn, project=None, **kw):
     return res
 
 
+def forget(ids, project=None):
+    """Close out workers that will never report back.
+
+    A killed or cancelled agent fires no SubagentStop, so its start sits
+    outstanding until the stale age-out — far too long when the user cancelled
+    minutes ago. This writes the missing close, rather than editing history.
+    """
+    lg = ledger(project)
+    targets = lg["outstanding"] + lg["abandoned"] if ids in (["all"], "all") else list(ids)
+    live = set(lg["outstanding"]) | set(lg["abandoned"])
+    done = []
+    f = root(project) / ".state" / "events.log"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    with f.open("a") as fh:
+        for a in targets:
+            if a in live:
+                fh.write(f"{now()}  cancel    id={a}  reason=cancelled by the lead\n")
+                done.append(a)
+    return {"forgotten": done, "still_outstanding": ledger(project)["outstanding"]}
+
+
 def summary(db):
     live = [t for t in db["tasks"] if t["state"] != "merged"]
     by = {}
@@ -263,14 +284,14 @@ def ledger(project=None) -> dict:
             elif rest.startswith("start"):
                 starts += 1
     for ts, rest in _events(project):
-        tok = dict(p.split("=", 1) for p in rest.split("  ") if "=" in p)
+        tok = dict(p.split("=", 1) for p in re.split(r"\s{2,}", rest.strip()) if "=" in p)
         aid = tok.get("id")
         if not aid:
             continue
         if rest.startswith(("start", "resume")):
             live[aid] = ts
             seen[aid] = tok.get("agent", seen.get(aid, "?"))
-        elif rest.startswith("return"):
+        elif rest.startswith(("return", "cancel")):
             live.pop(aid, None)
             seen[aid] = tok.get("agent", seen.get(aid, "?"))
     cutoff = (datetime.datetime.now(datetime.UTC)
@@ -385,7 +406,7 @@ def main(argv):
     if not argv:
         print(__doc__); return 1
     cmd, rest = argv[0], argv[1:]
-    kw, proj = {}, None
+    kw, proj, pos = {}, None, []
     i = 0
     while i < len(rest):
         a = rest[i]
@@ -402,6 +423,7 @@ def main(argv):
                 kw[k] = v
             i += 2
         else:
+            pos.append(a)
             i += 1
     if cmd == "list":
         print(json.dumps(summary(load(proj)), indent=2))
@@ -416,6 +438,9 @@ def main(argv):
         for t in live:
             b = f" [{t['branch']}]" if t.get("branch") else ""
             print(f"  #{t['id']:<3} {t['state']:<9} {t['task'][:64]}{b}")
+        if lg["outstanding"]:
+            print("  workers still working: " +
+                  ", ".join(f"{a} ({lg['agents'].get(a, '?')})" for a in lg["outstanding"]))
         if lg["abandoned"]:
             print(f"  abandoned worker ids (started, never stopped): {', '.join(lg['abandoned'])}")
         probs = validate(db) + check_git(db, proj)
@@ -423,6 +448,8 @@ def main(argv):
             print(f"  ! {p_}")
     elif cmd == "ledger":
         print(json.dumps(ledger(proj), indent=2))
+    elif cmd == "forget":
+        print(json.dumps(forget(pos or ["all"], proj), indent=2))
     elif cmd == "render":                       # re-render md from json
         save(load(proj), proj); print("rendered")
     elif cmd == "check":                        # drift + validity, for the Stop gate

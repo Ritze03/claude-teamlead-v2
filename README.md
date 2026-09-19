@@ -218,6 +218,16 @@ you're dismissing it repeatedly for the same reason, that's a bug in the check; 
 hand-edit it — `board.py render` rebuilds it, and `board.py check` will tell you if the two
 have drifted.
 
+**It says a worker is working but nothing is running.** A cancelled or killed agent
+emits no stop event, so the ledger counts it until a long timeout. Close it out:
+
+```bash
+python3 <plugin>/scripts/board.py forget --project "$PWD"
+```
+
+`board.py status` lists the stuck ids first. This appends a `cancel` event rather
+than editing history.
+
 **A worker couldn't write somewhere.** Workers are fenced to their own worktree. That's
 deliberate: the refusal message tells them to report to the lead instead.
 

@@ -117,6 +117,11 @@ So hand the watcher back and forth with control:
 Stop it on leaving plan mode by any other route too; a monitor otherwise outlives
 the mode.
 
+**Cancelling a plan is one of those routes.** If the user calls it off mid-way:
+stop the watcher, delete `.state/plan-watch`, clear `.state/active-plan`, and run
+`board.py forget --project "$PWD"` — a scout killed mid-plan emits no stop event
+and would otherwise be counted as working for hours.
+
 **This does not weaken the safety net.** The watcher is convenience — the
 correctness rule is unchanged: re-read and compare before every write, and merge
 first if the file moved. That still catches a user edit made while the watcher is

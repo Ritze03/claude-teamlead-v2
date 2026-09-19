@@ -215,6 +215,22 @@ snapw=$wp/.claude/teamlead/.state/snap/t.md
 cmp -s $pfw $snapw && ok "  snapshot re-baselined to current content" || bad "  snapshot re-baselined"
 w2pid=$(cat $wp/.claude/teamlead/.state/plan-watch.pid 2>/dev/null); [ -n "$w2pid" ] && kill "$w2pid" 2>/dev/null; true
 
+echo "== a cancelled worker can be closed out =="
+fp=$T/forget; mkdir -p $fp/.claude/teamlead/.state; : > $fp/.claude/teamlead/.state/active
+NOWF=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  dispatch  agent=teamlead:tl-sonnet-medium  desc=scout\n%s  start     agent=teamlead:tl-sonnet-medium  id=k1\n' "$NOWF" "$NOWF" > $fp/.claude/teamlead/.state/events.log
+nout(){ python3 "$B" ledger --project $fp | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["outstanding"]))'; }
+check "killed worker counts as working" "$(nout)" 1
+atype=$(python3 "$B" ledger --project $fp | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["agents"]["k1"])')
+check "its agent type is parsed from the start line" "$atype" "teamlead:tl-sonnet-medium"
+python3 "$B" forget --project $fp >/dev/null
+check "forget closes it out" "$(nout)" 0
+grep -q '  cancel    id=k1' $fp/.claude/teamlead/.state/events.log && ok "  appends a cancel, does not rewrite history" || bad "  appends a cancel"
+grep -q '  start     agent=teamlead:tl-sonnet-medium  id=k1' $fp/.claude/teamlead/.state/events.log && ok "  the original start is still there" || bad "  original start kept"
+printf '%s  start     agent=teamlead:tl-sonnet-low  id=k2\n%s  start     agent=teamlead:tl-sonnet-low  id=k3\n' "$NOWF" "$NOWF" >> $fp/.claude/teamlead/.state/events.log
+python3 "$B" forget k2 --project $fp >/dev/null
+check "forget <id> closes only that one" "$(nout)" 1
+
 echo "== 👀 tells you whether edits are being watched =="
 wq=$T/eye; mkdir -p $wq/.claude/teamlead/{plan,.state}
 : > $wq/.claude/teamlead/.state/active

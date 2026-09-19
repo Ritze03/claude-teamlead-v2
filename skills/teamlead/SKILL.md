@@ -45,6 +45,19 @@ tools:
 | `board_add` | Decompose a request into tasks — call this *before* dispatching. Takes several at once. |
 | `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
+**When work is cancelled, close out its workers.** A killed or abandoned agent
+never emits a stop event, so the ledger keeps counting it as working until a long
+stale timeout. Whenever the user cancels, aborts, or you abandon a dispatch —
+including cancelling a plan mid-way — run:
+
+```
+python3 <plugin-root>/scripts/board.py forget --project "$PWD"          # all stuck
+python3 <plugin-root>/scripts/board.py forget <agent-id> --project "$PWD"
+```
+
+It appends a `cancel` event rather than editing history, and `board.py status`
+lists the stuck ids so you can see what you are closing.
+
 A task marked `merged` is **verified against git**: if its branch still has commits
 not in `HEAD`, the gate says so. Do not mark something merged until it is.
 
