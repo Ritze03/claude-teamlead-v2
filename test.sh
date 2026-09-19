@@ -257,6 +257,15 @@ echo "== plan skill hands the watcher off with control =="
 grep -q 'watcher follows who has control' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "documents the handoff" || bad "documents the handoff"
 grep -q 'plan-watch' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "  records the task id to survive compaction" || bad "  records the task id"
 
+echo "== the skill is self-sufficient for its own tooling =="
+SKC="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
+for c in "board.py render" "board.py check" "board.py forget" "board.py status"; do
+  grep -q "$c" "$SKC" || bad "skill never mentions '$c' — the agent would have to read the source"
+done
+ok "every CLI remedy is in the skill, not only the README"
+grep -q 'never read the plugin.s source' "$SKC" && ok "  tells it not to reverse-engineer" || bad "  tells it not to reverse-engineer"
+grep -q 'plan-watch\|plugin-root' "$SKC" && ok "  says where the plugin root is" || bad "  says where the plugin root is"
+
 echo "== plan skill presents the path prominently =="
 PS="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 grep -q 'single-cell table' "$PS" && ok "instructs a single-cell table" || bad "instructs a single-cell table"

@@ -457,8 +457,9 @@ def main(argv):
         probs = validate(db) + check_git(db, proj)
         _, m = _paths(proj)
         if m.exists() and m.read_text() != render(db):
-            probs.append("board.md has drifted from board.json — it is generated; "
-                         "re-render it and make changes through the board tools instead")
+            probs.append("board.md has drifted from board.json — it is generated. "
+                         "Fix with: board.py render --project <dir>  (and make changes "
+                         "through the board tools, not by editing board.md)")
         if probs:
             print("\n".join("  - " + p for p in probs)); return 1
     else:

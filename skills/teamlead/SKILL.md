@@ -80,9 +80,16 @@ When you merge a task, set `notes` to **how it was solved**, not what was asked.
 That is the part worth having in three weeks, and it is rendered into the board's
 "How it was solved" section.
 
-`board.py status --project "$PWD"` prints everything at a glance — open tasks,
-workers still out, and any problem the checks would raise. Use it instead of
-reading the files.
+The CLI behind those tools, for the things the MCP tools do not cover. The plugin
+root is in `.claude/teamlead/.state/plugin-root` (`CLAUDE_PLUGIN_ROOT` is **not**
+set in your shell):
+
+| command | when |
+|---|---|
+| `board.py status --project "$PWD"` | Everything at a glance — open tasks, workers working, stuck ids, and any problem the checks would raise. Use it instead of reading the files. |
+| `board.py check --project "$PWD"` | Run the board checks yourself — after fixing something the Stop gate flagged, to confirm it is actually fixed. |
+| `board.py render --project "$PWD"` | Regenerate `board.md` from the JSON. **This is the fix when the gate reports drift.** |
+| `board.py forget [id] --project "$PWD"` | Close out a cancelled or killed worker that will never report back. |
 
 If the board tools are unavailable, the same operations exist as a CLI:
 `python3 <plugin-root>/scripts/board.py add|update|list|check --project "$PWD" …`
@@ -236,6 +243,28 @@ first time.
 - Never two workers editing the same file. Concurrent reads are fine.
 - Workers cannot spawn workers. All coordination is yours.
 - Never remove a worktree holding work without asking.
+
+## When teamlead's own machinery misbehaves
+
+Diagnose it, do not reverse-engineer it. **Everything you need is listed above —
+never read the plugin's source to work out a command.**
+
+| symptom | what it means | do |
+|---|---|---|
+| Gate reports drift | `board.md` was hand-edited; it is generated | `board.py render` |
+| Gate says a worker is working, nothing is running | It was cancelled or killed, so it never reported back | `board.py forget` |
+| Gate flags something you believe is fine | It blocks once, never traps you | Say plainly what you are skipping and why, then continue |
+| Gate fires on the same wrong thing repeatedly | That is a bug in the check, not in you | Say so to the user — a check that fires on a correct state is worse than no check |
+| A board write is refused | Two unfinished tasks would own overlapping paths | Narrow the scopes or sequence the tasks; the refusal names both |
+| Your plan edits are not being noticed | The watcher is off, or you are the one holding control | Expected while you write; restart it when you hand back |
+| `CLAUDE_PLUGIN_ROOT` is empty | It is not set in your shell, only in hooks | Read `.claude/teamlead/.state/plugin-root` |
+
+Start with `board.py status` — it prints open tasks, working workers, stuck ids,
+and every problem the checks would raise, in one call.
+
+If something is genuinely broken rather than merely surprising, **tell the user**
+rather than working around it silently. This is a young tool; a bug you route
+around is a bug that stays.
 
 ## Commands
 
