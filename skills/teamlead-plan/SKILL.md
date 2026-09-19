@@ -28,9 +28,9 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | Stage | What happens | Ends when |
 |---|---|---|
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
-| **2 Create and show** | Create the near-empty plan with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
+| **2 Create and show** | Create the near-empty plan — the five sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
-| **4 Implementation plan** | You alone write the wave table. Then **stop again**. | The user says "Go" |
+| **4 Done when + implementation plan** | You alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again**. | The user says "Go" |
 | **5 Go** | Translate into `board.md` and execute. | — |
 
 ### Order inside the first turn
@@ -182,15 +182,23 @@ off.
 ## Goal
 One or two lines. `TBD` until stated.
 
-## Done when
-- [ ] A concrete, checkable condition — *verified by: agent* (`pytest -q` passes)
-- [ ] Something only a person can judge — *verified by: user*
-
 ## Context
 Constraints, what exists, what must not break. Scout findings land here.
 
 ## Decisions
 - **D1** The call — *why, in one line.*
+
+## Done when
+- [ ] A concrete, checkable condition — *verified by: agent* (`pytest -q` passes)
+- [ ] Something only a person can judge — *verified by: user*
+
+## Implementation plan
+*Built from D1–D5 · decisions:a3f9*
+
+| Wave | ID | Task | Agent | Owns | After |
+|:----:|:--:|------|-------|------|-------|
+| 1 | I1 | … | `tl-sonnet-medium` | *(read-only)* | — |
+| 2 | I2 | … — **D1** | `tl-sonnet-high` | `src/x/` | I1 |
 
 ## Open questions
 1. The question?
@@ -202,15 +210,18 @@ Constraints, what exists, what must not break. Scout findings land here.
 
 ## Notes from me
 Theirs to write. You only ever remove a line once it is folded into a Decision.
-
-## Implementation plan
-*Built from D1–D5 · decisions:a3f9*
-
-| Wave | ID | Task | Agent | Owns | After |
-|:----:|:--:|------|-------|------|-------|
-| 1 | I1 | … | `tl-sonnet-medium` | *(read-only)* | — |
-| 2 | I2 | … — **D1** | `tl-sonnet-high` | `src/x/` | I1 |
 ```
+
+**`## Done when` and `## Implementation plan` do not exist until stage 4.** Create
+the file with the other five sections only, and insert both *above* `## Open
+questions` when you write them.
+
+**Why there.** The last two sections are the user's half of the file — the only ones
+they type into. They stay at the bottom, where they are quick to scroll to and easy
+to append to, with nothing large growing underneath them. A wave table parked below
+the boxes they are typing in pushes their half of the file out of reach, and an empty
+stage-4 header sitting there from stage 2 is worse: it is a placeholder in their way
+for the entire time they are actually writing.
 
 **Same wave = runs in parallel.** No prose annotations like *"parallel with I2"* —
 a dependency column plus a prose note is two sources of truth that can disagree.
@@ -248,20 +259,24 @@ think?"* — a whole round trip to get to where you should have started.
 This is a suggestion, not a decision. Do not write it into `## Decisions` and carry
 on as though it were answered — it stays an open question until they answer it.
 
-## Decide "done" while planning, not at the end
+## Decide "done" once the decisions are made
 
-`## Done when` is settled in stage 1–2, alongside the Goal, and every item names
-**who verifies it**:
+`## Done when` is written at **stage 4**, with the implementation plan and from the
+same settled decisions. Criteria are what the decisions imply — written while the
+Goal still says `TBD` they only get written twice — so derive them from `## Decisions`
+the same way the wave table is, and every item names **who verifies it**:
 
 | verifier | for | example |
 |---|---|---|
 | `agent` | anything with an objective answer | tests pass, the endpoint returns 200, every page has a meta description |
 | `user` | anything needing judgement or eyes | it reads well, the layout looks right, this is the behaviour I meant |
 
-Ask for this when you ask about the goal — *"how will we know this is done, and is
-that something I can check or something you need to look at?"* Deciding it at the
-end is how everything becomes "agent checks it": by then both of you want to be
-finished, and the honest answer is whatever closes the task.
+**Writing it last has one failure mode**: by stage 4 both of you want to be finished,
+and `agent` is the verifier that closes the plan fastest. Two things keep it honest.
+Every criterion traces to a decision or the Goal, so the list is derived rather than
+invented at the end. And the user reads it at the stage-4 review, before the second
+"Go" — call the list out there, because that review is their chance to say a
+criterion you marked `agent` is one they want to look at themselves.
 
 **Prefer `agent`, but do not fake it.** If a criterion cannot be checked
 mechanically, marking it `agent` does not make it verified — it makes the

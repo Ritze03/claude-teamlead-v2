@@ -12,9 +12,21 @@ add() { fail+="  - $1"$'\n'; }
 # 1. sections present, in order  (checks are numbered as in the skill: 1 sections,
 # 2 dependency waves, 3 Owns overlap, 4 agent tier, 5 decisions covered,
 # 6 unpromoted answers, 7 TBD at stage 4, 8 staleness stamp)
-order=$(grep -n '^## ' "$f" | sed 's/^[0-9]*:## //')
-want=$'Goal\nDone when\nContext\nDecisions\nOpen questions\nNotes from me\nImplementation plan'
-[ "$order" = "$want" ] || add "sections wrong or out of order. Want: Goal, Done when, Context, Decisions, Open questions, Notes from me, Implementation plan"
+# 'Done when' and 'Implementation plan' are both written at stage 4, from the same
+# settled decisions, so before then they are simply absent. Both land ABOVE the two
+# inboxes: 'Open questions' and 'Notes from me' are the user's half of the file and
+# stay at the bottom, quick to reach and with nothing large growing underneath them.
+order=$(grep '^## ' "$f" | sed 's/^## //')
+canon=$'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nNotes from me'
+always=$'Goal\nContext\nDecisions\nOpen questions\nNotes from me'
+bad=$(grep -vFx "$canon" <<<"$order" || true)
+gone=$(grep -vFx "$order" <<<"$always" || true)
+[ -n "$bad" ]  && add "unexpected section(s): $(tr '\n' ' ' <<<"$bad")"
+[ -n "$gone" ] && add "missing section(s): $(tr '\n' ' ' <<<"$gone")"
+# Only meaningful once the headings themselves are right, or it reports twice.
+if [ -z "$bad" ] && [ -z "$gone" ] && [ "$order" != "$(grep -Fx "$order" <<<"$canon")" ]; then
+  add "sections out of order. Want: Goal, Context, Decisions, [Done when, Implementation plan,] Open questions, Notes from me"
+fi
 
 # table rows: | wave | id | task | agent | owns | after |
 # ID may carry a suffix (I4b); without [a-z]? such a row is silently invisible.
@@ -72,6 +84,7 @@ awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Notes from me/{o=0}
 # inboxes, not storage; a plan that still holds either is not finished planning.
 if grep -qi '^> \*\*Stage 4\*\*' "$f"; then
   grep -q 'TBD' "$f" && add "stage 4 reached but TBD markers remain"
+  [ -z "$rows" ] && add "stage 4 reached with no implementation plan — write the wave table above '## Open questions'"
   q=$(awk '/^## Open questions/{o=1;next} /^### Answered/{o=0} /^## /{o=0} o' "$f" \
       | grep -cE '^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]+\S') || q=0
   [ "$q" -gt 0 ] && add "stage 4 reached with $q open question(s) still unanswered — fold each answer into a Decision and strike the question into ### Answered"
@@ -82,7 +95,7 @@ if grep -qi '^> \*\*Stage 4\*\*' "$f"; then
   dw=$(awk '/^## Done when/{o=1;next} /^## /{o=0} o' "$f")
   c=$(printf '%s' "$dw" | grep -cE '^[[:space:]]*-[[:space:]]*\[.\]') || c=0
   if [ "$c" -eq 0 ]; then
-    add "stage 4 reached with no criteria under 'Done when' — say what must be true for this to be finished, as '- [ ] ...' items"
+    add "stage 4 reached with no criteria under 'Done when' — add the section above '## Implementation plan' and say what must be true for this to be finished, as '- [ ] ...' items"
   else
     v=$(printf '%s' "$dw" | grep -cE 'verified by:[[:space:]]*(agent|user)') || v=0
     [ "$v" -lt "$c" ] && add "$((c - v)) of $c 'Done when' item(s) do not say who verifies them — mark each *verified by: agent* or *verified by: user*"
@@ -109,7 +122,7 @@ bare=$(awk '
 # 8. staleness — the implementation plan must be stamped with the decisions it was built from
 stamp=$(grep -oE 'decisions:[0-9a-f]{4}' "$f" | head -1 | cut -d: -f2)
 if [ -n "$rows" ]; then
-  cur=$(sed -n '/^## Decisions/,/^## Open questions/p' "$f" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  cur=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$f" | grep '^- \*\*D' | md5sum | cut -c1-4)
   if [ -z "$stamp" ]; then add "implementation plan is not stamped — add '*Built from D… · decisions:$cur*' under the heading"
   elif [ "$stamp" != "$cur" ]; then add "implementation plan predates the current decisions (stamp $stamp, now $cur) — revise it or re-stamp"; fi
 fi

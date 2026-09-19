@@ -520,9 +520,9 @@ Only the last blocks. Mid-edit inconsistency is normal and should not be fought;
 implementation from a self-contradicting plan is the actual harm.** This also extends the
 existing no-Go deny on `board.md` — two conditions on the same gate.
 
-**Implementation plan lives in the same file, at the bottom** — one file to open, the header
-says where you are, stage 4 steps can reference decisions by ID (`I2 implements D4`), and
-being last means it never pushes the collaborative sections down.
+**Implementation plan lives in the same file** — one file to open, the header says where you
+are, and stage 4 steps can reference decisions by ID (`I2 implements D4`). *Its position was
+originally "at the bottom"; superseded by §18 — it sits above the inboxes.*
 
 **OPEN:** topic→filename slugging rules.
 
@@ -1259,3 +1259,34 @@ rule. A note that cannot be folded yet stays, and becomes an open question inste
 **Enforced, not hoped for.** `plan-lint` at stage 4 now requires: no `TBD`, no unanswered
 open question, nothing left in `Notes from me`, and every decision referenced by a step.
 Stage 3 may hold as much as it likes — the constraint is on *finished*, not on *in progress*.
+
+## 18. The stage-4 sections move above the inboxes — 2026-09-19
+
+Section order is now **Goal, Context, Decisions, Done when, Implementation plan, Open
+questions, Notes from me**, and the last two are the only ones the user types into.
+
+This reverses the §5 rationale, which had the implementation plan last because "being last
+means it never pushes the collaborative sections down". Backwards: last means the wave table
+grows *underneath* the boxes the user is typing in, so their half of the file drifts further
+from the end of the document the longer the plan gets. Reported from real use — *"the most
+important parts are put at the bottom and then there's just an implementation plan which
+doesn't fit and makes editing feel less structured"*. The inboxes stay at the bottom, where
+they are quick to scroll to and easy to append to, and nothing large grows below them.
+
+**Both stage-4 sections are absent until stage 4.** An empty `## Implementation plan` header
+parked in the file from stage 2 is a placeholder in the user's way for the entire time they
+are actually writing. `## Done when` joins it there: acceptance criteria are what the
+decisions imply, so writing them at stage 1–2 against a `TBD` goal just means writing them
+twice. Both are derived from settled `## Decisions` in the same turn.
+
+This weakens §17's "decide done while planning, not at the end" — the guard against everything
+quietly becoming *verified by: agent* because both sides want to be finished. Kept in adapted
+form: criteria must trace to a decision or the Goal rather than being invented at the end, and
+the lead calls the list out at the stage-4 review, which is the user's chance to say a
+criterion marked `agent` is one they want to look at themselves.
+
+**Enforced.** `plan-lint` builds the expected order by filtering the canonical list to the
+sections actually present — so a missing stage-4 section is fine, a renamed one is
+"unexpected", a dropped required one is "missing", and a wave table below `Notes from me` is
+"out of order". At stage 4 both sections are required. The staleness stamp had to stop using
+`sed '/^## Decisions/,/^## Open questions/p'`, which now spans the implementation plan.

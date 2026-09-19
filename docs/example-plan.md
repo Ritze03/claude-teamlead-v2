@@ -10,11 +10,6 @@ Every public API endpoint enforces a per-key request budget, returns `429` with 
 Out of scope: the billing endpoints — an open contract question with legal, and entangling
 the two would block both.
 
-## Done when
-- [x] `pytest tests/limits/` passes, including the boundary-burst and Redis-down cases — *verified by: agent*
-- [x] `/health` and `/metrics` still answer under load — *verified by: agent*
-- [ ] A 429 response reads sensibly to a customer integrating against it — *verified by: user*
-
 ## Context
 - 34 public endpoints across `api/routes/*.py`, all behind one `@app.route` decorator stack —
   so there is a single place to hook, not 34. *(scout, 2026-08-28)*
@@ -39,19 +34,10 @@ the two would block both.
 - **D8** Exceeding the limit throttles, never hard-blocks — *a hard block turns a
   burst into an outage for a paying customer.*
 
-## Open questions
-*(none open — all resolved below)*
-
-### Answered
-- ~~Default budget for a key with no explicit tier?~~ → 1000/hour, matching the
-  pricing page. → **D6**
-- ~~Per-endpoint overrides on day one?~~ → No, one budget per key ships first. → **D7**
-- ~~Ever hard-block a key, or only throttle?~~ → Throttle only. → **D8**
-- ~~Redis or Postgres for the counters?~~ → Redis, already a dependency. → **D2**
-- ~~What happens when Redis is down?~~ → Fail open, alert. → **D3**
-- ~~Per-IP or per-key?~~ → Per-key. → **D4**
-
-## Notes from me
+## Done when
+- [x] `pytest tests/limits/` passes, including the boundary-burst and Redis-down cases — *verified by: agent*
+- [x] `/health` and `/metrics` still answer under load — *verified by: agent*
+- [ ] A 429 response reads sensibly to a customer integrating against it — *verified by: user*
 
 ## Implementation plan
 *Built from D1–D8 · decisions:a4ea*
@@ -75,3 +61,17 @@ Same wave = runs in parallel. `Owns` is the write scope handed verbatim to the w
 4. D1–D8 each appear in a task. ✅
 
 No Opus anywhere: the design calls are already made above, so what remains is execution.
+
+## Open questions
+*(none open — all resolved below)*
+
+### Answered
+- ~~Default budget for a key with no explicit tier?~~ → 1000/hour, matching the
+  pricing page. → **D6**
+- ~~Per-endpoint overrides on day one?~~ → No, one budget per key ships first. → **D7**
+- ~~Ever hard-block a key, or only throttle?~~ → Throttle only. → **D8**
+- ~~Redis or Postgres for the counters?~~ → Redis, already a dependency. → **D2**
+- ~~What happens when Redis is down?~~ → Fail open, alert. → **D3**
+- ~~Per-IP or per-key?~~ → Per-key. → **D4**
+
+## Notes from me

@@ -330,15 +330,18 @@ rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; printf '# mine\n' > $ic/s
 run --combined >/dev/null; grep -q '^# mine' $ic/statusline.sh && ok "refuses to clobber a hand-written combiner" || bad "refuses to clobber"
 
 echo "== done-when criteria and archiving =="
-mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Done when\n%s\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" > "$T/dw.md"
-  dh=$(sed -n '/^## Decisions/,/^## Open questions/p' "$T/dw.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+# $2 is the whole '## Done when' section, or '' for a plan that has not reached
+# stage 4 yet — it and the wave table are written together, from settled decisions.
+mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n%b\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/dw.md"
+  dh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/dw.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$dh/" "$T/dw.md"; "$PL" "$T/dw.md" >"$T/dwout" 2>&1; echo $?; }
-check "criteria with verifiers pass" "$(mkdw 4 '- [x] tests pass — *verified by: agent*')" 0
-check "no criteria at stage 4 fails" "$(mkdw 4 '')" 1
+check "criteria with verifiers pass" "$(mkdw 4 '## Done when\n- [x] tests pass — *verified by: agent*\n')" 0
+check "no 'Done when' section at stage 4 fails" "$(mkdw 4 '')" 1
 grep -q "no criteria under 'Done when'" "$T/dwout" && ok "  says what to add" || bad "  says what to add"
-check "a criterion with no verifier fails" "$(mkdw 4 '- [ ] vague')" 1
+check "the section with no criteria in it fails" "$(mkdw 4 '## Done when\n')" 1
+check "a criterion with no verifier fails" "$(mkdw 4 '## Done when\n- [ ] vague\n')" 1
 grep -q 'who verifies them' "$T/dwout" && ok "  demands agent or user" || bad "  demands agent or user"
-check "stage 3 needs none of it yet" "$(mkdw 3 '')" 0
+check "stage 3 has neither section yet" "$(mkdw 3 '')" 0
 grep -q 'Done when' "$PS2" && ok "  the skill asks for it while planning" || bad "  skill asks while planning"
 grep -q 'Really run them' "$PS2" && ok "  demands the checks actually run" || bad "  demands checks actually run"
 
@@ -370,8 +373,8 @@ check "--abandon files a dropped plan anyway" "$(arch '# T\n\n## Done when\n- [ 
 [ -f "$ap/.claude/teamlead/plan/done/$d-abandoned-topic.md" ] && ok "  and marks it abandoned" || bad "  and marks it abandoned"
 
 echo "== a finished plan has empty inboxes =="
-mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Done when\n- [x] it works — *verified by: agent*\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" "$3" > "$T/fin.md"
-  fh=$(sed -n '/^## Decisions/,/^## Open questions/p' "$T/fin.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Done when\n- [x] it works — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n' "$1" "$2" "$3" > "$T/fin.md"
+  fh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/fin.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$fh/" "$T/fin.md"
   "$PL" "$T/fin.md" >"$T/finout" 2>&1; echo $?; }
 check "stage 4, both inboxes empty" "$(mkfin 4 '*(none open)*' '')" 0
@@ -541,14 +544,17 @@ mkplan(){ cat > "$T/pl.md" <<PEOF
 ## Goal
 G
 
-## Done when
-- [ ] it works — *verified by: agent*
-
 ## Context
 C
 
 ## Decisions
 - **D1** a call — *why.*
+
+## Done when
+- [ ] it works — *verified by: agent*
+
+## Implementation plan
+$3
 
 ## Open questions
 1. A question?
@@ -558,9 +564,6 @@ $2
 ### Answered
 
 ## Notes from me
-
-## Implementation plan
-$3
 PEOF
 "$PL" "$T/pl.md" >"$T/plout" 2>&1; echo $?; }
 TBL='*Built from D1 · decisions:XX*
@@ -634,7 +637,7 @@ grep -q 'Vision.*tl-opus-medium' <<<"$r" && ok "vision survives opus:never + xlo
 grep -q 'Never tl-opus-high for vision' <<<"$r" && ok "vision capped below high" || bad "vision capped below high"
 
 echo "== a question carries the lead's recommendation =="
-mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Done when\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n\n## Implementation plan\n' "$1" "${2:-}" > "$T/q.md"
+mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" > "$T/q.md"
   "$PL" "$T/q.md" >"$T/qout" 2>&1; echo $?; }
 check "a bare question fails" "$(mkq '1. Per key or per IP?\n   > me: ')" 1
 grep -q 'Your call' "$T/qout" && ok "  offers the honest opt-out" || bad "  offers the opt-out"
@@ -650,6 +653,25 @@ grep -q 'Never ask a bare question' "$PS2" && ok "  the plan skill says why" || 
 grep -q 'Never ask a bare question' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" && ok "  and it applies in chat too" || bad "  applies in chat too"
 grep -q 'Suggest:' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-brainstorm/SKILL.md" && ok "  brainstorm asks the same way" || bad "  brainstorm asks the same way"
 
+echo "== the two stage-4 sections are absent until stage 4 =="
+# $1 = stage, $2 = the section block that sits between Decisions and Open questions.
+mkord(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n%b## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/o.md"
+  "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?; }
+FULL='## Done when\n- [x] ok — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:QQ*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n'
+check "a stage-3 plan with five sections is complete" "$(mkord 3 '')" 0
+check "stage 4 without them fails" "$(mkord 4 '')" 1
+grep -q 'no implementation plan' "$T/oout" && ok "  asks for the wave table" || bad "  asks for the wave table"
+grep -q "no criteria under 'Done when'" "$T/oout" && ok "  asks for the criteria" || bad "  asks for the criteria"
+# The inboxes stay last: anything after 'Notes from me' pushes the user's half of
+# the file out of reach, which is the whole reason the order changed.
+check "the wave table below the inboxes is out of order" \
+  "$(printf '# T\n\n> **Stage 4** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Implementation plan\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' > "$T/o.md"; "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?)" 1
+grep -q 'out of order' "$T/oout" && ok "  and says so" || bad "  and says so"
+check "a misspelled heading is caught" "$(printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open Questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' > "$T/o.md"; "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?)" 1
+grep -q 'unexpected section' "$T/oout" && ok "  named as unexpected" || bad "  named as unexpected"
+grep -q 'missing section' "$T/oout" && ok "  and as missing" || bad "  and as missing"
+grep -q 'do not exist until stage 4' "$PS2" && ok "  the skill says when they appear" || bad "  skill says when"
+
 # The shipped docs are the reference a lead copies from. The example drifted out of
 # spec once already (stage 4 with a full 'Notes from me') because nothing checked it.
 echo "== shipped docs satisfy their own linter =="
@@ -658,7 +680,7 @@ echo "== shipped docs satisfy their own linter =="
 # The skill's template is what every new plan starts as, so its section order must
 # match the linter's. Extract it and compare headings directly.
 tpl=$(awk '/^## Goal$/{p=1} p&&/^## /{print}' "$PS2" | head -7 | sed 's/^## //')
-check "template section order matches the linter" "$tpl" "$(printf 'Goal\nDone when\nContext\nDecisions\nOpen questions\nNotes from me\nImplementation plan')"
+check "template section order matches the linter" "$tpl" "$(printf 'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nNotes from me')"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
