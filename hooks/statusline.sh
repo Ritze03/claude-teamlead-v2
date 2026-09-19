@@ -38,9 +38,21 @@ ap="$d/.state/active-plan"
 if [ -f "$ap" ]; then
   pf=$(cat "$ap" 2>/dev/null)
   if [ -n "$pf" ] && [ -f "$pf" ]; then
-    stage=$(grep -m1 -oE '^> \*\*Stage [0-9]+\*\*' "$pf" 2>/dev/null | grep -oE '[0-9]+')
+    hdr=$(grep -m1 -E '^> \*\*Stage [0-9]+\*\*' "$pf" 2>/dev/null)
+    stage=$(printf '%s' "$hdr" | grep -oE '[0-9]+' | head -1)
     if [ -n "$stage" ] && [ "$stage" -lt 5 ]; then
-      seg+=" $(c $PLUM "✎ $(basename "$pf" .md) S$stage")"
+      # Label keyed on the stage NUMBER, not the header prose. The two can
+      # disagree — a stage bumped without rewording leaves a stale description —
+      # and the number is the structured half.
+      case "$stage" in
+        1) desc="picking the topic" ;;
+        2) desc="open it in your editor" ;;
+        3) desc="working it out" ;;
+        4) desc="implementation plan" ;;
+      esac
+      seg+=" $(c $PLUM "✎ planning $(basename "$pf" .md) · stage $stage/5 $desc")"
+      # Stage 4 is finished and waiting on you specifically.
+      [ "$stage" = "4" ] && seg+=" $(c $AMBER '⏎Go')"
     else
       rm -f "$ap"            # handed off to the board; stop claiming planning
     fi

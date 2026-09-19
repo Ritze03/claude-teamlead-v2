@@ -147,7 +147,7 @@ A plugin **cannot** install a main status line — only your `settings.json` can
 a segment and leaves the slot alone rather than claiming it:
 
 ```
-⚑ teamlead ✎ recipes-section S3 · 3 open · 1 working · 1 returned ⚠
+⚑ teamlead ✎ planning recipes-section · stage 3/5 working it out · 2 open
 ```
 
 Each part appears only when it applies, so the line is short almost always and grows exactly
@@ -155,7 +155,7 @@ when something needs you:
 
 | | |
 |---|---|
-| `✎ <plan> S3` | Planning mode, and which stage. Driven by the plan file's own stage header, so it disappears at handoff rather than sticking around. |
+| `✎ planning <name> · stage N/5 <what it is for>` | Plan mode, which plan, and what the current stage is actually doing. The stage comes from the plan file's header so it disappears at handoff; the label is keyed on the *number* rather than the header prose, which can go stale when a stage is bumped without rewording. Stage 4 adds an amber `⏎Go` — that stage is finished and waiting on you specifically. |
 | `N open` | Unfinished tasks. |
 | `N working` | Workers actually running, paired by agent id — accurate however long they run. Deliberately not called `running`: the board has a `running` state, and when the two disagree that divergence is the bug the reconcile gate catches. |
 | `N returned` | **A worker came back and you have not acted on it.** The window where work used to evaporate; amber because it is the one number worth chasing. |

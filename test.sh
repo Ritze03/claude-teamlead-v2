@@ -174,8 +174,16 @@ pf=$slp/.claude/teamlead/plan/topic.md
 printf '# T\n\n> **Stage 3** — working it out\n' > $pf
 echo "$pf" > $slp/.claude/teamlead/.state/active-plan
 out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
-grep -q 'topic S3' <<<"$out" && ok "  shows planning mode and stage" || bad "  shows planning mode and stage ($out)"
-sed -i 's/Stage 3/Stage 5/' $pf
+grep -q 'planning topic' <<<"$out" && ok "  names planning mode and the plan" || bad "  names planning mode and the plan ($out)"
+grep -q 'stage 3/5' <<<"$out" && ok "  shows stage out of total" || bad "  shows stage out of total"
+grep -q 'working it out' <<<"$out" && ok "  says what the stage is for" || bad "  says what the stage is for"
+# the label must follow the NUMBER, not stale header prose
+sed -i 's/Stage 3/Stage 4/' $pf
+out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
+grep -q 'implementation plan' <<<"$out" && ok "  label tracks the number, not the prose" || bad "  label tracks the number ($out)"
+grep -q 'Go' <<<"$out" && ok "  stage 4 flags that it is waiting on you" || bad "  stage 4 flags waiting"
+sed -i 's/Stage 4/Stage 3/' $pf
+sed -i 's/Stage [0-9]/Stage 5/' $pf
 out=$(echo '{"workspace":{"current_dir":"'$slp'"}}' | bash "$SL")
 grep -q 'topic S' <<<"$out" && bad "  stage 5 should not read as planning" || ok "  stage 5 (handed off) is not planning"
 [ -f $slp/.claude/teamlead/.state/active-plan ] && bad "  pointer cleared at handoff" || ok "  pointer cleared at handoff"
