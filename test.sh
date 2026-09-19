@@ -299,6 +299,36 @@ ok "every CLI remedy is in the skill, not only the README"
 grep -q 'never read the plugin.s source' "$SKC" && ok "  tells it not to reverse-engineer" || bad "  tells it not to reverse-engineer"
 grep -q 'plan-watch\|plugin-root' "$SKC" && ok "  says where the plugin root is" || bad "  says where the plugin root is"
 
+echo "== the status line installer =="
+INS="$CLAUDE_PLUGIN_ROOT/scripts/install-statusline.sh"
+ic=$T/cfg; mkdir -p $ic
+run(){ CLAUDE_CONFIG_DIR=$ic bash "$INS" "$1" >"$T/iout" 2>&1; echo $?; }
+sl(){ python3 -c "import json;print((json.load(open('$ic/settings.json')).get('statusLine') or {}).get('command',''))"; }
+printf '{"model":"opus","statusLine":{"type":"command","command":"bash \\"/tmp/prior.sh\\""}}\n' > $ic/settings.json
+check "combined install succeeds" "$(run --combined)" 0
+grep -q 'prior.sh' $ic/statusline.sh && ok "  keeps the existing segment" || bad "  keeps the existing segment"
+grep -q 'teamlead-v2/hooks/statusline.sh' $ic/statusline.sh && ok "  adds teamlead" || bad "  adds teamlead"
+[ "$(sl)" = "bash \"$ic/statusline.sh\"" ] && ok "  points settings at the combiner" || bad "  points settings at combiner ($(sl))"
+python3 -c "import json;d=json.load(open('$ic/settings.json'));assert d['model']=='opus'" && ok "  leaves other settings alone" || bad "  leaves other settings alone"
+ls $ic/settings.json.bak.* >/dev/null 2>&1 && ok "  wrote a backup" || bad "  wrote a backup"
+run --combined >/dev/null
+check "idempotent" "$(grep -c 'teamlead-v2/hooks/statusline.sh' $ic/statusline.sh)" 1
+run --uninstall >/dev/null
+check "uninstall restores the original" "$(sl)" 'bash "/tmp/prior.sh"'
+# version pinning is removed so a plugin update cannot break the segment
+printf '{"statusLine":{"type":"command","command":"bash \\"$HOME/.claude/plugins/cache/x/y/1.2.3/s.sh\\""}}\n' > $ic/settings.json
+rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; run --combined >/dev/null
+grep -q '/x/y/\*/s.sh' $ic/statusline.sh && ok "un-pins a versioned plugin path" || bad "un-pins a versioned plugin path"
+# a glob inside quotes never expands, so the de-pinned path must be unquoted
+grep -qE '"bash [^"]*/x/y/\*/s\.sh"' $ic/statusline.sh && ok "  leaves the glob unquoted so it expands" || bad "  glob must be unquoted"
+# a path containing spaces stays quoted and therefore stays pinned
+printf '{"statusLine":{"type":"command","command":"bash \\"/a b/plugins/cache/x/y/1.2.3/s.sh\\""}}\n' > $ic/settings.json
+rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; run --combined >/dev/null
+grep -q '1.2.3' $ic/statusline.sh && ok "  a path with spaces stays pinned and quoted" || bad "  path with spaces must stay quoted"
+# never clobber a hand-written combiner
+rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; printf '# mine\n' > $ic/statusline.sh
+run --combined >/dev/null; grep -q '^# mine' $ic/statusline.sh && ok "refuses to clobber a hand-written combiner" || bad "refuses to clobber"
+
 echo "== a finished plan has empty inboxes =="
 mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' "$1" "$2" "$3" > "$T/fin.md"
   fh=$(sed -n '/^## Decisions/,/^## Open questions/p' "$T/fin.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
