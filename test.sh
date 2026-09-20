@@ -322,12 +322,12 @@ sl(){ python3 -c "import json;print((json.load(open('$ic/settings.json')).get('s
 printf '{"model":"opus","statusLine":{"type":"command","command":"bash \\"/tmp/prior.sh\\""}}\n' > $ic/settings.json
 check "combined install succeeds" "$(run --combined)" 0
 grep -q 'prior.sh' $ic/statusline.sh && ok "  keeps the existing segment" || bad "  keeps the existing segment"
-grep -q 'teamlead-v2/hooks/statusline.sh' $ic/statusline.sh && ok "  adds teamlead" || bad "  adds teamlead"
+grep -qF "$H/statusline.sh" $ic/statusline.sh && ok "  adds teamlead" || bad "  adds teamlead"
 [ "$(sl)" = "bash \"$ic/statusline.sh\"" ] && ok "  points settings at the combiner" || bad "  points settings at combiner ($(sl))"
 python3 -c "import json;d=json.load(open('$ic/settings.json'));assert d['model']=='opus'" && ok "  leaves other settings alone" || bad "  leaves other settings alone"
 ls $ic/settings.json.bak.* >/dev/null 2>&1 && ok "  wrote a backup" || bad "  wrote a backup"
 run --combined >/dev/null
-check "idempotent" "$(grep -c 'teamlead-v2/hooks/statusline.sh' $ic/statusline.sh)" 1
+check "idempotent" "$(grep -cF "$H/statusline.sh" $ic/statusline.sh)" 1
 run --uninstall >/dev/null
 check "uninstall restores the original" "$(sl)" 'bash "/tmp/prior.sh"'
 # version pinning is removed so a plugin update cannot break the segment
@@ -1135,6 +1135,16 @@ grep -q '^## Brainstorm request' "$PS2" && ok "  and the '## Brainstorm request'
 grep -q 'inotifywait' "$PS2" && ok "  and 'inotifywait'" || bad "  'inotifywait'"
 grep -qF 'ran `' "$PS2" && ok "  and the D10 tick-evidence format" || bad "  the D10 tick-evidence format"
 grep -qiE '^## .*phase' "$PS2" && ok "  and a heading about phases" || bad "  a heading about phases"
+
+echo "== docs/enforcement.md names exactly the files under hooks/ and scripts/ =="
+ENF="$CLAUDE_PLUGIN_ROOT/docs/enforcement.md"
+documented=$(grep -oE '^\| `[^`]+`' "$ENF" | tr -d '|` ' | sort)
+actual=$(find "$H" "$CLAUDE_PLUGIN_ROOT/scripts" -maxdepth 1 -type f -printf '%f\n' | grep -v '^hooks.json$' | sort)
+d=$(diff <(printf '%s\n' "$documented") <(printf '%s\n' "$actual"))
+[ -z "$d" ] && ok "table matches hooks/ and scripts/ exactly" || bad "table vs tree differ:
+$d"
+dupes=$(printf '%s\n' "$documented" | uniq -d)
+[ -z "$dupes" ] && ok "  no filename listed twice" || bad "  listed more than once: $dupes"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
