@@ -46,7 +46,12 @@ check "start recorded"           "$(grep -c '  start ' $L)" 1
 check "internal agent ignored"   "$(grep -c 'return' $L)" 0
 outn(){ python3 "$B" ledger --project $proj | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["outstanding"]))'; }
 check "one worker outstanding"   "$(outn)" 1
-check "running worker blocks"    "$(ev "$STOP" "$H/gate.sh")" 2
+# A worker still running in the background is the intended shape, not a
+# problem: the turn is meant to end and the lead re-invoked when it lands.
+check "an outstanding worker does not block the gate" "$(ev "$STOP" "$H/gate.sh")" 0
+check "  and it prints nothing"  "$(cat "$T/out")" ""
+python3 "$B" status --project $proj > "$T/statout" 2>&1
+grep -q 'workers still working' "$T/statout" && ok "  board.py status still lists it as working" || bad "  board.py status lists it as working"
 check "loop guard releases"      "$(ev "$LOOP" "$H/gate.sh")" 0
 ev "$R1" "$H/record.sh" >/dev/null
 check "return clears it"         "$(outn)" 0
@@ -119,7 +124,7 @@ SK="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
 grep -q '/teamlead help' "$SK" && ok "help is in the commands table" || bad "help is in the commands table"
 grep -q '## Help text' "$SK" && ok "help text block exists" || bad "help text block exists"
 # every command the help advertises must be real
-for c in "/teamlead plan" "/teamlead brainstorm" "/teamlead superdoc" "/teamlead status" "stop teamlead"; do
+for c in "/teamlead plan" "/teamlead brainstorm" "/teamlead superdoc" "/teamlead status" "/teamlead stop" "/teamlead board" "/teamlead plan continue"; do
   grep -q -- "$c" "$SK" || bad "help advertises '$c' but the skill does not define it"
 done
 ok "advertised commands all defined"
@@ -455,7 +460,18 @@ A='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}'
 ev "$A" "$H/mode.sh" >/dev/null
 [ -f .claude/teamlead/.state/active ] && ok "activation creates the flag" || bad "activation creates the flag"
 grep -q '^| ✓ | ID | Task |' .claude/teamlead/board.md && ok "board seeded as a table" || bad "board seeded as a table"
-S='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ok stop teamlead"}'
+NA='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"please act as a team lead"}'
+rm -rf "$proj/.claude"
+ev "$NA" "$H/mode.sh" >/dev/null
+[ -f .claude/teamlead/.state/active ] && bad "'please act as a team lead' activates" || ok "'please act as a team lead' does not activate"
+ev "$A" "$H/mode.sh" >/dev/null   # actually activate, so the deactivation checks below have a flag to remove
+N1='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ok stop teamlead"}'
+ev "$N1" "$H/mode.sh" >/dev/null
+[ -f .claude/teamlead/.state/active ] && ok "'ok stop teamlead' does not remove the flag" || bad "'ok stop teamlead' removed the flag"
+N2='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"switch to normal mode"}'
+ev "$N2" "$H/mode.sh" >/dev/null
+[ -f .claude/teamlead/.state/active ] && ok "'switch to normal mode' does not remove the flag" || bad "'switch to normal mode' removed the flag"
+S='{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead stop"}'
 ev "$S" "$H/mode.sh" >/dev/null
 [ -f .claude/teamlead/.state/active ] && bad "stop removes the flag" || ok "stop removes the flag"
 
@@ -492,7 +508,8 @@ check "after return, nothing outstanding" "$(ev "$STOP" "$H/gate.sh")" 0
 SM='{"hook_event_name":"PreToolUse","cwd":"'$proj'","tool_name":"SendMessage","tool_input":{"to":"w7","summary":"one correction"}}'
 ev "$SM" "$H/record.sh" >/dev/null
 grep -q '  resume    id=w7' $L && ok "resume recorded" || bad "resume recorded"
-check "resumed worker counts as outstanding" "$(ev "$STOP" "$H/gate.sh")" 2
+check "resumed worker counts as outstanding (ledger)" "$(outn)" 1
+check "  but does not block the gate — it is running in the background" "$(ev "$STOP" "$H/gate.sh")" 0
 R7='{"hook_event_name":"SubagentStop","cwd":"'$proj'","agent_type":"teamlead:tl-sonnet-high","agent_id":"w7","last_assistant_message":"fixed"}'
 ev "$R7" "$H/record.sh" >/dev/null
 check "its return clears the gate again" "$(ev "$STOP" "$H/gate.sh")" 0
@@ -507,7 +524,8 @@ printf '%s  dispatch  agent=tl-sonnet-low  desc=killed worker\n' "$old" > $L
 check "stale unreturned dispatch ages out" "$(ev "$STOP" "$H/gate.sh")" 0
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '%s  dispatch  agent=tl-sonnet-low  desc=live worker\n' "$now" > $L
-check "a just-dispatched worker (no start yet) still blocks" "$(ev "$STOP" "$H/gate.sh")" 2
+check "a just-dispatched worker (no start yet) does not block either" "$(ev "$STOP" "$H/gate.sh")" 0
+check "  it is pending in the ledger" "$(python3 "$B" ledger --project $proj | python3 -c 'import json,sys;print(json.load(sys.stdin)["pending"])')" 1
 printf '%s  start     agent=tl-sonnet-low  id=z1\n' "$now" >> $L
 check "once started, it is tracked by id not by pending" "$(python3 "$B" ledger --project $proj | python3 -c 'import json,sys;d=json.load(sys.stdin);print(str(len(d["outstanding"]))+","+str(d["pending"]))')" "1,0"
 rm -f $L
@@ -515,8 +533,8 @@ rm -f $L
 echo "== vocabulary is consistent: 'working', never 'out'/'running' =="
 NOW2=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '%s  start     agent=tl-sonnet-high  id=v1\n' "$NOW2" > $L
-ev "$STOP" "$H/gate.sh" >/dev/null
-grep -q 'worker(s) still working' "$T/out" && ok "gate says working" || bad "gate says working ($(cat $T/out))"
+check "an outstanding worker alone: gate exits 0" "$(ev "$STOP" "$H/gate.sh")" 0
+check "  and prints nothing" "$(cat "$T/out")" ""
 grep -qE 'worker\(s\) (still )?out\b' "$T/out" && bad "gate still says 'out'" || ok "gate no longer says 'out'"
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"hi"}' "$H/mode.sh" >/dev/null
 grep -q 'worker(s) working' "$T/out" && ok "per-turn line says working" || ok "per-turn line quiet (no open tasks)"
@@ -708,6 +726,232 @@ echo "== shipped docs satisfy their own linter =="
 # match the linter's. Extract it and compare headings directly.
 tpl=$(awk '/^## Goal$/{p=1} p&&/^## /{print}' "$PS2" | head -7 | sed 's/^## //')
 check "template section order matches the linter" "$tpl" "$(printf 'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nNotes from me')"
+
+# ==============================================================================
+# Phase-A mechanisms (plan-mode-improvements): D16 Go record, D16/D23 plan-fence,
+# board-fence's stage gate, gate.sh's plan-mode checks, board.py check_plan (D22),
+# state.sh/restore.sh (D14), and the skill text that documents them.
+# ==============================================================================
+
+echo "== mode.sh: a 'Go' is recorded against the plan's current stage (D16) =="
+gop=$T/gorec; mkdir -p $gop/.claude/teamlead/plan $gop/.claude/teamlead/.state
+: > $gop/.claude/teamlead/.state/active
+gopf=$gop/.claude/teamlead/plan/topic.md
+printf '# T\n\n> **Stage 3** — x\n' > $gopf
+echo "$gopf" > $gop/.claude/teamlead/.state/active-plan
+gosay(){ echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$gop'","prompt":"'"$1"'"}' | "$H/mode.sh" >/dev/null; }
+rm -f $gop/.claude/teamlead/.state/plan-go
+gosay "Go"
+check "'Go' appends one line to plan-go" "$(wc -l < $gop/.claude/teamlead/.state/plan-go)" 1
+grep -qE '^3 [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' $gop/.claude/teamlead/.state/plan-go \
+  && ok "  as '<stage> <ISO-8601 UTC>'" || bad "  line format"
+gosay " go "; gosay "GO"
+check "' go ' and 'GO' also count (trim + case-insensitive)" "$(wc -l < $gop/.claude/teamlead/.state/plan-go)" 3
+gosay "go ahead"
+check "'go ahead' does not count" "$(wc -l < $gop/.claude/teamlead/.state/plan-go)" 3
+rm -f $gop/.claude/teamlead/.state/active-plan $gop/.claude/teamlead/.state/plan-go
+gosay "Go"
+[ -f $gop/.claude/teamlead/.state/plan-go ] && bad "no active-plan: nothing written" || ok "no active-plan: nothing written"
+
+echo "== plan-fence.sh: guards the plan's own stage header and its 'Notes from me' (D16, D23) =="
+pfp=$T/pfence; mkdir -p $pfp/.claude/teamlead/plan $pfp/.claude/teamlead/.state
+: > $pfp/.claude/teamlead/.state/active
+pff=$pfp/.claude/teamlead/plan/topic.md
+pfedit(){ echo '{"hook_event_name":"PreToolUse","cwd":"'$pfp'","tool_name":"Edit","tool_input":{"file_path":"'$pff'","old_string":"'"$1"'","new_string":"'"$2"'"}}' | "$H/plan-fence.sh"; }
+pfdecide(){ [ -z "$1" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$1"; }
+
+printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\nkeep this\n' > $pff
+echo "$pff" > $pfp/.claude/teamlead/.state/active-plan
+rm -f $pfp/.claude/teamlead/.state/plan-go $pfp/.claude/teamlead/.state/plan-stage
+out=$(pfedit '**Stage 3**' '**Stage 4**')
+check "3->4 with no Go recorded: denied" "$(pfdecide "$out")" deny
+grep -q 'none recorded since the last stage change' <<<"$out" && ok "  names the missing Go" || bad "  names the missing Go"
+
+printf '3 2026-01-01T00:00:00Z\n' > $pfp/.claude/teamlead/.state/plan-go
+out=$(pfedit '**Stage 3**' '**Stage 4**')
+check "3->4 with a Go recorded since: allowed" "$(pfdecide "$out")" allow
+check "  plan-stage now starts with '4 '" "$(cut -d' ' -f1 $pfp/.claude/teamlead/.state/plan-stage)" 4
+
+# plan-fence never writes the file itself — only the real Edit/Write tool does —
+# so the on-disk header has to be moved to Stage 4 by hand before testing 4->5.
+printf '# T\n\n> **Stage 4** — x\n\n## Notes from me\n' > $pff
+out=$(pfedit '**Stage 4**' '**Stage 5**')
+check "4->5 on that same old Go: denied (plan-stage moved since)" "$(pfdecide "$out")" deny
+
+printf '5 2099-01-01T00:00:00Z\n' >> $pfp/.claude/teamlead/.state/plan-go
+out=$(pfedit '**Stage 4**' '**Stage 5**')
+check "4->5 with a fresh Go: allowed" "$(pfdecide "$out")" allow
+
+printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\n' > $pff
+rm -f $pfp/.claude/teamlead/.state/plan-stage
+out=$(pfedit '**Stage 3**' '**Stage 5**')
+check "3->5 in one edit: denied" "$(pfdecide "$out")" deny
+grep -q 'one stage at a time' <<<"$out" && ok "  names the reason" || bad "  names the reason"
+
+printf '# T\n\n> **Stage 5** — x\n\n## Notes from me\n' > $pff
+out=$(pfedit '**Stage 5**' '**Stage 4**')
+check "5->4 (backwards): allowed" "$(pfdecide "$out")" allow
+
+printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\nold line\n' > $pff
+out=$(pfedit 'old line' 'old line\nnew line')
+check "adding a line under '## Notes from me': denied" "$(pfdecide "$out")" deny
+grep -q "the user's section" <<<"$out" && ok "  names it as the user's section" || bad "  names it as the user's section"
+
+printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\nold line\nsecond line\n' > $pff
+out=$(pfedit 'old line\nsecond line' 'old line')
+check "removing a line under '## Notes from me': allowed" "$(pfdecide "$out")" allow
+
+pfother=$pfp/other.md; printf 'x\n' > $pfother
+out=$(echo '{"hook_event_name":"PreToolUse","cwd":"'$pfp'","tool_name":"Edit","tool_input":{"file_path":"'$pfother'","old_string":"x","new_string":"y"}}' | "$H/plan-fence.sh")
+check "Edit to a different file: no output" "$out" ""
+
+pffresh=$pfp/.claude/teamlead/plan/fresh.md; rm -f "$pffresh"
+echo "$pffresh" > $pfp/.claude/teamlead/.state/active-plan
+rm -f $pfp/.claude/teamlead/.state/plan-stage
+out=$(echo '{"hook_event_name":"PreToolUse","cwd":"'$pfp'","tool_name":"Write","tool_input":{"file_path":"'$pffresh'","content":"# T\n\n> **Stage 1** — x\n"}}' | "$H/plan-fence.sh")
+check "Write to a plan path that doesn't exist yet: allowed" "$out" ""
+grep -q '^1 ' $pfp/.claude/teamlead/.state/plan-stage && ok "  and seeds plan-stage" || bad "  and seeds plan-stage"
+
+echo "$pff" > $pfp/.claude/teamlead/.state/active-plan
+printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\n' > $pff
+out=$(pfedit 'not present anywhere' 'whatever')
+check "old_string not in the file: allow silently (parse failure = allow)" "$out" ""
+
+m=$(jq -r '.hooks.PreToolUse[] | select(.matcher=="Edit|Write|MultiEdit|NotebookEdit") | .hooks[].command' "$CLAUDE_PLUGIN_ROOT/hooks/hooks.json")
+grep -q 'plan-fence.sh' <<<"$m" && ok "  hooks.json wires plan-fence.sh under Edit|Write|MultiEdit|NotebookEdit" || bad "  hooks.json wires plan-fence.sh"
+
+echo "== board-fence.sh: board_add is also gated by the plan's stage =="
+bfp=$T/bfence; mkdir -p $bfp/.claude/teamlead/plan $bfp/.claude/teamlead/.state
+bff=$bfp/.claude/teamlead/plan/topic.md
+echo "$bff" > $bfp/.claude/teamlead/.state/active-plan
+RB=mcp__plugin_teamlead_teamlead-board
+bfdecide(){ out=$(echo "$1" | "$H/board-fence.sh"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
+
+printf '# T\n\n> **Stage 3** — x\n' > $bff
+check "board_add while the plan is at stage 3: denied" \
+  "$(bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_add","tool_input":{}}')" deny
+
+printf '# T\n\n> **Stage 5** — x\n' > $bff
+check "board_add once the plan reaches stage 5: allowed" \
+  "$(bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_add","tool_input":{}}')" allow
+
+printf '# T\n\n> **Stage 3** — x\n' > $bff
+check "board_update at stage 3: allowed (closing pre-existing work stays open)" \
+  "$(bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_update","tool_input":{}}')" allow
+
+printf '# T\n\n> **Stage 5** — x\n' > $bff
+check "a worker's board_add at stage 5: still refused (worker, not stage)" \
+  "$(bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_add","tool_input":{},"agent_id":"w1"}')" deny
+
+echo "== gate.sh: plan-mode checks — footer, plan-lint, stage 5->6, returned (D1, D9) =="
+gtp=$T/gtgate; mkdir -p $gtp/.claude/teamlead/plan $gtp/.claude/teamlead/.state
+: > $gtp/.claude/teamlead/.state/active
+gtf=$gtp/.claude/teamlead/plan/topic.md
+echo "$gtf" > $gtp/.claude/teamlead/.state/active-plan
+git -C $gtp init -q; git -C $gtp config user.email t@t.t; git -C $gtp config user.name t
+echo a > $gtp/a.txt; git -C $gtp add -A >/dev/null; git -C $gtp commit -qm init >/dev/null
+gtmktx(){ printf '{"type":"user","message":{"content":"hi"}}\n' > "$1"
+  python3 -c 'import json,sys;print(json.dumps({"type":"assistant","message":{"content":[{"type":"text","text":sys.argv[1]}]}}))' "$2" >> "$1"; }
+gtev(){ echo "$1" | "$H/gate.sh" >"$T/gtout" 2>&1; echo $?; }
+
+printf '# T\n\n> **Stage 3** — x\n' > $gtf
+gttx1=$gtp/tx1.jsonl; gtmktx "$gttx1" $'body\n\nType "Go" if you want me to plan the implementation.'
+check "stage 3, footer present: exit 0" \
+  "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false,"transcript_path":"'$gttx1'"}')" 0
+
+gttx2=$gtp/tx2.jsonl; gtmktx "$gttx2" $'body\n\nType "Go" if you want me to start implementing.'
+check "stage 3, last line is the stage-4 footer instead: exit 2" \
+  "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false,"transcript_path":"'$gttx2'"}')" 2
+grep -q 'Type "Go" if you want me to plan the implementation.' "$T/gtout" && ok "  names the stage-3 footer it wanted" || bad "  names the wanted footer"
+
+printf '# T\n\n> **Stage 4** — x\n\n## Goal\nTBD\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' > $gtf
+check "stage 4, a plan that fails plan-lint: exit 2" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 2
+grep -q 'TBD' "$T/gtout" && ok "  surfaces the TBD finding" || bad "  surfaces the TBD finding"
+grep -q "no criteria under 'Done when'" "$T/gtout" && ok "  and the missing Done-when" || bad "  and the missing Done-when"
+
+printf '# T\n\n> **Stage 5** — x\n' > $gtf
+python3 "$B" add --project $gtp --task "w" --agent tl-sonnet-low --owns src/x >/dev/null
+python3 "$B" update --project $gtp --id 1 --state merged >/dev/null
+check "stage 5, the only board task is merged: exit 2" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 2
+grep -q 'Stage 6' "$T/gtout" && ok "  tells it to set the header to Stage 6" || bad "  names Stage 6"
+
+python3 "$B" add --project $gtp --task "w2" --agent tl-sonnet-low --owns src/y >/dev/null
+python3 "$B" update --project $gtp --id 2 --state returned >/dev/null
+check "a task sitting in 'returned': exit 2" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 2
+grep -q 'returned' "$T/gtout" && ok "  names it" || bad "  names it"
+
+python3 "$B" update --project $gtp --id 2 --state merged >/dev/null
+printf '# T\n\n> **Stage 3** — x\n' > $gtf
+check "no transcript_path: footer check skipped, exit 0" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 0
+
+echo "== board.py check_plan: the wave table's CURRENT phase must be on the board (D22) =="
+cpp=$T/cplan; mkdir -p $cpp/.claude/teamlead/plan $cpp/.claude/teamlead/.state
+git -C $cpp init -q; git -C $cpp config user.email t@t.t; git -C $cpp config user.name t
+echo a > $cpp/a.txt; git -C $cpp add -A >/dev/null; git -C $cpp commit -qm init >/dev/null
+cpf=$cpp/.claude/teamlead/plan/topic.md
+echo "$cpf" > $cpp/.claude/teamlead/.state/active-plan
+printf '# T\n\n> **Stage 5** — x\n\n## Implementation plan\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| — | **A** | **First** | | | |\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n| 2 | I2 | do2 — **D1** | `tl-sonnet-low` | src/b | — |\n| — | **B** | **Second** | | | |\n| 3 | I3 | do3 — **D1** | `tl-sonnet-low` | src/c | — |\n' > $cpf
+cpchk(){ python3 "$B" check --project $cpp >"$T/cpout" 2>&1; echo $?; }
+check "empty board: check fails" "$(cpchk)" 1
+grep -q 'plan step I1 has no board task' "$T/cpout" && ok "  names I1" || bad "  names I1"
+grep -q 'I2 has no board task' "$T/cpout" && ok "  and I2" || bad "  and I2"
+grep -q 'I3' "$T/cpout" && bad "  should not name I3 (a later phase)" || ok "  does not name I3 (a later phase)"
+python3 "$B" add --project $cpp --task "do" --agent tl-sonnet-low --owns src/a --plan I1 >/dev/null
+check "with I1 on the board: only I2 remains" "$(cpchk)" 1
+grep -q 'I1 has no board task' "$T/cpout" && bad "  I1 still named" || ok "  I1 no longer named"
+grep -q 'I2 has no board task' "$T/cpout" && ok "  I2 still named" || bad "  I2 still named"
+python3 "$B" add --project $cpp --task "do2" --agent tl-sonnet-low --owns src/b --plan I2 >/dev/null
+check "with I1 and I2 both on the board: clean" "$(cpchk)" 0
+sed -i 's/Stage 5/Stage 3/' $cpf
+check "header below stage 5: clean regardless of the board" "$(cpchk)" 0
+sed -i 's/Stage 3/Stage 5/' $cpf
+rm -f $cpp/.claude/teamlead/.state/board.json
+python3 "$B" add --project $cpp --task "do" --agent tl-sonnet-low --owns src/a --plan I1 >/dev/null
+python3 "$B" status --project $cpp > "$T/cpstatus" 2>&1
+grep -q 'I2 has no board task' "$T/cpstatus" && ok "  'status' prints the same problem text" || bad "  status prints the problem"
+
+echo "== state.sh: stage/go/watcher status block (D14) =="
+stp=$T/state1; mkdir -p $stp/.claude/teamlead/plan $stp/.claude/teamlead/.state
+git -C $stp init -q; git -C $stp config user.email t@t.t; git -C $stp config user.name t
+echo a > $stp/a.txt; git -C $stp add -A >/dev/null; git -C $stp commit -qm init >/dev/null
+stf=$stp/.claude/teamlead/plan/topic.md
+echo "$stf" > $stp/.claude/teamlead/.state/active-plan
+
+printf '# T\n\n> **Stage 3** — x\n' > $stf
+stout=$("$H/state.sh" "$stp")
+grep -q 'stage: 3 — working it out' <<<"$stout" && ok "names the stage and its label" || bad "names the stage and its label"
+grep -q 'go: none recorded' <<<"$stout" && ok "  no Go recorded" || bad "  no Go recorded"
+grep -q 'watcher: NOT running — restart it:' <<<"$stout" && ok "  says the watcher is not running" || bad "  watcher not running"
+grep -q 'watch-plan.sh' <<<"$stout" && ok "    and names watch-plan.sh" || bad "    names watch-plan.sh"
+
+printf '3 2026-01-01T00:00:00Z\n' > $stp/.claude/teamlead/.state/plan-go
+stout=$("$H/state.sh" "$stp")
+grep -q 'go: recorded at' <<<"$stout" && ok "a recorded Go is shown" || bad "a recorded Go is shown"
+grep -q 'already said Go' <<<"$stout" && ok "  and folded into the next: line" || bad "  folded into next:"
+
+printf '# T\n\n> **Stage 5** — x\n' > $stf
+stout=$("$H/state.sh" "$stp")
+grep -q 'watcher: off (stages 5-7)' <<<"$stout" && ok "stage 5: watcher reported off" || bad "watcher off"
+grep -q '^  next:' <<<"$stout" && ok "  and still has a next: line" || bad "  next: line"
+
+echo "== restore.sh: flags a plan left mid-flight after /clear =="
+: > $stp/.claude/teamlead/.state/active
+printf '# T\n\n> **Stage 6** — x\n' > $stf
+rsout=$(echo '{"hook_event_name":"SessionStart","source":"clear","cwd":"'$stp'"}' | "$H/restore.sh")
+grep -q 'Session was cleared mid-plan' <<<"$rsout" && ok "stage 6: flags the clear" || bad "stage 6: flags the clear"
+printf '# T\n\n> **Stage 3** — x\n' > $stf
+rsout=$(echo '{"hook_event_name":"SessionStart","source":"clear","cwd":"'$stp'"}' | "$H/restore.sh")
+grep -q 'Session was cleared mid-plan' <<<"$rsout" && bad "stage 3: should not flag the clear" || ok "stage 3: does not flag the clear"
+
+echo "== skill text reflects the phase-A changes =="
+grep -q 'stop teamlead' "$SK" && bad "teamlead/SKILL.md still says 'stop teamlead'" || ok "teamlead/SKILL.md no longer says 'stop teamlead'"
+grep -q 'normal mode' "$SK" && bad "teamlead/SKILL.md still mentions 'normal mode'" || ok "teamlead/SKILL.md no longer mentions 'normal mode'"
+grep -q 'Stage 7' "$SK" && ok "  and it documents Stage 7" || bad "  documents Stage 7"
+grep -q 'plan continue' "$PS2" && ok "teamlead-plan/SKILL.md documents 'plan continue'" || bad "documents plan continue"
+grep -q 'plan-go' "$PS2" && ok "  and plan-go" || bad "  and plan-go"
+grep -q 'Edit/Write' "$PS2" && ok "  and the Edit/Write requirement" || bad "  and Edit/Write"
+grep -qF 'To build this on a fresh context: `/clear`, then `/teamlead plan continue`.' "$PS2" \
+  && ok "  the byte-exact handoff line" || bad "  byte-exact handoff line"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
