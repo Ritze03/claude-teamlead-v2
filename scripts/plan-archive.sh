@@ -8,6 +8,7 @@
 # Refuses a plan with unticked 'Done when' boxes: "confirm before retiring" is the
 # whole point, and a rule that lives only in the skill text erodes. --abandon is the
 # way out for a plan that was dropped rather than finished, and says so in the name.
+# --abandon also runs `board.py forget` to close out any workers still outstanding.
 set -uo pipefail
 plan="${1:-}"; shift || true
 proj="$PWD"; abandon=""
@@ -26,6 +27,17 @@ fi
 state="$proj/.claude/teamlead/.state"
 dest="$proj/.claude/teamlead/plan/done"
 mkdir -p "$dest"
+
+# An abandoned plan usually has workers still out, and a killed worker never
+# reports back — this is the one place the cancel step belongs. `forget` with
+# no id closes out every outstanding worker; it only appends `cancel` events
+# to the ledger, never edits history, so it is safe even when nothing is
+# outstanding.
+if [ -n "$abandon" ]; then
+  fout=$(python3 "$(dirname "$0")/board.py" forget --project "$proj" 2>&1) \
+    || echo "plan-archive: board.py forget failed (continuing with archive)" >&2
+  printf '%s\n' "$fout"
+fi
 
 # A finished plan has every box ticked. Unticked ones mean the confirmation step
 # never happened — which is exactly when a plan gets quietly filed away and the

@@ -36,10 +36,16 @@ tl_pin_root() {
 # never gets it.
 tl_ensure_gitignore() {
   git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-  local gi="$TL_PROJECT/.gitignore" pat
-  for pat in ".claude/teamlead/.state/" ".claude/teamlead/board.md"; do
-    grep -qxF "$pat" "$gi" 2>/dev/null || printf '%s\n' "$pat" >> "$gi"
-  done
+  local gi="$TL_PROJECT/.gitignore"
+  # Ignore the whole teamlead directory, not just the runtime bits: a plan is
+  # one person's working state, and a worker that finds a half-made plan
+  # sitting in its worktree reads it as instructions.
+  if [ -f "$gi" ]; then
+    local tmp="$gi.tmp.$$"
+    grep -vxF -e ".claude/teamlead/.state/" -e ".claude/teamlead/board.md" "$gi" > "$tmp" 2>/dev/null
+    mv "$tmp" "$gi"
+  fi
+  grep -qxF ".claude/teamlead/" "$gi" 2>/dev/null || printf '%s\n' ".claude/teamlead/" >> "$gi"
 }
 
 tl_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
