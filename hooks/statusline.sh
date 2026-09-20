@@ -38,7 +38,7 @@ ap="$d/.state/active-plan"
 if [ -f "$ap" ]; then
   pf=$(cat "$ap" 2>/dev/null)
   if [ -n "$pf" ] && [ -f "$pf" ]; then
-    hdr=$(grep -m1 -E '^> \*\*Stage [0-9]+\*\*' "$pf" 2>/dev/null)
+    hdr=$(grep -m1 -i -E '^> \*\*Stage [0-9]+\*\*' "$pf" 2>/dev/null)
     stage=$(printf '%s' "$hdr" | grep -oE '[0-9]+' | head -1)
     # No upper cutoff: the plan stays active through building and both testing
     # stages. Dropping it at stage 5 is what used to leave the session dangling —
@@ -49,17 +49,17 @@ if [ -f "$ap" ]; then
       # disagree — a stage bumped without rewording leaves a stale description —
       # and the number is the structured half.
       case "$stage" in
-        1) desc="picking the topic" ;;
-        2) desc="open it in your editor" ;;
-        3) desc="working it out" ;;
-        4) desc="implementation plan" ;;
-        5) desc="building it" ;;
-        6) desc="verifying" ;;
-        7) desc="your turn to test" ;;
+        1) em="💬"; desc="picking the topic" ;;
+        2) em="📄"; desc="open it in your editor" ;;
+        3) em="📝"; desc="working it out" ;;
+        4) em="📋"; desc="implementation plan" ;;
+        5) em="🔨"; desc="building it" ;;
+        6) em="🧪"; desc="verifying" ;;
+        7) em="🙋"; desc="your turn to test" ;;
       esac
       # "Planning" only reads right for the first four; after that the plan is
       # being executed and checked, and the label should say so.
-      [ "$stage" -le 4 ] && what="📄 Planning" || what="📄 Plan"
+      [ "$stage" -le 4 ] && what="$em Planning" || what="$em Plan"
       seg+=" $(c $PLUM "$what: $(basename "$pf" .md) · stage $stage/7 $desc")"
       # 👀 = your edits will actually be picked up right now. The watcher stops
       # while the agent holds control, so its absence is real information.
