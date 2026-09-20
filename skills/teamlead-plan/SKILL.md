@@ -120,6 +120,10 @@ Before asking the user anything, dispatch scouts to gather what the repo can
 answer. Findings go in `## Context`. Research first, questions second — never ask
 what you could have looked up.
 
+The scout reports facts — file:line, what exists, what is already enforced and
+where — never improvement proposals or a change list. Those come only from a
+brainstorm the user actually asked for (see *Brainstorm request*, below).
+
 The scout runs **after** the path is on screen, never before it (see *Order inside
 the first turn*). An empty repo is not a reason to skip scouting — scout the
 machine instead: language runtimes, build tools, what is actually installed. That
@@ -142,6 +146,11 @@ their work.
   `cp <plan> <project>/.claude/teamlead/.state/snap/<file>`
 - If the file changed since you last read it, they edited it — **merge first**.
   The watcher is convenience; this check is correctness.
+- **Collapse blank runs after every write.** Striking a question into
+  `### Answered` or removing a folded note leaves empty lines behind, and
+  `plan-lint` fails on two or more consecutive blank lines anywhere in the file.
+  A `cat -s`-style squeeze (or a `re.sub(r'\n{3,}', '\n\n', text)`) right before
+  you save is enough — do it every time, not just when lint catches it.
 
 **The clobber.** The user's editor can save from a stale buffer and silently
 revert a line you added seconds earlier — the watcher's diff then shows a `-`
@@ -164,7 +173,15 @@ it the longest `timeout_ms` allowed (1800000) and re-arm on expiry; there is no
 $(cat .claude/teamlead/.state/plugin-root)/hooks/watch-plan.sh "$PWD" <plan-file>
 ```
 
-Each save emits a diff plus any lint failures.
+Each save emits a diff plus any lint failures. It needs `inotifywait`
+(inotify-tools, Linux only). If the watcher can't start for that reason, there is
+no watcher — re-read the plan file before every write instead, and tell the user
+their edits are picked up on their next message rather than live.
+
+Starting it while one is already running is safe: the script kills the previous
+watcher itself, so there is never more than one instance. That is also how you
+re-arm it — the Monitor tool expires after ~30 minutes, and re-arming is just
+starting `watch-plan.sh` again.
 
 **Record the Monitor's task id** to `.claude/teamlead/.state/plan-watch` as soon as
 you start it, so you can still stop it after a compaction has wiped your memory of
@@ -238,6 +255,9 @@ Constraints, what exists, what must not break. Scout findings land here.
 ### Answered
 - ~~Old question~~ → answer → **D1**
 
+## Brainstorm request
+Initial brainstorm [y/N]: 
+
 ## Notes from me
 Theirs to write. You only ever remove a line once it is folded into a Decision.
 ```
@@ -246,20 +266,34 @@ Theirs to write. You only ever remove a line once it is folded into a Decision.
 the file with the other five sections only, and insert both *above* `## Open
 questions` when you write them.
 
-**Why there.** The last two sections are the user's half of the file — the only ones
-they type into. They stay at the bottom, where they are quick to scroll to and easy
-to append to, with nothing large growing underneath them. A wave table parked below
-the boxes they are typing in pushes their half of the file out of reach, and an empty
+**Why there.** The last three sections — `Open questions`, `Brainstorm request`,
+`Notes from me` — are the user's half of the file, the only ones they type into.
+They stay at the bottom, where they are quick to scroll to and easy to append to,
+with nothing large growing underneath them. A wave table parked below the boxes
+they are typing in pushes their half of the file out of reach, and an empty
 stage-4 header sitting there from stage 2 is worse: it is a placeholder in their way
 for the entire time they are actually writing.
 
 **Same wave = runs in parallel.** No prose annotations like *"parallel with I2"* —
 a dependency column plus a prose note is two sources of truth that can disagree.
+The table may also group waves under phase rows for a large plan — see *Phases
+split a big plan*, below — but that is the exception; most plans are one phase
+and this table as shown.
 
 **`Owns` is the load-bearing column**: the write scope handed verbatim to the
 worker. Without it "parallel" is an assertion, not a proof — two steps both
 writing `api/routes/` is the one-writer-per-file violation everything rests on
 avoiding. Read-only steps own nothing and are always safe to fan out.
+
+**`## Brainstorm request` starts with one line**, written at stage 2 alongside the
+other sections: `Initial brainstorm [y/N]: `. If it is still unanswered by the
+time the stage-3 questions are posted, drop the line and leave the section
+empty — the offer lapses, not the section. It stays available for the rest of
+planning: writing `initial brainstorm` under it at any later stage runs a full
+brainstorm over the plan as it stands then, exactly as answering `y` would have;
+anything else written there is a focused brainstorm on that topic instead.
+`plan-lint` treats the section as optional but requires it empty by stage 5 — run
+it or clear it (see *Brainstorm request*, below, for what running one does).
 
 Leave each question a `> me: ` line to answer on — **with one trailing space**, so
 the cursor lands in the right place when the user clicks at the end of it. Write it
@@ -289,6 +323,24 @@ think?"* — a whole round trip to get to where you should have started.
 This is a suggestion, not a decision. Do not write it into `## Decisions` and carry
 on as though it were answered — it stays an open question until they answer it.
 
+## Brainstorm request
+
+A brainstorm is asked for two ways: in chat ("brainstorm the caching approach") or
+by writing under `## Brainstorm request` in the file — `initial brainstorm` for a
+full pass over the plan, anything else for a focused one on that topic. It is a
+stage-3/4 feature; there is nothing worth brainstorming before `## Context` and
+`## Decisions` exist.
+
+Ask one or two clarifying questions in chat first if the topic is ambiguous, then
+dispatch read-only agents (`tl-sonnet-medium`, no worktree — they never edit the
+plan) over the plan file. Brief them to hand back suggestions already in the
+open-question format: each a `- ` item with `*Suggest:*` / `*Or:*` and one empty
+`> me: ` line. That is what lets you merge their output straight into
+`## Open questions` without rewriting it, then clear `## Brainstorm request`.
+
+This is lighter than the `/teamlead brainstorm` skill — one round, read-only,
+scoped to this plan file, not the multi-round general-purpose mode.
+
 ## Decide "done" once the decisions are made
 
 `## Done when` is written at **stage 4**, with the implementation plan and from the
@@ -312,17 +364,49 @@ criterion you marked `agent` is one they want to look at themselves.
 mechanically, marking it `agent` does not make it verified — it makes the
 verification a guess with a tick next to it. Say `user` and let it wait.
 
+## Phases split a big plan
+
+The wave table can group waves under phase rows when the user asks for it, or
+when the changes are unrelated enough that one big table would push all testing
+to the very end:
+
+```markdown
+| Wave | ID | Task | Agent | Owns | After |
+|:----:|:--:|------|-------|------|-------|
+| — | **A** | **Bold phase title** | | | |
+| 1 | I1 | … | `tl-sonnet-medium` | *(read-only)* | — |
+| — | **B** | **Next phase title** | | | |
+| 2 | I2 | … | `tl-sonnet-high` | `src/x/` | I1 |
+```
+
+A phase row carries no wave number, agent, `Owns` or `After` — it only labels.
+Waves keep numbering across the whole table; they do not restart per phase.
+`## Done when` items may carry the same grouping, a bold `**Phase A — …**` line
+above the criteria it covers. `plan-lint` ignores phase rows entirely in its
+dependency and `Owns` checks — they carry nothing to validate.
+
+With phases, stages 5→6→7 run **per phase**: phase A's tasks merge, get
+agent-tested, get user-tested, and only then does the header return to stage 5
+for phase B. Say which phase in the header's body line —
+`> **Stage 5** — building phase B (I9–I14) · started <date>` — so the status
+line and a resumed session both know where you are. `board.py check` only
+requires the *current* phase's `I<n>` rows on the board — it finds the current
+phase by which one already has a step there, so nothing complains that phase C
+hasn't been added yet.
+
 ## Stage 6 — Agent-Testing
 
 When the board is empty and every implementation step has merged, set the header to
 `> **Stage 6**` and work the `verified by: agent` list:
 
-1. **Really run them.** A command, a request, a test — actually execute it. Do not
-   reason about whether it would pass; a criterion you argued your way through is
-   not verified, and the whole point of splitting `agent` from `user` was to make
-   this half mechanical.
-2. **Tick each box** in `## Done when` and report the evidence next to it — the
-   command and its output, not "confirmed".
+1. **Really run them.** Dispatch the runs to a worker like any other work — a
+   command, a request, a test, actually executed, not reasoned about. A criterion
+   you argued your way through is not verified, and the whole point of splitting
+   `agent` from `user` was to make this half mechanical.
+2. **Tick each box from the worker's report**, and record how, on the same line:
+   `` - [x] <criterion> — *verified by: agent* — ran `cmd` → result ``. `plan-lint`
+   at stage ≥ 6, and `plan-archive.sh`, both reject a ticked agent item with no
+   `` ran `...` `` on it — a bare `[x]` is indistinguishable from a guess.
 3. **A failure is a task, not a caveat.** Put it back on the board, return to stage
    5, and come back. Do not carry a broken criterion forward as a footnote.
 
