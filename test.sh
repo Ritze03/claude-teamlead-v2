@@ -347,7 +347,7 @@ run --combined >/dev/null; grep -q '^# mine' $ic/statusline.sh && ok "refuses to
 echo "== done-when criteria and archiving =="
 # $2 is the whole '## Done when' section, or '' for a plan that has not reached
 # stage 4 yet — it and the wave table are written together, from settled decisions.
-mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n%b\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/dw.md"
+mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n%b\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" | cat -s > "$T/dw.md"
   dh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/dw.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$dh/" "$T/dw.md"; "$PL" "$T/dw.md" >"$T/dwout" 2>&1; echo $?; }
 check "criteria with verifiers pass" "$(mkdw 4 '## Done when\n- [x] tests pass — *verified by: agent*\n')" 0
@@ -593,6 +593,7 @@ $2
 
 ## Notes from me
 PEOF
+cat -s "$T/pl.md" > "$T/pl.md.sq" && mv "$T/pl.md.sq" "$T/pl.md"
 "$PL" "$T/pl.md" >"$T/plout" 2>&1; echo $?; }
 TBL='*Built from D1 · decisions:XX*
 
@@ -640,20 +641,28 @@ n=$(wc -l < $rl)
 rm -f $rl $proj/.claude/teamlead/.state/events.archive.log
 
 echo "== runtime state is gitignored =="
+# tl_ensure_gitignore now writes one blanket line, '.claude/teamlead/', and
+# migrates away the two old, narrower lines it used to write.
 rm -rf $proj/.claude $proj/.gitignore
+printf 'node_modules/\n' > $proj/.gitignore
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
-grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "state dir ignored" || bad "state dir ignored"
-grep -qxF '.claude/teamlead/board.md' $proj/.gitignore && ok "board.md ignored" || bad "board.md ignored"
+check "state dir ignored" "$(grep -cxF '.claude/teamlead/' $proj/.gitignore)" 1
+check "board.md ignored" "$(git -C $proj check-ignore -q .claude/teamlead/board.md; echo $?)" 0
+grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && bad "  old state-dir line still present" || ok "  old state-dir line removed"
+grep -qxF '.claude/teamlead/board.md' $proj/.gitignore && bad "  old board.md line still present" || ok "  old board.md line removed"
+grep -qxF 'node_modules/' $proj/.gitignore && ok "  a pre-existing line is preserved" || bad "  a pre-existing line is preserved"
 before=$(wc -l < $proj/.gitignore)
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
 check "not duplicated on re-activation" "$(wc -l < $proj/.gitignore)" "$before"
-# A project activated by an older version has the flag but no gitignore entries.
+# A project activated by an older version has the flag but the OLD two-line form.
 rm -f $proj/.gitignore
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > $proj/.gitignore
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
-grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "backfilled on an ordinary turn" || bad "backfilled on an ordinary turn"
+check "backfilled on an ordinary turn" "$(grep -cxF '.claude/teamlead/' $proj/.gitignore)" 1
+grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && bad "  and migrates the old lines away" || ok "  and migrates the old lines away"
 rm -f $proj/.gitignore
 ev '{"hook_event_name":"SessionStart","cwd":"'$proj'","source":"startup"}' "$H/restore.sh" >/dev/null
-grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && ok "backfilled on session restore" || bad "backfilled on session restore"
+check "backfilled on session restore" "$(grep -cxF '.claude/teamlead/' $proj/.gitignore)" 1
 
 echo "== routing resolution =="
 mkdir -p .claude/teamlead
@@ -665,7 +674,7 @@ grep -q 'Vision.*tl-opus-medium' <<<"$r" && ok "vision survives opus:never + xlo
 grep -q 'Never tl-opus-high for vision' <<<"$r" && ok "vision capped below high" || bad "vision capped below high"
 
 echo "== a question carries the lead's recommendation =="
-mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" > "$T/q.md"
+mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" | cat -s > "$T/q.md"
   "$PL" "$T/q.md" >"$T/qout" 2>&1; echo $?; }
 check "a bare question fails" "$(mkq '1. Per key or per IP?\n   > me: ')" 1
 grep -q 'Your call' "$T/qout" && ok "  offers the honest opt-out" || bad "  offers the opt-out"
@@ -703,7 +712,7 @@ grep -q 'do not exist until stage 4' "$PS2" && ok "  the skill says when they ap
 echo "== the plan stays finished through stages 5-7 =="
 # Keying the finished-plan checks on "== 4" would let every one of them slide the
 # moment the header ticked over to building.
-mkst(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:SS*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%b\n\n### Answered\n\n## Notes from me\n%b\n' "$1" "$2" "$3" > "$T/st.md"
+mkst(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:SS*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%b\n\n### Answered\n\n## Notes from me\n%b\n' "$1" "$2" "$3" | cat -s > "$T/st.md"
   sh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/st.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:SS/decisions:$sh/" "$T/st.md"; "$PL" "$T/st.md" >"$T/stout" 2>&1; echo $?; }
 for n in 4 5 6 7; do
@@ -723,9 +732,14 @@ echo "== shipped docs satisfy their own linter =="
 "$PL" "$CLAUDE_PLUGIN_ROOT/docs/example-plan.md" >/dev/null 2>&1 \
   && ok "example-plan.md passes plan-lint" || bad "example-plan.md passes plan-lint"
 # The skill's template is what every new plan starts as, so its section order must
-# match the linter's. Extract it and compare headings directly.
-tpl=$(awk '/^## Goal$/{p=1} p&&/^## /{print}' "$PS2" | head -7 | sed 's/^## //')
-check "template section order matches the linter" "$tpl" "$(printf 'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nNotes from me')"
+# match the linter's. Extract it and compare headings directly — derived from
+# plan-lint.sh's own canon= line so the two cannot silently drift apart again.
+cline=$(grep -m1 '^canon=' "$PL")
+ccontent="${cline#canon=\$\'}"; ccontent="${ccontent%\'}"
+canon_expected=$(printf '%b' "$ccontent")
+ccount=$(grep -c '^' <<<"$canon_expected")
+tpl=$(awk '/^## Goal$/{p=1} p&&/^## /{print}' "$PS2" | head -n "$ccount" | sed 's/^## //')
+check "template section order matches the linter" "$tpl" "$canon_expected"
 
 # ==============================================================================
 # Phase-A mechanisms (plan-mode-improvements): D16 Go record, D16/D23 plan-fence,
@@ -952,6 +966,175 @@ grep -q 'plan-go' "$PS2" && ok "  and plan-go" || bad "  and plan-go"
 grep -q 'Edit/Write' "$PS2" && ok "  and the Edit/Write requirement" || bad "  and Edit/Write"
 grep -qF 'To build this on a fresh context: `/clear`, then `/teamlead plan continue`.' "$PS2" \
   && ok "  the byte-exact handoff line" || bad "  byte-exact handoff line"
+
+# ==============================================================================
+# Phase-B mechanisms: plan-lint's Owns-overlap/placeholder/blank-line/tick-evidence/
+# Brainstorm-request/phase-row rules (I9), watch-plan.sh's single inotifywait (I10),
+# statusline.sh's case-insensitive stage header (I11), plan-archive.sh --abandon
+# closing out the ledger (I12), and the skill text documenting all of it (I13).
+# ==============================================================================
+
+echo "== plan-lint (I9): Owns prefix overlap in the same wave (D21) =="
+# $1 = the two (or more) table rows, real newlines via %b. Wraps them in a full,
+# otherwise-valid stage-4 plan so only the overlap check is under test.
+mkrows(){ printf '# T\n\n> **Stage 4** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$T/rows.md"
+  rh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/rows.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$rh/" "$T/rows.md"; "$PL" "$T/rows.md" >"$T/rowsout" 2>&1; echo $?; }
+check "a directory prefix overlapping a file under it, same wave: fails" \
+  "$(mkrows '| 1 | I1 | do — **D1** | `tl-sonnet-low` | hooks/ | — |\n| 1 | I2 | do2 — **D1** | `tl-sonnet-low` | hooks/gate.sh | — |')" 1
+grep -q 'Owns overlaps in the same wave' "$T/rowsout" && ok "  names the overlap" || bad "  names the overlap"
+grep -q 'I1 and I2' "$T/rowsout" && ok "  names both ids" || bad "  names both ids"
+check "backticked, comma-separated Owns cells overlap too" \
+  "$(mkrows '| 1 | I1 | do — **D1** | `tl-sonnet-low` | `hooks/a.sh`, `hooks/b.sh` | — |\n| 1 | I2 | do2 — **D1** | `tl-sonnet-low` | `hooks/b.sh` | — |')" 1
+check "the same overlap across different waves is fine" \
+  "$(mkrows '| 1 | I1 | do — **D1** | `tl-sonnet-low` | hooks/ | — |\n| 2 | I2 | do2 — **D1** | `tl-sonnet-low` | hooks/gate.sh | I1 |')" 0
+check "an exact duplicate Owns path in the same wave still fails" \
+  "$(mkrows '| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a.py | — |\n| 1 | I2 | do2 — **D1** | `tl-sonnet-low` | src/a.py | — |')" 1
+
+echo "== plan-lint (I9): placeholder marker (TBD) is scoped to '## Goal' =="
+mktbd(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\n%s\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%s\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/tbd.md"
+  th=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/tbd.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$th/" "$T/tbd.md"; "$PL" "$T/tbd.md" >"$T/tbdout" 2>&1; echo $?; }
+check "TBD inside '## Goal' at stage 5 fails" \
+  "$(mktbd 'TBD: decide later' '| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |')" 1
+grep -q 'placeholder marker (TBD)' "$T/tbdout" && ok "  names it" || bad "  names it"
+check "TBD only in a wave-table row does not trip it" \
+  "$(mktbd 'G' '| 1 | I1 | fix the TBD bug — **D1** | `tl-sonnet-low` | src/a | — |')" 0
+
+echo "== plan-lint (I9): two-or-more blank lines (D17) =="
+mkblank(){ printf '%b' "$1" > "$T/bl.md"; "$PL" "$T/bl.md" >"$T/blout" 2>&1; echo $?; }
+BLANKBAD='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n'
+BLANKGOOD='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n'
+check "two consecutive blank lines fail" "$(mkblank "$BLANKBAD")" 1
+grep -qE 'two or more consecutive blank lines \(first at line [0-9]+\)' "$T/blout" && ok "  names the line" || bad "  names the line"
+check "a single blank line is fine" "$(mkblank "$BLANKGOOD")" 0
+
+echo "== plan-lint (I9): D10 tick evidence at stage >= 6 =="
+mkevid(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n%b\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/ev.md"
+  eh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/ev.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$eh/" "$T/ev.md"; "$PL" "$T/ev.md" >"$T/evout" 2>&1; echo $?; }
+check "stage 6, ticked agent item with no 'ran \`...\`': fails" "$(mkevid 6 '- [x] ok — *verified by: agent*')" 1
+grep -q 'ticked agent item has no evidence' "$T/evout" && ok "  names it" || bad "  names it"
+check "stage 6, with 'ran \`...\`' evidence: ok" "$(mkevid 6 '- [x] ok — *verified by: agent* — ran `x` → ok')" 0
+check "stage 5, no evidence: ok (rule only applies from stage 6)" "$(mkevid 5 '- [x] ok — *verified by: agent*')" 0
+check "stage 6, ticked *verified by: user*, no evidence needed: ok" "$(mkevid 6 '- [x] ok — *verified by: user*')" 0
+
+echo "== plan-lint (I9): 'Brainstorm request' must be run or cleared by stage 5 (D12) =="
+# $2 = the section's own content, including its own trailing blank line when
+# non-empty (empty string when it should read as cleared).
+mkbrn(){ if [ "${3:-}" = after ]; then
+    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Brainstorm request\n%b' "$1" "$2" > "$T/brn.md"
+  else
+    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Brainstorm request\n%b## Notes from me\n' "$1" "$2" > "$T/brn.md"
+  fi
+  bh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/brn.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$bh/" "$T/brn.md"
+  "$PL" "$T/brn.md" >"$T/brnout" 2>&1; echo $?; }
+check "cleared (empty) Brainstorm request at stage 5: ok" "$(mkbrn 5 '')" 0
+check "non-empty Brainstorm request at stage 5: fails" "$(mkbrn 5 'y — run it\n\n')" 1
+grep -q "non-empty 'Brainstorm request'" "$T/brnout" && ok "  names it" || bad "  names it"
+check "non-empty Brainstorm request at stage 3: ok (still available while planning)" "$(mkbrn 3 'y — run it\n\n')" 0
+check "Brainstorm request placed after 'Notes from me': out of order" "$(mkbrn 5 '' after)" 1
+grep -q 'out of order' "$T/brnout" && ok "  says so" || bad "  says so"
+
+echo "== plan-lint (I9): a phase row is display-only, not a real step =="
+mkphase(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$T/ph.md"
+  ph=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/ph.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$ph/" "$T/ph.md"; "$PL" "$T/ph.md" >"$T/phout" 2>&1; echo $?; }
+check "a phase row alongside real rows: lints clean" \
+  "$(mkphase '| — | **A** | **Phase one** | | | |\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |')" 0
+check "a phase row alone still counts as no implementation plan" \
+  "$(mkphase '| — | **A** | **Phase one** | | | |')" 1
+grep -q 'no implementation plan' "$T/phout" && ok "  the check still sees past the phase row" || bad "  the check still sees past the phase row"
+
+echo "== watch-plan.sh (I10): single inotifywait, no persistent-mode text =="
+grep -q 'persistent: true' "$H/watch-plan.sh" && bad "watch-plan.sh still says 'persistent: true'" || ok "watch-plan.sh no longer says 'persistent: true'"
+grep -q 'inotifywait' "$H/watch-plan.sh" && ok "  drives inotifywait" || bad "  drives inotifywait"
+if command -v inotifywait >/dev/null 2>&1; then
+  cat > "$T/i10.sh" <<EOF
+set -uo pipefail
+wip="$T/wone"; mkdir -p "\$wip/.claude/teamlead/plan"
+wipf="\$wip/.claude/teamlead/plan/t.md"; printf 'x\n' > "\$wipf"
+trap '
+  p=\$(cat "\$wip/.claude/teamlead/.state/plan-watch.pid" 2>/dev/null)
+  [ -n "\$p" ] && kill -9 "\$p" 2>/dev/null
+  pkill -9 -f "inotifywait.*\$wip" 2>/dev/null
+  true
+' EXIT
+setsid nohup bash "$H/watch-plan.sh" "\$wip" "\$wipf" >/dev/null 2>&1 </dev/null &
+disown 2>/dev/null
+sleep 1
+setsid nohup bash "$H/watch-plan.sh" "\$wip" "\$wipf" >/dev/null 2>&1 </dev/null &
+disown 2>/dev/null
+sleep 1
+wcount=\$(pgrep -f "inotifywait.*\$wip" | wc -l)
+wpid=\$(cat "\$wip/.claude/teamlead/.state/plan-watch.pid" 2>/dev/null)
+live=0; [ -n "\$wpid" ] && kill -0 "\$wpid" 2>/dev/null && live=1
+[ -n "\$wpid" ] && kill -TERM "\$wpid" 2>/dev/null
+sleep 1
+pidgone=1; [ -f "\$wip/.claude/teamlead/.state/plan-watch.pid" ] && pidgone=0
+wcount2=\$(pgrep -f "inotifywait.*\$wip" | wc -l)
+printf '%s %s %s %s\n' "\$wcount" "\$live" "\$pidgone" "\$wcount2"
+EOF
+  read -r wcount live pidgone wcount2 <<<"$(bash "$T/i10.sh")"
+  check "exactly one inotifywait after starting twice (D2)" "${wcount:-?}" 1
+  check "  plan-watch.pid holds a live pid" "${live:-?}" 1
+  check "  TERMed: pid file is gone" "${pidgone:-?}" 1
+  check "  TERMed: no inotifywait left" "${wcount2:-?}" 0
+else
+  echo "skip: inotifywait not installed — cannot test the live watcher"
+fi
+
+echo "== statusline.sh (I11): stage header parsing is case-insensitive =="
+slip=$T/sli; mkdir -p $slip/.claude/teamlead/{plan,.state}
+: > $slip/.claude/teamlead/.state/active
+slipf=$slip/.claude/teamlead/plan/topic.md
+printf '# T\n\n> **stage 6** — x\n' > $slipf
+echo "$slipf" > $slip/.claude/teamlead/.state/active-plan
+out=$(printf '{"cwd":"%s"}' "$slip" | bash "$H/statusline.sh")
+grep -q '🧪 Plan:' <<<"$out" && ok "lowercase 'stage 6' header: 🧪 Plan" || bad "lowercase 'stage 6' header: 🧪 Plan ($out)"
+grep -q 'stage 6/7' <<<"$out" && ok "  and 'stage 6/7'" || bad "  and 'stage 6/7'"
+printf '# T\n\n> **Stage 2** — x\n' > $slipf
+out=$(printf '{"cwd":"%s"}' "$slip" | bash "$H/statusline.sh")
+grep -q '📄 Planning:' <<<"$out" && ok "'Stage 2' header: 📄 Planning" || bad "'Stage 2' header: 📄 Planning ($out)"
+printf '# T\n\n> **Stage 7** — x\n' > $slipf
+out=$(printf '{"cwd":"%s"}' "$slip" | bash "$H/statusline.sh")
+grep -q '🙋' <<<"$out" && ok "'Stage 7' header: 🙋" || bad "'Stage 7' header: 🙋 ($out)"
+
+echo "== plan-archive.sh --abandon (I12): closes out the ledger =="
+abp=$T/aband; mkdir -p $abp/.claude/teamlead/{plan,.state/snap}
+git -C $abp init -q; git -C $abp config user.email t@t.t; git -C $abp config user.name t
+echo a > $abp/a.txt; git -C $abp add -A >/dev/null; git -C $abp commit -qm init >/dev/null
+abf=$abp/.claude/teamlead/plan/topic.md
+printf '# T\n\n## Done when\n- [ ] never done — *verified by: user*\n' > $abf
+echo "$abf" > $abp/.claude/teamlead/.state/active-plan
+NOWA=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  dispatch  agent=tl-sonnet-low  desc=scout\n%s  start     agent=tl-sonnet-low  id=a1\n' "$NOWA" "$NOWA" > $abp/.claude/teamlead/.state/events.log
+python3 "$B" status --project $abp > "$T/abstatus1" 2>&1
+grep -q '1 worker(s) working' "$T/abstatus1" && ok "before --abandon: one worker outstanding" || bad "before --abandon: one worker outstanding"
+bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $abf --project $abp --abandon >/dev/null 2>&1
+python3 "$B" status --project $abp > "$T/abstatus2" 2>&1
+grep -q '0 worker(s) working' "$T/abstatus2" && ok "--abandon closes out the ledger" || bad "--abandon closes out the ledger"
+ls $abp/.claude/teamlead/plan/done/*abandoned-*.md >/dev/null 2>&1 && ok "  and files the plan as abandoned" || bad "  and files the plan as abandoned"
+# Without --abandon, a finished plan archives cleanly and the ledger is untouched.
+abp2=$T/aband2; mkdir -p $abp2/.claude/teamlead/{plan,.state/snap}
+git -C $abp2 init -q; git -C $abp2 config user.email t@t.t; git -C $abp2 config user.name t
+echo a > $abp2/a.txt; git -C $abp2 add -A >/dev/null; git -C $abp2 commit -qm init >/dev/null
+abf2=$abp2/.claude/teamlead/plan/topic.md
+printf '# T\n\n## Done when\n- [x] it works — *verified by: agent* — ran `x` → ok\n' > $abf2
+echo "$abf2" > $abp2/.claude/teamlead/.state/active-plan
+printf '%s  dispatch  agent=tl-sonnet-low  desc=scout\n%s  start     agent=tl-sonnet-low  id=a2\n' "$NOWA" "$NOWA" > $abp2/.claude/teamlead/.state/events.log
+before2=$(cat $abp2/.claude/teamlead/.state/events.log)
+bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $abf2 --project $abp2 >/dev/null 2>&1
+after2=$(cat $abp2/.claude/teamlead/.state/events.log)
+check "without --abandon, the ledger is untouched" "$after2" "$before2"
+
+echo "== skill text documents phase-B mechanisms (I13) =="
+grep -qF 'Initial brainstorm [y/N]: ' "$PS2" && ok "documents the brainstorm prompt line" || bad "documents the brainstorm prompt line"
+grep -q '^## Brainstorm request' "$PS2" && ok "  and the '## Brainstorm request' heading" || bad "  the Brainstorm request heading"
+grep -q 'inotifywait' "$PS2" && ok "  and 'inotifywait'" || bad "  'inotifywait'"
+grep -qF 'ran `' "$PS2" && ok "  and the D10 tick-evidence format" || bad "  the D10 tick-evidence format"
+grep -qiE '^## .*phase' "$PS2" && ok "  and a heading about phases" || bad "  a heading about phases"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
