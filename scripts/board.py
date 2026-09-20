@@ -105,6 +105,55 @@ def check_git(db: dict, project=None) -> list[str]:
     return problems
 
 
+_STEP_RE = re.compile(r"^\|\s*\d+\s*\|\s*(I\d+[a-z]?)\s*\|")
+_PHASE_RE = re.compile(r"^\|\s*(?:—|-)\s*\|\s*\*\*")
+_STAGE_RE = re.compile(r">\s*\*\*Stage\s+(\d+)\*\*", re.I)
+
+
+def check_plan(db: dict, project=None) -> list[str]:
+    """The wave table and the board can drift apart: a step gets planned but the
+    lead forgets to board_add it. Below stage 5 the board is legitimately empty
+    (nothing dispatched yet), so this only fires once building has started.
+
+    The plan is built one phase at a time, so only the CURRENT phase's steps are
+    expected on the board — the phase that already has at least one step there.
+    """
+    ap = root(project) / ".state" / "active-plan"
+    if not ap.exists():
+        return []
+    plan_path = ap.read_text().strip()
+    if not plan_path:
+        return []
+    pf = pathlib.Path(plan_path)
+    if not pf.exists():
+        return []
+    text = pf.read_text(errors="replace")
+    m = _STAGE_RE.search(text)
+    if not m or int(m.group(1)) < 5:
+        return []
+
+    groups: list[list[str]] = []
+    current: list[str] | None = None
+    for line in text.splitlines():
+        if _PHASE_RE.match(line):
+            current = []
+            groups.append(current)
+            continue
+        sm = _STEP_RE.match(line)
+        if sm:
+            if current is None:
+                current = []
+                groups.append(current)
+            current.append(sm.group(1))
+    if not groups:
+        return []
+
+    on_board = {t["plan"] for t in db["tasks"] if t.get("plan")}
+    target = next((g for g in groups if any(i in on_board for i in g)), groups[0])
+    return [f"plan step {i} has no board task — copy it from the wave table "
+            f"(board_add with plan: {i})" for i in target if i not in on_board]
+
+
 def validate(db: dict) -> list[str]:
     """Only unfinished tasks can collide. Finished work shares freely."""
     problems, seen = [], set()
@@ -443,7 +492,7 @@ def main(argv):
                   ", ".join(f"{a} ({lg['agents'].get(a, '?')})" for a in lg["outstanding"]))
         if lg["abandoned"]:
             print(f"  abandoned worker ids (started, never stopped): {', '.join(lg['abandoned'])}")
-        probs = validate(db) + check_git(db, proj)
+        probs = validate(db) + check_git(db, proj) + check_plan(db, proj)
         for p_ in probs:
             print(f"  ! {p_}")
     elif cmd == "ledger":
@@ -454,7 +503,7 @@ def main(argv):
         save(load(proj), proj); print("rendered")
     elif cmd == "check":                        # drift + validity, for the Stop gate
         db = load(proj)
-        probs = validate(db) + check_git(db, proj)
+        probs = validate(db) + check_git(db, proj) + check_plan(db, proj)
         _, m = _paths(proj)
         if m.exists() and m.read_text() != render(db):
             probs.append("board.md has drifted from board.json — it is generated. "
