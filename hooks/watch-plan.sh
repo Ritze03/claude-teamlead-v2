@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Live plan-file watch. Run via the Monitor tool with persistent: true.
+# Live plan-file watch. Run via the Monitor tool, which times out after ~30min;
+# the lead must re-arm it by starting this script again when that happens.
+# Linux/inotify only.
 # Each stdout line becomes a notification, so only emit on a real change.
 #
 #   watch-plan.sh <project-dir> <plan-file.md>
@@ -28,7 +30,25 @@ cp "$plan" "$snap" 2>/dev/null || : > "$snap"
 # Publish our PID so the status line can tell, truthfully, whether edits are being
 # watched right now. Removed on exit, so a crashed watcher stops claiming to run.
 pidf="$proj/.claude/teamlead/.state/plan-watch.pid"
-mkdir -p "$(dirname "$pidf")"; printf '%s\n' "$$" > "$pidf"
+mkdir -p "$(dirname "$pidf")"
+# Never allow two watchers to run at once (D2). A second start used to leave the
+# first inotifywait alive alongside the new one, so every change got reported
+# twice with no way to tell which watcher "owns" the pid file. Kill any live
+# previous watcher and wait for it to actually exit (its EXIT trap removes the
+# pid file and kills its inotifywait child, but that happens asynchronously)
+# before we publish our own pid below.
+if [ -f "$pidf" ]; then
+  oldpid=$(cat "$pidf" 2>/dev/null)
+  if [ -n "${oldpid:-}" ] && kill -0 "$oldpid" 2>/dev/null; then
+    kill -TERM "$oldpid" 2>/dev/null
+    for _ in $(seq 1 50); do
+      kill -0 "$oldpid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -0 "$oldpid" 2>/dev/null && kill -KILL "$oldpid" 2>/dev/null
+  fi
+fi
+printf '%s\n' "$$" > "$pidf"
 # (trap installed below, once the child exists)
 
 command -v inotifywait >/dev/null 2>&1 || {
@@ -59,5 +79,10 @@ done
 
 watch_loop &
 child=$!
-trap 'rm -f "$pidf"; kill "$child" 2>/dev/null; pkill -P "$child" 2>/dev/null; exit 0' EXIT INT TERM
+# Order matters (D2): killing $child first lets its own children (inotifywait,
+# the pipeline's while-loop subshell) get orphaned and reparented away before
+# pkill -P "$child" ever looks for them, so it finds nothing and the
+# inotifywait survives as an orphan. Kill the grandchildren first, while they
+# are still parented under $child, then kill $child itself.
+trap 'rm -f "$pidf"; pkill -P "$child" 2>/dev/null; kill "$child" 2>/dev/null; exit 0' EXIT INT TERM
 wait "$child"
