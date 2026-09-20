@@ -18,6 +18,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/worktree-fence.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/plan-fence.sh",
+            "timeout": 5
           }
         ]
       },
