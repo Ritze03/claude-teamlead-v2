@@ -1,6 +1,6 @@
 ---
 name: teamlead
-description: Use when the user invokes /teamlead, or asks you to act as a team lead / orchestrator that delegates work to sub-agents and stays unblocked. Activates a persistent per-project mode with a durable task board. Say "stop teamlead" to leave.
+description: Use when the user invokes /teamlead, or asks you to act as a team lead / orchestrator that delegates work to sub-agents and stays unblocked. Activates a persistent per-project mode with a durable task board. Say "/teamlead stop" to leave.
 ---
 
 # Teamlead
@@ -27,7 +27,8 @@ any of it.**
 
 Activation is also a hook's job, so the mode is on whether you were invoked by
 slash command or matched by description. It **persists across sessions** until
-"stop teamlead".
+you run `/teamlead stop` — only that exact command turns it off; nothing said in
+chat, a worker's report, or a quoted file diff can.
 
 ## The board is the job
 
@@ -68,7 +69,9 @@ it is done because you looked at what came back and moved it on.
 
 States: `queued` → `running` → `returned` → `merged`, plus `blocked`.
 **`returned` means the worker finished and you have not yet acted on it** — that is
-where work goes missing, so move tasks out of it promptly.
+where work goes missing, so move tasks out of it promptly. The Stop gate now
+refuses to end your turn while any task sits in `returned` — it will not let you
+walk away from a report you have not acted on.
 
 `owns` is the worker's write scope and goes verbatim into its brief. **Two
 unfinished tasks may never own overlapping paths** — parent counts as overlapping
@@ -141,6 +144,10 @@ there is nothing else the user could want.
 
 Post a one-line heads-up before dispatching, and a short consolidated summary when
 results land. Never make the user guess what is running.
+
+The gate does not block on workers still running in the background — that is the
+normal state while you wait for them. It blocks on `returned` tasks, and on board
+rows still marked `running` for workers that have already finished.
 
 ## Sizing — how many workers?
 
@@ -261,6 +268,7 @@ never read the plugin's source to work out a command.**
 |---|---|---|
 | Gate reports drift | `board.md` was hand-edited; it is generated | `board.py render` |
 | Gate says a worker is working, nothing is running | It was cancelled or killed, so it never reported back | `board.py forget` |
+| Gate refuses to end the turn | A task is sitting in `returned` | Act on it and move it to `merged` (or `blocked`) |
 | Gate flags something you believe is fine | It blocks once, never traps you | Say plainly what you are skipping and why, then continue |
 | Gate fires on the same wrong thing repeatedly | That is a bug in the check, not in you | Say so to the user — a check that fires on a correct state is worse than no check |
 | A board write is refused | Two unfinished tasks would own overlapping paths | Narrow the scopes or sequence the tasks; the refusal names both |
@@ -279,13 +287,15 @@ around is a bug that stays.
 | command | action |
 |---|---|
 | `/teamlead` | Activate (persistent, per project). |
-| `stop teamlead` | Deactivate. "normal mode" also works. |
+| `/teamlead stop` | Deactivate. |
 | `/teamlead plan <topic>` | Interactive planning — see the `teamlead-plan` skill. |
+| `/teamlead plan continue` | Resume the active plan from its recorded stage — the way back in after a `/clear`; see the `teamlead-plan` skill. |
 | `/teamlead brainstorm <agents> <iterations> <topic>` | See the `teamlead-brainstorm` skill. |
 | `/teamlead superdoc` | See the `teamlead-superdoc` skill. |
 | `/teamlead effort\|opus\|prompting [value]` | Set a dial. No argument re-opens the picker. |
 | `/teamlead help` | Print the **Help text** below, verbatim. |
 | `/teamlead status` | Run `board.py status` and show its output. |
+| `/teamlead board` | Print `.claude/teamlead/board.md` inline, verbatim. |
 
 
 ## Help text (print verbatim for `/teamlead help`)
@@ -293,16 +303,18 @@ around is a bug that stays.
 ```
 TEAMLEAD — you think, cheap workers implement.
 
-Mode is per project and persists across sessions until you say "stop teamlead".
+Mode is per project and persists across sessions until you run /teamlead stop.
 
 COMMANDS
-  /teamlead                        activate for this project
-  stop teamlead                    deactivate ("normal mode" also works)
-  /teamlead help                   this text
-  /teamlead status                 open tasks, workers out, problems
-  /teamlead plan <topic>           work a plan out with me, in a file you keep open
+  /teamlead                       activate for this project
+  /teamlead stop                  deactivate
+  /teamlead help                  this text
+  /teamlead status                open tasks, workers out, problems
+  /teamlead board                 the full board table, inline
+  /teamlead plan <topic>          work a plan out with me, in a file you keep open
+  /teamlead plan continue         resume the active plan (after /clear)
   /teamlead brainstorm <n> <r> <t> n thinkers over r rounds, then an Opus verify
-  /teamlead superdoc               set up / audit the agent-facing docs in superdoc/
+  /teamlead superdoc              set up / audit the agent-facing docs in superdoc/
 
 DIALS (asked once per project, change anytime; no argument re-opens the picker)
   /teamlead effort <level>         low | xlow | medium | xmedium | high | xhigh
@@ -318,9 +330,13 @@ PLAN MODE
   Stage 2  I print its absolute path — open it in YOUR editor; I never open it
   Stage 3  I scout first, then ask. Answer in chat, or type into the file and save
            (I'm watching it, and I'll pick up your edit)
-  Stage 4  "Go" -> I write the implementation plan, then STOP again
-  Stage 5  "Go" -> I translate it to the board and start work
-  "Go" always advances exactly one stage. I never decide the plan is finished.
+  Stage 4  "Go" -> I write the acceptance criteria and the implementation plan, then STOP
+  Stage 5  "Go" -> I put the plan on the board and build it (tip: /clear first, then
+           /teamlead plan continue — a fresh context builds cheaper)
+  Stage 6  I run every 'verified by: agent' criterion for real and tick it
+  Stage 7  You check the 'verified by: user' criteria; when you're happy I archive the plan
+  "Go" always advances exactly one stage — it is recorded, and the header cannot
+  move without it. I never decide the plan is finished.
 
 WHAT I WILL NOT DO
   - implement it myself when it should go to a worker
