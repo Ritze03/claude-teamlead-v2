@@ -1130,7 +1130,7 @@ after2=$(cat $abp2/.claude/teamlead/.state/events.log)
 check "without --abandon, the ledger is untouched" "$after2" "$before2"
 
 echo "== skill text documents phase-B mechanisms (I13) =="
-grep -qF 'Initial brainstorm [y/N]: ' "$PS2" && ok "documents the brainstorm prompt line" || bad "documents the brainstorm prompt line"
+grep -qF 'Initial brainstorm [y/n]: ' "$PS2" && ok "documents the brainstorm prompt line" || bad "documents the brainstorm prompt line"
 grep -q '^## Brainstorm request' "$PS2" && ok "  and the '## Brainstorm request' heading" || bad "  the Brainstorm request heading"
 grep -q 'inotifywait' "$PS2" && ok "  and 'inotifywait'" || bad "  'inotifywait'"
 grep -qF 'ran `' "$PS2" && ok "  and the D10 tick-evidence format" || bad "  the D10 tick-evidence format"

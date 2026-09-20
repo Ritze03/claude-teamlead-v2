@@ -256,7 +256,7 @@ Constraints, what exists, what must not break. Scout findings land here.
 - ~~Old question~~ → answer → **D1**
 
 ## Brainstorm request
-Initial brainstorm [y/N]: 
+Initial brainstorm [y/n]: 
 
 ## Notes from me
 Theirs to write. You only ever remove a line once it is folded into a Decision.
@@ -286,9 +286,13 @@ writing `api/routes/` is the one-writer-per-file violation everything rests on
 avoiding. Read-only steps own nothing and are always safe to fan out.
 
 **`## Brainstorm request` starts with one line**, written at stage 2 alongside the
-other sections: `Initial brainstorm [y/N]: `. If it is still unanswered by the
-time the stage-3 questions are posted, drop the line and leave the section
-empty — the offer lapses, not the section. It stays available for the rest of
+other sections: `Initial brainstorm [y/n]: ` — lowercase `n`, no default; the user
+answers `y` or `n`. `y` runs the brainstorm and the line goes; `n` means you remove
+the line and leave the section empty. Left unanswered, it stays through **all** of
+stage 3 untouched alongside the questions — stage 2 auto-advances into stage 3, so
+there is no moment to answer it before the questions land. Only at the 3→4 bump,
+if it is still unanswered, do you drop the line and leave the section empty — the
+offer lapses, not the section. It stays available for the rest of
 planning: writing `initial brainstorm` under it at any later stage runs a full
 brainstorm over the plan as it stands then, exactly as answering `y` would have;
 anything else written there is a focused brainstorm on that topic instead.
