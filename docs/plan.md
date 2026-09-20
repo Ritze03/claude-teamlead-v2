@@ -319,6 +319,15 @@ is the one thing a model cannot get subtly wrong.
 `PreToolUse` deny. Execution starting early is the actual harm; the rest is judgment and stays
 prose.
 
+> superseded by §13 / built 2026-09-20 as two separate hooks, not one: `board-fence.sh`
+> (PreToolUse on `board_add`/`board_update`) refuses a **worker's** board write outright and
+> refuses the lead's own `board_add` specifically while the plan header is below stage 5 — it
+> is not "no board.md write without a Go", it is "no board *task* without the second Go", and
+> `board_update` stays open throughout for closing pre-existing tasks. The Go itself is
+> enforced separately by `plan-fence.sh` (PreToolUse on `Edit|Write|MultiEdit`), which refuses
+> the plan file's own 3→4 and 4→5 header bumps without a Go recorded since the last bump. See
+> `docs/enforcement.md`.
+
 **The lead writes the plan file itself.** Deliberate carve-out from "never do the work
 yourself" — dispatching a worker per one-line edit during a live conversation is unusable
 latency. This **answers §8 item 3**: a blanket `Edit|Write` deny would break plan mode, so it
@@ -338,6 +347,9 @@ Primitive: the **`Monitor` tool with `persistent: true`** — the "one notificat
 occurrence, indefinitely" case. Not Bash `run_in_background`, which fires once and exits and
 would need re-arming after every save. `inotifywait` (inotify-tools) is the watcher.
 **No portability fallback** — see §0.1.
+
+> superseded by §13: `persistent: true` does not exist on this Monitor. The lead instead
+> passes `timeout_ms` (a ~30 min ceiling) and re-arms `watch-plan.sh` itself when it times out.
 
 Three rules, each fixing a specific failure:
 
@@ -389,6 +401,13 @@ at stage 5.
 only needs to re-inject the active plan's path, not its content.
 
 ### Plan file structure — **DECIDED**
+
+> superseded by §18: the section order below (`Implementation plan` last, after the inboxes)
+> was reversed 2026-09-19 to `Goal, Context, Decisions, Done when, Implementation plan, Open
+> questions, Notes from me` — the wave table sits *above* the two inboxes so the user's own
+> section stays at the bottom regardless of plan length. `Done when` was also added as its own
+> stage-4 section (§17, §19). Kept below for the parts §18 did not change: the accreting
+> Decisions/Open-questions lists, inline `> me:` answers, `TBD`, and the `I<n>` step ids.
 
 Fixed section order, always the same, so the user learns it once. Derived from what has
 actually worked in this document: decisions accrete, questions get struck and moved to an
@@ -485,7 +504,8 @@ So the checks are **not a stage-4 ritual**. They are a linter that runs on every
 
 **Checks** — pure text operations over one file, no judgment:
 
-1. The six sections are present, in the fixed order.
+1. The six sections are present, in the fixed order. *(superseded by §18/§19: eight canonical
+   sections now, two of them — `Done when`, `Implementation plan` — absent until stage 4.)*
 2. Every `After` target exists and sits in a **lower-numbered wave**.
 3. No two rows in one wave have **overlapping `Owns`** — the parallel-safety proof.
 4. Every row carries an agent tier from the known `tl-*` set; no blanks.
@@ -519,6 +539,12 @@ Without it, a stage-4 plan keeps looking authoritative while the ground under it
 Only the last blocks. Mid-edit inconsistency is normal and should not be fought; **starting
 implementation from a self-contradicting plan is the actual harm.** This also extends the
 existing no-Go deny on `board.md` — two conditions on the same gate.
+
+> superseded by §13 / built 2026-09-20 differently: there is no `PreToolUse` deny wired to
+> plan-lint. Instead `hooks/gate.sh` (`Stop`) runs `plan-lint.sh` at stage 4 and blocks the
+> *turn* on failure — a plan that doesn't lint clean simply can't be left behind, rather than
+> the header bump itself being denied. The Go-gated header bump is `plan-fence.sh`, a separate
+> mechanism (see the note above). See `docs/enforcement.md`.
 
 **Implementation plan lives in the same file** — one file to open, the header says where you
 are, and stage 4 steps can reference decisions by ID (`I2 implements D4`). *Its position was

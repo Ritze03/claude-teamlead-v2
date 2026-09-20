@@ -33,6 +33,8 @@ the two would block both.
   second release once we see real usage.*
 - **D8** Exceeding the limit throttles, never hard-blocks — *a hard block turns a
   burst into an outage for a paying customer.*
+- **D9** Cache is keyed per-user — *the data is already keyed by user id.* *(illustration —
+  see the answer loop under ### Answered.)*
 
 ## Done when
 - [x] `pytest tests/limits/` passes, including the boundary-burst and Redis-down cases — *verified by: agent*
@@ -40,7 +42,7 @@ the two would block both.
 - [ ] A 429 response reads sensibly to a customer integrating against it — *verified by: user*
 
 ## Implementation plan
-*Built from D1–D8 · decisions:a4ea*
+*Built from D1–D9 · decisions:ed54*
 
 | Wave | ID | Task | Agent | Owns | After |
 |:----:|:--:|------|-------|------|-------|
@@ -50,7 +52,7 @@ the two would block both.
 | 3 | I4 | Wire the limiter into the decorator stack, skip on `X-Internal-Token` — **D4** | `tl-sonnet-high` | `api/routes/` | I2, I3 |
 | 3 | I7 | Default budget + throttle-not-block behaviour — **D6 D7 D8** | `tl-sonnet-medium` | `api/limits/policy.py` | I2 |
 | 4 | I5 | Tests: boundary burst, Redis-down fail-open, internal bypass, `/health` exemption | `tl-sonnet-high` | `tests/limits/` | I4 |
-| 5 | I6 | QC pass over I2–I7 against D1–D8 and the goal | `tl-sonnet-high` | *(read-only)* | I5 |
+| 5 | I6 | QC pass over I2–I7 against D1–D9 and the goal | `tl-sonnet-high` | *(read-only)* | I5 |
 
 Same wave = runs in parallel. `Owns` is the write scope handed verbatim to the worker.
 
@@ -58,7 +60,7 @@ Same wave = runs in parallel. `Owns` is the write scope handed verbatim to the w
 1. Every `After` target is in a lower wave. ✅
 2. No two rows in one wave overlap in `Owns` — I2 `api/limits/` vs I3 `api/config/`. ✅
 3. Every row has an agent tier. ✅
-4. D1–D8 each appear in a task. ✅
+4. D1–D9 each appear in a task. ✅
 
 No Opus anywhere: the design calls are already made above, so what remains is execution.
 
@@ -66,6 +68,19 @@ No Opus anywhere: the design calls are already made above, so what remains is ex
 *(none open — all resolved below)*
 
 ### Answered
+*(Illustrating the `> me:` loop: the `> me:` line is the user's answer, typed inline under a
+still-open question; the lead promotes it into a Decision and strikes the question here — both
+states shown together since the loop is otherwise invisible once it's finished. In a live plan
+only the struck line below would remain; the live question would sit under
+`## Open questions` until answered.)*
+
+```
+- Should the cache be per-user or global? *Suggest:* per-user — the data is already keyed by
+  user id. *Or:* global with the id in the key.
+  > me: per-user
+```
+
+- ~~Should the cache be per-user or global?~~ → per-user → **D9**
 - ~~Default budget for a key with no explicit tier?~~ → 1000/hour, matching the
   pricing page. → **D6**
 - ~~Per-endpoint overrides on day one?~~ → No, one budget per key ships first. → **D7**
