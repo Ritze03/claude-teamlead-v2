@@ -30,8 +30,8 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
 | **2 Create and show** | Create the near-empty plan — the five sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
-| **4 Done when + implementation plan** | You alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again**. | The user says "Go" |
-| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**`. | Every task merged, board empty |
+| **4 Done when + implementation plan** | You alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
+| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
 | **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. | They all pass |
 | **7 User-Testing** | Hand the `verified by: user` criteria over and **wait**. | The user says it is good |
 
@@ -62,6 +62,14 @@ plan, then stop*. From 4 it means *start implementing*. One word, never a skip
 straight to execution — your plan of *how* is separate work from their plan of
 *what*.
 
+This used to be pure discipline; `plan-fence.sh` now enforces the shape of it.
+It refuses a header bump of more than one stage at a time (recording the last
+accepted one to `.state/plan-stage`), and refuses 3→4 or 4→5 unless
+`.state/plan-go` has an entry newer than that last accepted bump. So a skipped
+stage is not a discipline failure any more — it is a refused tool call. When the
+edit comes back refused, do not work around it: the user has not actually said
+Go.
+
 ### Do not block on the user opening the file
 
 You cannot tell whether they opened it. `IN_OPEN` fires for every process that
@@ -89,7 +97,9 @@ you do not ask whether to start. Banned:
 - "I think we've covered everything." — the implicit version.
 - Treating **silence** as consent.
 - Treating a **file save** as consent. "looks good to me" typed into the file is
-  *not* a Go. Go comes from chat.
+  *not* a Go. Go comes from chat — literally: `mode.sh` watches the *chat* prompt
+  for the word "go" and logs it to `.state/plan-go`; a "Go" typed into the file is
+  never seen by that hook.
 
 Instead, end every planning turn with one **fixed** line, set off from the body:
 
@@ -99,6 +109,10 @@ Instead, end every planning turn with one **fixed** line, set off from the body:
 **Byte-identical every turn.** The moment it tracks your sense of progress —
 *"Type Go, I think we're about there"* — it becomes the banned question again.
 A static line is not you judging readiness; it is the command staying visible.
+
+**`gate.sh` checks it.** It reads the transcript at Stop; at stages 1–4, a turn
+whose last line is not this exact text is blocked. That is the other reason it
+is byte-exact — a paraphrase reads fine to a person and fails a string compare.
 
 ## Stage 3 opens with a scout
 
@@ -117,13 +131,23 @@ They have it open; you write to it between turns. Without discipline this eats
 their work.
 
 - **Targeted edits only, never full-file rewrites.** Re-read before every write.
+- **Write it with the Edit/Write tools — never through shell** (`sed`, a heredoc,
+  python). `plan-fence.sh` only sees writes made through the file tools; an edit
+  that bypasses it is an edit nobody checked, the two rules below included.
 - **`## Notes from me` is theirs to write.** Never add your own content there and
   never reword a line; the only edit you make is removing a note once it is folded
-  into a Decision (see *Everything ends up in Decisions*).
+  into a Decision (see *Everything ends up in Decisions*). `plan-fence.sh` refuses
+  any add or reword there outright; removing a folded note still goes through.
 - After every write of yours, refresh the snapshot so the watcher stays quiet:
   `cp <plan> <project>/.claude/teamlead/.state/snap/<file>`
 - If the file changed since you last read it, they edited it — **merge first**.
   The watcher is convenience; this check is correctness.
+
+**The clobber.** The user's editor can save from a stale buffer and silently
+revert a line you added seconds earlier — the watcher's diff then shows a `-`
+line of *your own* text. That is not the user deleting it; it is a stale buffer
+winning a race. Re-apply it the same way as any other divergence: re-read,
+merge your line back in, write. Observed today.
 
 `CLAUDE_PLUGIN_ROOT` is **not** set in your shell — the plugin's absolute path is in
 `.claude/teamlead/.state/plugin-root`, and the injected state block prints it. Use it.
@@ -386,8 +410,13 @@ authoritative while the ground under it has moved.
 
 ## Stage 5 — handoff
 
-Copy the wave table into `.claude/teamlead/board.md`, column for column. Each
-board row keeps `— I<n>` linking back to its plan step.
+Copy the wave table into `.claude/teamlead/board.md`, column for column, via
+`board_add` with `plan: I<n>` set on each row — that field is the actual link
+back to the plan step; board.py renders it as the `— I<n>` suffix on the task
+text. `board-fence.sh` refuses `board_add` while the plan is below stage 5, so
+nothing can land early. And once you're here, `board.py check` (run every turn
+by the gate) reports any current-phase wave-table step with no matching board
+row, so a half-copied table does not go unnoticed.
 
 **Leave `.claude/teamlead/.state/active-plan` set.** It used to be cleared here, and
 that is what made the session dangle: implementation would start, plan mode would
@@ -398,3 +427,42 @@ very end. Update the header to `> **Stage 5**` so the status line tracks it.
 **Plan is frozen intent; board is live state.** When execution diverges, record it
 on the board — never silently patch the plan. Losing the fact that reality
 departed from the plan loses the interesting part.
+
+## The second Go: offer a fresh context
+
+The second "Go" (stage 4 → 5) is also D14's handoff point: building is cheaper
+in a small context, and the plan file plus the board were designed to be the
+whole handoff. In this order:
+
+1. Set the header to `> **Stage 5**`.
+2. Print, **byte-exact**, on its own paragraph:
+
+   ```
+   To build this on a fresh context: `/clear`, then `/teamlead plan continue`.
+   Or say "here" to continue in this session.
+   ```
+
+3. **Stop — dispatch nothing.** Wait for the user to say "here", or for the plan
+   to be picked up again via `/teamlead plan continue`. Never run `/clear`
+   yourself.
+
+## `/teamlead plan continue`
+
+The general "pick the plan back up" command — after the fresh-context handoff
+above, after a compaction, or just a new day. Nothing is re-derived from
+memory; the plan file and the board are the whole handoff (D14):
+
+1. Read the state block's plan lines — `stage`, `go`, `next` — printed at
+   session start and on activation by `state.sh`.
+2. Read the plan file **in full**, not just the header.
+3. Act on `next` for that stage:
+
+| Stage | Action |
+|:----:|---|
+| 3 or 4, with a recorded Go | The user already said Go — write the implementation plan (3) or start implementing (4). |
+| 5 | Put the **current phase's** wave rows on the board (`board_add`, `plan: I<n>`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
+| 6 | Run the `verified by: agent` criteria for real. |
+| 7 | Hand the `verified by: user` criteria back to the user. |
+
+If the state block shows the watcher **NOT running** and the stage is 2–4,
+restart it first — see *The watcher follows who has control*.
