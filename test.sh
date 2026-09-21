@@ -1137,6 +1137,33 @@ python3 "$B" add --project $cpp --task "do" --agent tl-sonnet-low --owns src/a -
 python3 "$B" status --project $cpp > "$T/cpstatus" 2>&1
 grep -q 'I2 has no board task' "$T/cpstatus" && ok "  'status' prints the same problem text" || bad "  status prints the problem"
 
+echo "== board.py check_plan: an unphased wave table groups by WAVE, never fully-merged (D22 follow-up) =="
+wcp=$T/wcplan; mkdir -p $wcp/.claude/teamlead/plan $wcp/.claude/teamlead/.state
+git -C $wcp init -q; git -C $wcp config user.email t@t.t; git -C $wcp config user.name t
+echo a > $wcp/a.txt; git -C $wcp add -A >/dev/null; git -C $wcp commit -qm init >/dev/null
+wcf=$wcp/.claude/teamlead/plan/topic.md
+echo "$wcf" > $wcp/.claude/teamlead/.state/active-plan
+printf '# T\n\n> **Stage 5** — x\n\n## Implementation plan\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n| 1 | I2 | do2 — **D1** | `tl-sonnet-low` | src/b | — |\n| 2 | I3 | do3 — **D1** | `tl-sonnet-low` | src/c | I1 |\n| 3 | I4 | do4 — **D1** | `tl-sonnet-low` | src/d | I3 |\n' > $wcf
+wcchk(){ python3 "$B" check --project $wcp >"$T/wcout" 2>&1; echo $?; }
+python3 "$B" add --project $wcp --task "do" --agent tl-sonnet-low --owns src/a --plan I1 >/dev/null
+check "only I1 boarded: check fails" "$(wcchk)" 1
+grep -q 'I2 has no board task' "$T/wcout" && ok "  names I2 (same wave)" || bad "  names I2"
+grep -q 'I3' "$T/wcout" && bad "  should not name I3 (a later wave)" || ok "  does not name I3 (a later wave)"
+grep -q 'I4' "$T/wcout" && bad "  should not name I4 (a later wave)" || ok "  does not name I4 (a later wave)"
+python3 "$B" add --project $wcp --task "do2" --agent tl-sonnet-low --owns src/b --plan I2 >/dev/null
+check "wave 1 fully boarded (not yet merged): clean — this was the 57-step nag bug" "$(wcchk)" 0
+i1id=$(python3 -c "import json;print([t['id'] for t in json.load(open('$wcp/.claude/teamlead/.state/board.json'))['tasks'] if t['plan']=='I1'][0])")
+i2id=$(python3 -c "import json;print([t['id'] for t in json.load(open('$wcp/.claude/teamlead/.state/board.json'))['tasks'] if t['plan']=='I2'][0])")
+python3 "$B" update --project $wcp --id $i1id --state merged >/dev/null
+python3 "$B" update --project $wcp --id $i2id --state merged >/dev/null
+check "wave 1 fully merged, wave 2 untouched: falls back to the lowest un-boarded wave" "$(wcchk)" 1
+grep -q 'I1' "$T/wcout" && bad "  should not name I1 (merged)" || ok "  does not name I1 (merged)"
+grep -q 'I2' "$T/wcout" && bad "  should not name I2 (merged)" || ok "  does not name I2 (merged)"
+grep -q 'I3 has no board task' "$T/wcout" && ok "  names I3 (next wave)" || bad "  names I3 (next wave)"
+grep -q 'I4' "$T/wcout" && bad "  should not name I4 (a later wave)" || ok "  does not name I4 (a later wave)"
+python3 "$B" add --project $wcp --task "do3" --agent tl-sonnet-low --owns src/c --plan I3 >/dev/null
+check "wave 1 merged, wave 2 (I3) boarded and not merged: clean" "$(wcchk)" 0
+
 echo "== state.sh: stage/go/watcher status block (D14) =="
 stp=$T/state1; mkdir -p $stp/.claude/teamlead/plan $stp/.claude/teamlead/.state
 git -C $stp init -q; git -C $stp config user.email t@t.t; git -C $stp config user.name t

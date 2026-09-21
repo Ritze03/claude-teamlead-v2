@@ -154,7 +154,7 @@ def check_git(db: dict, project=None) -> list[str]:
     return problems
 
 
-_STEP_RE = re.compile(r"^\|\s*\d+\s*\|\s*(I\d+[a-z]?)\s*\|")
+_STEP_RE = re.compile(r"^\|\s*(\d+)\s*\|\s*(I\d+[a-z]?)\s*\|")
 _PHASE_RE = re.compile(r"^\|\s*(?:—|-)\s*\|\s*\*\*")
 _STAGE_RE = re.compile(r">\s*\*\*Stage\s+(\d+)\*\*", re.I)
 
@@ -164,8 +164,15 @@ def check_plan(db: dict, project=None) -> list[str]:
     lead forgets to board_add it. Below stage 5 the board is legitimately empty
     (nothing dispatched yet), so this only fires once building has started.
 
-    The plan is built one phase at a time, so only the CURRENT phase's steps are
-    expected on the board — the phase that already has at least one step there.
+    The plan is built one phase (or, absent phase rows, one wave) at a time, so
+    only the CURRENT group's steps are expected on the board. With phase rows,
+    the current group is the phase that already has at least one step there
+    (falling back to the first phase when none does). Without phase rows, the
+    current group is the lowest wave that has a step on the board and isn't
+    fully merged yet; if no wave qualifies (nothing boarded, or every boarded
+    wave is already fully merged), it falls back to the lowest wave that has
+    no step on the board and isn't fully merged — the natural "next wave" nudge.
+    A fully-merged wave is never demanded.
     """
     ap = root(project) / ".state" / "active-plan"
     if not ap.exists():
@@ -181,24 +188,60 @@ def check_plan(db: dict, project=None) -> list[str]:
     if not m or int(m.group(1)) < 5:
         return []
 
-    groups: list[list[str]] = []
-    current: list[str] | None = None
-    for line in text.splitlines():
-        if _PHASE_RE.match(line):
-            current = []
-            groups.append(current)
-            continue
-        sm = _STEP_RE.match(line)
-        if sm:
-            if current is None:
+    has_phases = any(_PHASE_RE.match(line) for line in text.splitlines())
+    on_board = {t["plan"] for t in db["tasks"] if t.get("plan")}
+
+    if has_phases:
+        groups: list[list[str]] = []
+        current: list[str] | None = None
+        for line in text.splitlines():
+            if _PHASE_RE.match(line):
                 current = []
                 groups.append(current)
-            current.append(sm.group(1))
-    if not groups:
+                continue
+            sm = _STEP_RE.match(line)
+            if sm:
+                if current is None:
+                    current = []
+                    groups.append(current)
+                current.append(sm.group(2))
+        if not groups:
+            return []
+        target = next((g for g in groups if any(i in on_board for i in g)), groups[0])
+        return [f"plan step {i} has no board task — copy it from the wave table "
+                f"(board_add with plan: {i})" for i in target if i not in on_board]
+
+    # No phase rows: group by wave number instead.
+    waves: dict[int, list[str]] = {}
+    for line in text.splitlines():
+        sm = _STEP_RE.match(line)
+        if sm:
+            waves.setdefault(int(sm.group(1)), []).append(sm.group(2))
+    if not waves:
         return []
 
-    on_board = {t["plan"] for t in db["tasks"] if t.get("plan")}
-    target = next((g for g in groups if any(i in on_board for i in g)), groups[0])
+    merged_states = {t["plan"]: t["state"] for t in db["tasks"] if t.get("plan")}
+
+    def fully_merged(steps):
+        return all(merged_states.get(i) == "merged" for i in steps)
+
+    def has_board(steps):
+        return any(i in on_board for i in steps)
+
+    target = None
+    for wave in sorted(waves):
+        steps = waves[wave]
+        if has_board(steps) and not fully_merged(steps):
+            target = steps
+            break
+    if target is None:
+        for wave in sorted(waves):
+            steps = waves[wave]
+            if not has_board(steps) and not fully_merged(steps):
+                target = steps
+                break
+    if target is None:
+        return []
     return [f"plan step {i} has no board task — copy it from the wave table "
             f"(board_add with plan: {i})" for i in target if i not in on_board]
 
