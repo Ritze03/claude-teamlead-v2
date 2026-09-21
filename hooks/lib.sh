@@ -12,12 +12,27 @@ tl_init() {
   # CLAUDE_PROJECT_DIR is not set for every event; fall back to the event's cwd.
   TL_PROJECT="${CLAUDE_PROJECT_DIR:-$(tl_json .cwd)}"
   [ -n "$TL_PROJECT" ] || exit 0
+  # F5: fired from inside a worktree, cwd/CLAUDE_PROJECT_DIR point at the worktree,
+  # not the main checkout where teamlead's state lives — resolve it the same way
+  # statusline.sh and board.py's _main_checkout do, or the hook silently acts as
+  # if teamlead were inactive. One git call, and only when the dir exists.
+  if [ -d "$TL_PROJECT" ]; then
+    local common
+    if common=$(git -C "$TL_PROJECT" rev-parse --git-common-dir 2>/dev/null); then
+      case "$common" in /*) ;; *) common="$TL_PROJECT/$common" ;; esac
+      local r
+      r=$(cd "$(dirname "$common")" 2>/dev/null && pwd) && TL_PROJECT="$r"
+    fi
+  fi
   TL_DIR="$TL_PROJECT/.claude/teamlead"
   TL_STATE="$TL_DIR/.state"
-  # ponytail: the flag is the whole gate. No flag, no work, no tokens.
-  [ -f "$TL_STATE/active" ] || exit 0
   TL_BOARD="$TL_DIR/board.md"
   TL_EVENTS="$TL_STATE/events.log"
+  # ponytail: the flag is the whole gate. No flag, no work, no tokens.
+  # F16: record.sh sets TL_NO_ACTIVE_CHECK to still catch a worker's SubagentStop
+  # when teamlead was deactivated mid-run — every other hook keeps this exit
+  # exactly as it was.
+  [ -n "${TL_NO_ACTIVE_CHECK:-}" ] || [ -f "$TL_STATE/active" ] || exit 0
 }
 
 # The lead's Bash tool does NOT get CLAUDE_PLUGIN_ROOT, but hooks do. Stash it so
@@ -45,7 +60,15 @@ tl_ensure_gitignore() {
     grep -vxF -e ".claude/teamlead/.state/" -e ".claude/teamlead/board.md" "$gi" > "$tmp" 2>/dev/null
     mv "$tmp" "$gi"
   fi
-  grep -qxF ".claude/teamlead/" "$gi" 2>/dev/null || printf '%s\n' ".claude/teamlead/" >> "$gi"
+  # F11/D7: exact-match only used to mean a pre-existing equivalent pattern
+  # (".claude/", no trailing slash, a leading "/") got a redundant line appended
+  # underneath it. Any of these already covers us.
+  local pat
+  for pat in ".claude" ".claude/" "/.claude" "/.claude/" \
+             ".claude/teamlead" ".claude/teamlead/" "/.claude/teamlead" "/.claude/teamlead/"; do
+    grep -qxF "$pat" "$gi" 2>/dev/null && return 0
+  done
+  printf '%s\n' ".claude/teamlead/" >> "$gi"
 }
 
 tl_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
