@@ -1836,6 +1836,99 @@ check "row 3 (returned, worker k1) is NOT requeued — the work already came bac
 
 check "board is still valid after the requeue" "$(python3 "$B" check --project $d2p >/dev/null 2>&1; echo $?)" 0
 
+echo "== I5/D3/D4: hooks.json wires PostToolUse(Agent) -> record.sh =="
+check "hooks.json declares the PostToolUse Agent matcher" \
+  "$(jq -e '.hooks.PostToolUse[0].matcher == "Agent"' "$H/hooks.json")" "true"
+check "record.sh's silent-stderr sites did not grow (no new board call swallows stderr)" \
+  "$(grep -c '2>/dev/null' "$H/record.sh")" 4
+
+echo "== I5/D3/D4: PostToolUse(Agent) calls worker-start =="
+p5=$T/i5; mkdir -p "$p5/.claude/teamlead/.state"; : > "$p5/.claude/teamlead/.state/active"
+python3 "$B" add --project $p5 --task "row one" --agent tl-sonnet-low --owns i5/a >/dev/null   # id 1
+python3 "$B" add --project $p5 --task "row two" --agent tl-sonnet-low --owns i5/b >/dev/null   # id 2
+python3 "$B" add --project $p5 --task "row three" --agent tl-sonnet-low --owns i5/c >/dev/null # id 3
+L5=$p5/.claude/teamlead/.state/events.log
+row5(){ python3 -c "import json;d=json.load(open('$p5/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==$1][0];print(str(t['state'])+','+str(t['worker'])+','+str(t['branch']))"; }
+
+PT1='{"hook_event_name":"PostToolUse","cwd":"'$p5'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"row one work","prompt":"Intro line one.\nboard: 1\nGoal: do the thing.","isolation":"worktree"},"tool_response":{"status":"async_launched","agentId":"pw1","description":"row one work","prompt":"Intro line one.\nboard: 1\nGoal: do the thing."}}'
+check "PostToolUse, object tool_response, mid-brief marker, worktree isolation: exit 0" "$(ev "$PT1" "$H/record.sh")" 0
+check "  row 1 -> running/pw1/worktree-agent-pw1" "$(row5 1)" "running,pw1,worktree-agent-pw1"
+
+PT2='{"hook_event_name":"PostToolUse","cwd":"'$p5'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"row two work","prompt":"Intro line two.\nboard: 2\nGoal: do another thing."},"tool_response":{"status":"async_launched","agentId":"pw2","description":"row two work","prompt":"Intro line two.\nboard: 2\nGoal: do another thing."}}'
+check "same, no isolation field: exit 0" "$(ev "$PT2" "$H/record.sh")" 0
+check "  row 2 -> running/pw2, branch stays null" "$(row5 2)" "running,pw2,None"
+
+PT3='{"hook_event_name":"PostToolUse","cwd":"'$p5'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"decoy","prompt":"see board: 1 above\nGoal: something else."},"tool_response":{"status":"async_launched","agentId":"px9","description":"decoy","prompt":"see board: 1 above"}}'
+check "board: N embedded mid-line (not its own line): exit 0" "$(ev "$PT3" "$H/record.sh")" 0
+check "  not matched — row 1 unchanged" "$(row5 1)" "running,pw1,worktree-agent-pw1"
+
+w0=$(grep -c 'warn' $L5 2>/dev/null || echo 0)
+PT4='{"hook_event_name":"PostToolUse","cwd":"'$p5'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"no marker","prompt":"Just a plain brief with no board line at all."},"tool_response":{"status":"async_launched","agentId":"px8","description":"no marker","prompt":"Just a plain brief with no board line at all."}}'
+check "no board: marker anywhere: exit 0" "$(ev "$PT4" "$H/record.sh")" 0
+check "  row 1 still unchanged" "$(row5 1)" "running,pw1,worktree-agent-pw1"
+check "  no warn line emitted" "$(grep -c 'warn' $L5 2>/dev/null || echo 0)" "$w0"
+
+PT5='{"hook_event_name":"PostToolUse","cwd":"'$p5'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"text fallback","prompt":"Some brief.\nboard: 3\nGoal: text fallback case."},"tool_response":"Dispatched async. agentId: pw2 status: ok"}'
+check "tool_response as a plain string, agentId: X fallback: exit 0" "$(ev "$PT5" "$H/record.sh")" 0
+check "  row 3 -> running/pw2 via the text fallback" "$(row5 3)" "running,pw2,None"
+
+PT6='{"hook_event_name":"PostToolUse","cwd":"'$p5'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"broken response case","prompt":"Some brief with no useful info."},"tool_response":{"status":"async_launched","description":"nope"}}'
+check "tool_response with neither an agentId field nor matching text: exit 0" "$(ev "$PT6" "$H/record.sh")" 0
+grep -q 'warn      no-agent-id' $L5 && ok "  no-agent-id warned to the ledger" || bad "  no-agent-id warned to the ledger"
+
+echo "== I5/D1: board.py refusals surface but never fail the hook =="
+p5d=$T/i5-blocked; mkdir -p "$p5d/.claude/teamlead/.state"; : > "$p5d/.claude/teamlead/.state/active"
+python3 "$B" add --project $p5d --task "d1" --agent tl-sonnet-low --owns i5d/a >/dev/null                 # id 1, unmerged
+python3 "$B" add --project $p5d --task "d2" --agent tl-sonnet-low --owns i5d/b --blocked-by 1 >/dev/null  # id 2, blocked_by 1
+L5D=$p5d/.claude/teamlead/.state/events.log
+row5d(){ python3 -c "import json;d=json.load(open('$p5d/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==$1][0];print(str(t['state'])+','+str(t['worker']))"; }
+before2=$(row5d 2)
+
+PTB1='{"hook_event_name":"PostToolUse","cwd":"'$p5d'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"missing row","prompt":"Brief.\nboard: 99\nGoal: nothing."},"tool_response":{"status":"async_launched","agentId":"pwB1","description":"x","prompt":"y"}}'
+echo "$PTB1" | "$H/record.sh" >"$T/outB1" 2>&1; rc=$?
+check "board: 99 (no such row): hook still exits 0" "$rc" 0
+grep -q '\[teamlead\] board:' "$T/outB1" && ok "  board.py stderr surfaced with the [teamlead] prefix" || bad "  board.py stderr surfaced with the [teamlead] prefix"
+grep -q 'no task with id 99' "$T/outB1" && ok "  names the missing id" || bad "  names the missing id"
+grep -q 'warn      board-refused' $L5D && ok "  logged to the ledger as board-refused" || bad "  logged to the ledger as board-refused"
+
+PTB2='{"hook_event_name":"PostToolUse","cwd":"'$p5d'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"blocked row","prompt":"Brief.\nboard: 2\nGoal: nothing."},"tool_response":{"status":"async_launched","agentId":"pwB2","description":"x","prompt":"y"}}'
+echo "$PTB2" | "$H/record.sh" >"$T/outB2" 2>&1; rc=$?
+check "board: 2 while its blocker (1) is unmerged: hook still exits 0" "$rc" 0
+grep -q 'is blocked by 1' "$T/outB2" && ok "  names the blocker" || bad "  names the blocker"
+check "  row 2 unchanged (write was refused, never saved)" "$(row5d 2)" "$before2"
+
+echo "== I5: non-tl-* subagent_type does nothing on PostToolUse =="
+PTC='{"hook_event_name":"PostToolUse","cwd":"'$p5d'","tool_name":"Agent","tool_input":{"subagent_type":"generic-fetcher","description":"not ours","prompt":"Brief.\nboard: 1\nGoal: nothing."},"tool_response":{"status":"async_launched","agentId":"pwC","description":"x","prompt":"y"}}'
+echo "$PTC" | "$H/record.sh" >"$T/outC" 2>&1; rc=$?
+check "non-tl-* subagent_type: exit 0" "$rc" 0
+check "  row 1 untouched" "$(row5d 1)" "queued,None"
+check "  no output at all" "$(cat "$T/outC")" ""
+
+echo "== I5/D12: SubagentStart/SubagentStop/SendMessage all drive worker-start/worker-stop =="
+S1='{"hook_event_name":"SubagentStop","cwd":"'$p5'","agent_type":"teamlead:tl-sonnet-high","agent_id":"pw1","last_assistant_message":"done for now"}'
+ev "$S1" "$H/record.sh" >/dev/null
+check "SubagentStop(pw1): row 1 -> returned" "$(row5 1)" "returned,pw1,worktree-agent-pw1"
+
+ST1='{"hook_event_name":"SubagentStart","cwd":"'$p5'","agent_type":"teamlead:tl-sonnet-high","agent_id":"pw1"}'
+ev "$ST1" "$H/record.sh" >/dev/null
+check "SubagentStart(pw1) resumes: row 1 -> running again" "$(row5 1)" "running,pw1,worktree-agent-pw1"
+
+S2='{"hook_event_name":"SubagentStop","cwd":"'$p5'","agent_type":"teamlead:tl-sonnet-high","agent_id":"pw1","last_assistant_message":"stopped again"}'
+ev "$S2" "$H/record.sh" >/dev/null
+check "SubagentStop(pw1) again: row 1 -> returned" "$(row5 1)" "returned,pw1,worktree-agent-pw1"
+
+SM1='{"hook_event_name":"PreToolUse","cwd":"'$p5'","tool_name":"SendMessage","tool_input":{"to":"pw1","summary":"resume please"}}'
+ev "$SM1" "$H/record.sh" >/dev/null
+check "SendMessage resume(pw1): row 1 -> running again, via the resume path" "$(row5 1)" "running,pw1,worktree-agent-pw1"
+
+echo "== I5: no board.json is a no-op and creates nothing =="
+p5h=$T/i5-noboard; mkdir -p "$p5h/.claude/teamlead/.state"; : > "$p5h/.claude/teamlead/.state/active"
+PTE='{"hook_event_name":"PostToolUse","cwd":"'$p5h'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"no board file","prompt":"Brief.\nboard: 1\nGoal: nothing.","isolation":"worktree"},"tool_response":{"status":"async_launched","agentId":"pwE","description":"x","prompt":"y"}}'
+echo "$PTE" | "$H/record.sh" >"$T/outE" 2>&1; rc=$?
+check "PostToolUse with a marker but no board.json: exit 0" "$rc" 0
+check "  no board.json created" "$([ -f "$p5h/.claude/teamlead/.state/board.json" ] && echo yes || echo no)" no
+check "  no stderr noise" "$(cat "$T/outE")" ""
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

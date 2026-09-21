@@ -11,6 +11,28 @@ source "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/lib.sh"
 # know which event this is.
 TL_NO_ACTIVE_CHECK=1 tl_init
 
+# D12: hook logic lives in board.py subcommands; record.sh only parses JSON and
+# calls them. Same plugin-root fallback restore.sh uses to locate board.py.
+BOARD="${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/scripts/board.py"
+
+# D1: a board.py refusal (bad id, blocked-by gate, …) must be visible to the
+# lead, never swallowed — but it must not fail the hook itself, or a dispatch
+# or a return would be blocked by a board disagreement. So: run it, keep only
+# stderr (idiom: `2>&1 >/dev/null` inside the substitution), and on a non-zero
+# exit print it to the hook's own stderr plus one ledger line. $2 (board id)
+# may be empty for the non-PostToolUse callers below — that is fine, the
+# warn line just carries board= empty.
+tl_board_call() {
+  local aid="$1" bid="$2" err rc
+  shift 2
+  err=$(python3 "$BOARD" "$@" --project "$TL_PROJECT" 2>&1 >/dev/null)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "[teamlead] board: $err" >&2
+    tl_event "warn      board-refused  id=$aid  board=$bid  msg=$(printf '%s' "$err" | tr '\n' ' ' | cut -c1-100)"
+  fi
+}
+
 ev=$(tl_json .hook_event_name)
 
 if [ ! -f "$TL_STATE/active" ]; then
@@ -45,6 +67,42 @@ case "$ev" in
     desc=$(tl_json .tool_input.description | tr '\n' ' ' | cut -c1-100)
     tl_event "dispatch  agent=$at  prompt=$(tl_json .prompt_id)  desc=$desc"
     ;;
+  # D3: the Agent tool's response carries the brief, the worker id AND
+  # tool_input.isolation in one payload — the deterministic pairing PreToolUse
+  # alone cannot give (it fires before the id exists).
+  PostToolUse)
+    [ "$(tl_json .tool_name)" = "Agent" ] || exit 0
+    at=$(tl_json .tool_input.subagent_type)
+    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    # tool_response is normally the object {status, agentId, description, prompt}
+    # (verified in this project's own transcript). Fall back to hunting an
+    # "agentId: X" substring in its text form for any other shape.
+    aid=$(tl_json .tool_response.agentId)
+    [ -n "$aid" ] || aid=$(tl_json .tool_response | grep -oE 'agentId: [A-Za-z0-9_-]+' | head -1 | awk '{print $2}')
+    if [ -z "$aid" ]; then
+      # .tool_response may itself be wrapped in an object ({content: …} or
+      # {content:[{text: …}]}) instead of a plain string — check its shape
+      # once and look inside for the id text.
+      case "$(tl_json '.tool_response | type')" in
+        object)
+          txt=$(tl_json .tool_response.content)
+          [ -n "$txt" ] || txt=$(tl_json '.tool_response.content[0].text')
+          aid=$(printf '%s' "$txt" | grep -oE 'agentId: [A-Za-z0-9_-]+' | head -1 | awk '{print $2}')
+          ;;
+      esac
+    fi
+    if [ -z "$aid" ]; then
+      tl_event "warn      no-agent-id  desc=$(tl_json .tool_input.description | tr '\n' ' ' | cut -c1-100)"
+      exit 0
+    fi
+    # The board-row marker is a line of its own, anywhere in the brief. No
+    # marker → no board call: a scout, a QC pass, or any brief not tied to a row.
+    bid=$(tl_json .tool_input.prompt | grep -oE '^board: [0-9]+$' | head -1 | awk '{print $2}')
+    [ -n "$bid" ] || exit 0
+    br=""
+    [ "$(tl_json .tool_input.isolation)" = "worktree" ] && br="worktree-agent-$aid"
+    tl_board_call "$aid" "$bid" worker-start --id "$aid" --board "$bid" ${br:+--branch "$br"}
+    ;;
   # A resumed worker never fires PreToolUse(Agent), so the retry ladder — which
   # works by resuming the SAME worker for its one correction — was invisible to the
   # ledger. outstanding read 0 while a worker was genuinely running, exactly when
@@ -60,18 +118,26 @@ case "$ev" in
     # board.py's `id=`/`agent=` field parsing is unaffected.
     sfx=""; sid=$(tl_json .session_id); [ -n "$sid" ] && sfx="  session=$sid"
     tl_event "resume    id=$to  summary=$sm$sfx"
+    # D12: whether a SendMessage resume also fires SubagentStart is unverified;
+    # both calls are no-ops when nothing matches, so wire both — cheap cover
+    # for whichever the harness actually fires.
+    tl_board_call "$to" "" worker-start --id "$to"
     ;;
   SubagentStart)
     at=$(tl_json .agent_type)
     case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
     sfx=""; sid=$(tl_json .session_id); [ -n "$sid" ] && sfx="  session=$sid"
     tl_event "start     agent=$at  id=$(tl_json .agent_id)$sfx"
+    # D12: the resume path — a fresh dispatch's row is already 'running' (or
+    # has no worker yet) via PostToolUse, so this is a harmless no-op then.
+    tl_board_call "$(tl_json .agent_id)" "" worker-start --id "$(tl_json .agent_id)"
     ;;
   SubagentStop)
     at=$(tl_json .agent_type)
     case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
     msg=$(tl_json .last_assistant_message | tr '\n' ' ' | cut -c1-200)
     tl_event "return    agent=$at  id=$(tl_json .agent_id)  msg=$msg"
+    tl_board_call "$(tl_json .agent_id)" "" worker-stop --id "$(tl_json .agent_id)"
     ;;
 esac
 exit 0
