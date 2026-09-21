@@ -53,16 +53,21 @@ backup() {
 }
 
 # A plugin-cache path with a pinned version breaks silently on the next update.
-# Swap the version for a glob; the combiner version-sorts and takes the newest.
+# Swap the version for a glob, resolved to exactly ONE path (newest wins) via a
+# quoted `compgen -G` substitution — never an unquoted `*`, which a two-version
+# cache would explode into multiple words when `bash -c` runs the command
+# (D7: `bash: /path1 /path2: No such file`).
 depin() {
   local c="$1"
   # Only worth doing for a pinned plugin-cache path.
   printf '%s' "$c" | grep -qE '/plugins/cache/[^/]+/[^/]+/[^/*"]+/' || { printf '%s' "$c"; return; }
-  # A glob must be UNQUOTED to expand — bash "/x/*/y.sh" is a literal path and the
-  # segment silently disappears. So only de-pin when the path has no spaces, where
-  # dropping the quotes is safe.
+  # A path with spaces can't be reworked char-for-char here safely — leave it
+  # pinned rather than risk mis-quoting it.
   printf '%s' "$c" | grep -qE '"[^"]* [^"]*"' && { printf '%s' "$c"; return; }
-  printf '%s' "$c" | sed -E 's#(/plugins/cache/[^/]+/[^/]+/)[^/*"]+/#\1*/#g; s/"//g'
+  local re='^(.*)"([^"]*/plugins/cache/[^/]+/[^/]+/)[^/*"]+/([^"]*)"(.*)$'
+  [[ $c =~ $re ]] || { printf '%s' "$c"; return; }
+  local before="${BASH_REMATCH[1]}" prefix="${BASH_REMATCH[2]}" suffix="${BASH_REMATCH[3]}" after="${BASH_REMATCH[4]}"
+  printf '%s"$(compgen -G '\''%s*/%s'\'' | sort -V | tail -1)"%s' "$before" "$prefix" "$suffix" "$after"
 }
 
 write_combined() {

@@ -31,6 +31,10 @@ trap 'rm -rf "$tmp"' EXIT
 i=0
 for cmd in "${SEGMENTS[@]}"; do
   i=$((i + 1))
+  # "$cmd" must resolve to exactly one command here — a de-pinned plugin-cache
+  # segment carries its own quoted `compgen -G ... | sort -V | tail -1` glob
+  # resolution (see install-statusline.sh's depin()), never a bare unquoted `*`
+  # that would explode into multiple words for `bash -c` on a two-version cache.
   printf '%s' "$in" | timeout "$TIMEOUT" bash -c "$cmd" >"$tmp/$i" 2>/dev/null &
 done
 wait
