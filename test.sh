@@ -112,6 +112,33 @@ check "race: the two rows have distinct ids" "$ids" "1,2"
 tmpleft=$(find "$lp/.claude/teamlead/.state" -maxdepth 1 -name '*.tmp*' 2>/dev/null | wc -l)
 check "atomic save: no leftover tmp file in .state/" "$tmpleft" 0
 
+echo "== D5: _atomic_write survives a crash mid-write (no truncated board.json) =="
+crashp=$T/crash; mkdir -p $crashp
+python3 "$B" add --task A --agent tl-sonnet-low --project $crashp >/dev/null
+crash_json="$crashp/.claude/teamlead/.state/board.json"
+before=$(cat "$crash_json")
+python3 -c "
+import sys, pathlib
+sys.path.insert(0, '$bd')
+import board
+orig = pathlib.Path.write_text
+def half(self, text, *a, **k):
+    orig(self, text[:len(text)//2], *a, **k)
+    raise RuntimeError('simulated crash')
+pathlib.Path.write_text = half
+try:
+    board.mutate(board.op_add, project='$crashp', task='B')
+except RuntimeError:
+    pass
+"
+after=$(cat "$crash_json")
+check "crash mid-write: board.json byte-identical to before the crash" "$after" "$before"
+ntasks=$(python3 -c "import json; print(len(json.load(open('$crash_json'))['tasks']))")
+check "crash mid-write: board.json still parses with exactly 1 task" "$ntasks" 1
+mdsize=$(wc -c < "$crashp/.claude/teamlead/board.md")
+[ "$mdsize" -gt 0 ] && ok "crash mid-write: board.md still exists and is non-empty" || bad "crash mid-write: board.md still exists and is non-empty"
+find "$crashp/.claude/teamlead/.state" -maxdepth 1 -name '*.tmp*' -delete
+
 echo "== QC1: render's load->save must not race a locked mutate() =="
 rndp=$T/rndlock; mkdir -p $rndp
 python3 "$B" add --project $rndp --task "renderable" --agent tl-sonnet-low --owns rnd/x >/dev/null  # id 1
