@@ -473,7 +473,14 @@ def op_remove(db, id, **_):
     """F17/D4: a repair op, not a workflow op — the only way today to drop a
     stray task (e.g. one a worker's CLI write left behind) is hand-editing
     board.json. Running or returned means a worker may still act on it, or
-    the lead hasn't yet looked at its report, so those are refused."""
+    the lead hasn't yet looked at its report, so those are refused.
+
+    Removal can also unblock other rows (dropping the ghost id from their
+    blocked_by, possibly flipping blocked->queued) — those rows can newly
+    overlap in owns with something no longer separated by a blocked_by chain
+    (D8). 'touched' reports every row this op changed besides the removed
+    one, so mutate()'s refusal check covers the cascade, not just the id
+    that was asked to be removed."""
     id = int(id)
     idx = next((i for i, t in enumerate(db["tasks"]) if t["id"] == id), None)
     if idx is None:
@@ -483,15 +490,17 @@ def op_remove(db, id, **_):
         raise ValueError(f"refused — task {id} is {t['state']}, not removable "
                          f"(only queued/blocked/merged tasks can be removed)")
     del db["tasks"][idx]
+    touched = []
     for other in db["tasks"]:                    # drop the ghost from blocked_by
         if other.get("blocked_by") and id in other["blocked_by"]:
             other["blocked_by"] = [b for b in other["blocked_by"] if b != id]
+            touched.append(other["id"])
             # removing the sole blocker requeues the dependant explicitly —
             # _auto_unblock no longer treats an empty blocked_by as satisfied
             if not other["blocked_by"] and other["state"] == "blocked":
                 other["state"] = "queued"
     _auto_unblock(db)
-    return {"id": id, "removed": True, "state": t["state"]}
+    return {"id": id, "removed": True, "state": t["state"], "touched": touched}
 
 
 @contextlib.contextmanager
@@ -515,16 +524,69 @@ def _board_lock(project=None):
 def mutate(fn, project=None, **kw):
     """A refusal here only reports problems touching the id(s) this edit added or
     updated — a pre-existing problem elsewhere on the board must not block an
-    unrelated write. (The explicit `check` command still reports everything.)"""
+    unrelated write. (The explicit `check` command still reports everything.)
+    A result dict's optional 'touched' list widens this beyond 'id' alone, for
+    an op whose edit cascades to other rows (op_remove's blocked_by cleanup).
+    If fn returns None (no matching row — the find-then-mutate ops), nothing
+    is saved or validated: the board did not change."""
     with _board_lock(project):
         db = load(project)
         res = fn(db, **kw)
-        touched = {res["id"]} if isinstance(res, dict) and "id" in res else set()
+        if res is None:
+            return None
+        touched = {res["id"]} | set(res.get("touched", [])) if isinstance(res, dict) and "id" in res else set()
         problems = [msg for ids, msg in _validate_detailed(db) if not touched or ids & touched]
         if problems:
             raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
         save(db, project)
         return res
+
+
+def op_worker_resume(db, agent_id, **_):
+    """D12/QC3: the find (which row is this agent's returned row?) must happen
+    under the same lock as the write, or a concurrent op_worker_stop/
+    op_requeue_lost racing on a stale snapshot can clobber a state this one
+    just set. None (no matching row) tells mutate() to save nothing."""
+    row = next((t for t in db["tasks"]
+                if t.get("worker") == agent_id and t["state"] == "returned"), None)
+    if row is None:
+        return None
+    row["state"] = "running"
+    row["updated"] = now()
+    _auto_unblock(db)
+    return row
+
+
+def op_worker_stop(db, agent_id, **_):
+    """D12/QC3: see op_worker_resume — find-then-set inside the lock."""
+    row = next((t for t in db["tasks"]
+                if t.get("worker") == agent_id and t["state"] == "running"), None)
+    if row is None:
+        return None
+    row["state"] = "returned"
+    row["updated"] = now()
+    return row
+
+
+def op_requeue_lost(db, agent_id, **_):
+    """D2/D12/QC3,4: forget()'s requeue, moved inside the lock (see
+    op_worker_resume) so it re-checks 'is this agent's row still running?'
+    against the live board, not a snapshot a racing worker_stop may have
+    already moved to 'returned'. Lands on 'blocked', not 'queued', when the
+    row's blocked_by isn't fully merged — the same condition _auto_unblock
+    uses, inverted — so a requeue never hands the lead a runnable-looking row
+    that D9 would refuse anyway."""
+    row = next((t for t in db["tasks"]
+                if t.get("worker") == agent_id and t["state"] == "running"), None)
+    if row is None:
+        return None
+    merged_ids = {t["id"] for t in db["tasks"] if t["state"] == "merged"}
+    by = row.get("blocked_by") or []
+    row["state"] = "blocked" if by and not all(b in merged_ids for b in by) else "queued"
+    line = f"requeued: worker {agent_id} lost on restart"
+    row["notes"] = line if not row.get("notes") else row["notes"] + "\n" + line
+    row["updated"] = now()
+    return row
 
 
 def worker_start(agent_id, project=None, board=None, branch=None):
@@ -543,11 +605,7 @@ def worker_start(agent_id, project=None, board=None, branch=None):
     if board is not None:
         return mutate(op_update, project=project, id=board, state="running",
                        worker=agent_id, branch=branch)
-    row = next((t for t in load(project)["tasks"]
-                if t.get("worker") == agent_id and t["state"] == "returned"), None)
-    if row is None:
-        return None
-    return mutate(op_update, project=project, id=row["id"], state="running")
+    return mutate(op_worker_resume, project=project, agent_id=agent_id)
 
 
 def worker_stop(agent_id, project=None):
@@ -558,11 +616,7 @@ def worker_stop(agent_id, project=None):
     j, _ = _paths(project)
     if not j.exists():
         return None
-    row = next((t for t in load(project)["tasks"]
-                if t.get("worker") == agent_id and t["state"] == "running"), None)
-    if row is None:
-        return None
-    return mutate(op_update, project=project, id=row["id"], state="returned")
+    return mutate(op_worker_stop, project=project, agent_id=agent_id)
 
 
 def forget(ids, project=None, before=None, not_session=None):
@@ -602,14 +656,9 @@ def forget(ids, project=None, before=None, not_session=None):
     j, _ = _paths(project)
     if done and j.exists():
         for a in done:
-            row = next((t for t in load(project)["tasks"]
-                        if t.get("worker") == a and t["state"] == "running"), None)
-            if row is None:
-                continue
-            line = f"requeued: worker {a} lost on restart"
-            notes = line if not row.get("notes") else row["notes"] + "\n" + line
-            mutate(op_update, project=project, id=row["id"], state="queued", notes=notes)
-            requeued.append(row["id"])
+            row = mutate(op_requeue_lost, project=project, agent_id=a)
+            if row is not None:
+                requeued.append(row["id"])
     return {"forgotten": done, "still_outstanding": ledger(project)["outstanding"],
             "requeued": requeued}
 
@@ -889,14 +938,15 @@ def main(argv):
                                  before=kw.get("before"), not_session=kw.get("not_session")),
                           indent=2))
     elif cmd == "render":                       # re-render md from json
-        db = load(proj)
-        _, m = _paths(proj)
-        if not db["tasks"] and m.exists() and _has_task_rows(m.read_text()):
-            print("refused — board.json is missing or has no tasks, but board.md still "
-                 "holds task rows; rendering now would overwrite them with an empty board. "
-                 "Investigate board.json before re-rendering.", file=sys.stderr)
-            return 1
-        save(db, proj); print("rendered")
+        with _board_lock(proj):                 # load->save must not race a mutate()
+            db = load(proj)
+            _, m = _paths(proj)
+            if not db["tasks"] and m.exists() and _has_task_rows(m.read_text()):
+                print("refused — board.json is missing or has no tasks, but board.md still "
+                     "holds task rows; rendering now would overwrite them with an empty board. "
+                     "Investigate board.json before re-rendering.", file=sys.stderr)
+                return 1
+            save(db, proj); print("rendered")
     elif cmd == "check":                        # drift + validity, for the Stop gate
         db = load(proj)
         probs = validate(db) + check_git(db, proj) + check_plan(db, proj)
