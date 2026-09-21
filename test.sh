@@ -84,6 +84,73 @@ grep -q 'drifted' "$T/bout" && ok "  drift names the cause" || bad "  drift name
 check "render repairs the drift" "$(bcmd render)" 0
 check "check passes again" "$(bcmd check)" 0
 
+echo "== D5/D13: board writes are serialised (lock race) and atomic =="
+lp=$T/lock; mkdir -p $lp
+lcmd(){ python3 "$B" "$@" --project $lp >"$T/lout" 2>&1; echo $?; }
+bd=$(dirname "$B")
+racer() {
+  python3 -c "
+import sys, time
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+board.mutate(board.op_add, project='$lp', task='$1')
+"
+}
+racer A & rp1=$!
+racer B & rp2=$!
+wait $rp1 $rp2
+race_json="$lp/.claude/teamlead/.state/board.json"
+nrows=$(python3 -c "import json; print(len(json.load(open('$race_json'))['tasks']))")
+check "race: both concurrent adds landed as rows" "$nrows" 2
+ids=$(python3 -c "import json; d=json.load(open('$race_json')); print(','.join(sorted(str(t['id']) for t in d['tasks'])))")
+check "race: the two rows have distinct ids" "$ids" "1,2"
+tmpleft=$(find "$lp/.claude/teamlead/.state" -maxdepth 1 -name '*.tmp*' 2>/dev/null | wc -l)
+check "atomic save: no leftover tmp file in .state/" "$tmpleft" 0
+
+echo "== D5: board_add's own MCP write path (_call, outside mutate()) is locked too =="
+mcp_p=$T/lockmcp; mkdir -p $mcp_p
+mcpracer() {
+  python3 -c "
+import sys, time, os
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+os.environ['CLAUDE_PROJECT_DIR'] = '$mcp_p'
+board._call('board_add', {'tasks': [{'task': '$1'}]})
+"
+}
+mcpracer A & mp1=$!
+mcpracer B & mp2=$!
+wait $mp1 $mp2
+mcp_json="$mcp_p/.claude/teamlead/.state/board.json"
+mcp_nrows=$(python3 -c "import json; print(len(json.load(open('$mcp_json'))['tasks']))")
+check "board_add race: both concurrent MCP adds landed as rows" "$mcp_nrows" 2
+mcp_ids=$(python3 -c "import json; d=json.load(open('$mcp_json')); print(','.join(sorted(str(t['id']) for t in d['tasks'])))")
+check "board_add race: the two rows have distinct ids" "$mcp_ids" "1,2"
+
+echo "== D10: update usage guard =="
+check "update without --id prints usage" "$(lcmd update --state running)" 1
+grep -q '^usage: board.py update --id' "$T/lout" && ok "  usage line printed" || bad "  usage line printed"
+grep -q Traceback "$T/lout" && bad "  no traceback printed" || ok "  no traceback printed"
+
+echo "== D11: worker row field, JSON-only =="
+wp=$T/lockw; mkdir -p $wp
+wcmd(){ python3 "$B" "$@" --project $wp >"$T/wout" 2>&1; echo $?; }
+check "add task W" "$(wcmd add --task W --agent tl-sonnet-low)" 0
+check "set worker on id 1" "$(wcmd update --id 1 --worker abc123)" 0
+w=$(python3 -c "import json; d=json.load(open('$wp/.claude/teamlead/.state/board.json')); print([t['worker'] for t in d['tasks'] if t['id']==1][0])")
+check "worker field set in board.json" "$w" "abc123"
+grep -q abc123 $wp/.claude/teamlead/board.md && bad "  worker id leaked into board.md" || ok "  worker id stays JSON-only, not in board.md"
+
 echo "== board resolves a worktree to the main checkout =="
 python3 "$B" add --project $bp --task "main-only" --agent tl-sonnet-low --owns src/zz >/dev/null 2>&1
 git -C $bp init -q 2>/dev/null; git -C $bp config user.email t@t.t; git -C $bp config user.name t

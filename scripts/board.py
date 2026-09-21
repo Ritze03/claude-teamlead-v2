@@ -13,7 +13,7 @@ Validation happens at WRITE time, so a bad board cannot exist rather than being
 detected afterwards.
 """
 from __future__ import annotations
-import json, os, re, sys, datetime, pathlib, subprocess
+import json, os, re, sys, datetime, pathlib, subprocess, fcntl, contextlib
 
 STATES = ("queued", "running", "returned", "merged", "blocked")
 
@@ -326,11 +326,19 @@ def _has_task_rows(md: str) -> bool:
     return bool(_ROW_RE.search(md))
 
 
+def _atomic_write(path: pathlib.Path, text: str) -> None:
+    """Same-directory tmp file + os.replace: a reader never sees a half-written
+    file, and a crash mid-write leaves the old file intact, never a corrupt one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def save(db: dict, project=None) -> None:
     j, m = _paths(project)
-    j.parent.mkdir(parents=True, exist_ok=True)
-    j.write_text(json.dumps(db, indent=2) + "\n")
-    m.write_text(render(db))
+    _atomic_write(j, json.dumps(db, indent=2) + "\n")
+    _atomic_write(m, render(db))
 
 
 # ---- operations -------------------------------------------------------------
@@ -339,7 +347,7 @@ def op_add(db, task, agent=None, owns=None, plan=None, blocked_by=None, **_):
     t = {"id": db["next_id"], "task": task, "agent": agent,
          "owns": _norm_owns(owns), "state": "blocked" if blocked_by else "queued",
          "branch": None, "plan": plan, "blocked_by": blocked_by or [],
-         "notes": None, "created": now(), "updated": now()}
+         "notes": None, "worker": None, "created": now(), "updated": now()}
     db["next_id"] += 1
     db["tasks"].append(t)
     return t
@@ -364,7 +372,7 @@ def _auto_unblock(db) -> None:
 def op_update(db, id, **kw):
     for t in db["tasks"]:
         if t["id"] == int(id):
-            for k in ("task", "agent", "state", "branch", "plan", "notes"):
+            for k in ("task", "agent", "state", "branch", "plan", "notes", "worker"):
                 if kw.get(k) is not None:
                     t[k] = kw[k]
             if kw.get("owns") is not None:
@@ -402,18 +410,37 @@ def op_remove(db, id, **_):
     return {"id": id, "removed": True, "state": t["state"]}
 
 
+@contextlib.contextmanager
+def _board_lock(project=None):
+    """D5: the MCP server, hook processes and the CLI all write board.json — an
+    unlocked load->edit->save can silently drop a concurrent write (both load the
+    same next_id, the second save wins). fcntl.flock on a dedicated lock file
+    (not board.json itself, so a plain read never blocks) serialises the whole
+    load->save window across processes. Reusable: I4 wraps forget()'s board
+    write with this same helper."""
+    lock = root(project) / ".state" / "board.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock, "a+") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def mutate(fn, project=None, **kw):
     """A refusal here only reports problems touching the id(s) this edit added or
     updated — a pre-existing problem elsewhere on the board must not block an
     unrelated write. (The explicit `check` command still reports everything.)"""
-    db = load(project)
-    res = fn(db, **kw)
-    touched = {res["id"]} if isinstance(res, dict) and "id" in res else set()
-    problems = [msg for ids, msg in _validate_detailed(db) if not touched or ids & touched]
-    if problems:
-        raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
-    save(db, project)
-    return res
+    with _board_lock(project):
+        db = load(project)
+        res = fn(db, **kw)
+        touched = {res["id"]} if isinstance(res, dict) and "id" in res else set()
+        problems = [msg for ids, msg in _validate_detailed(db) if not touched or ids & touched]
+        if problems:
+            raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
+        save(db, project)
+        return res
 
 
 def forget(ids, project=None, before=None, not_session=None):
@@ -555,6 +582,7 @@ TOOLS = [
          "owns": {"type": "array", "items": {"type": "string"}},
          "notes": {"type": "string", "description": "How it was solved. Recorded permanently."},
          "task": {"type": "string"},
+         "worker": {"type": "string", "description": "Worker agent_id, set by worker-start."},
          "blocked_by": {"type": "array", "items": {"type": "integer"}}}}},
 ]
 
@@ -570,14 +598,15 @@ def _call(name, args):
     if name == "board_add":
         _refuse_if_worker()                       # belt-and-braces: board-fence.sh already fences this
         proj = _write_project(None)
-        added = []
-        db = load(proj)
-        for spec in args.get("tasks", []):
-            added.append(op_add(db, **spec))
-        problems = validate(db)
-        if problems:
-            raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
-        save(db, proj)
+        with _board_lock(proj):                    # D5: this is the lead's primary write path too
+            added = []
+            db = load(proj)
+            for spec in args.get("tasks", []):
+                added.append(op_add(db, **spec))
+            problems = validate(db)
+            if problems:
+                raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
+            save(db, proj)
         return {"added": added, "open": summary(db)["open"]}
     if name == "board_update":
         _refuse_if_worker()                       # belt-and-braces: board-fence.sh already fences this
@@ -663,6 +692,10 @@ def main(argv):
     elif cmd == "update":
         _refuse_if_worker()
         proj = _write_project(proj)
+        if kw.get("id") is None:
+            print("usage: board.py update --id N [--state s] [--branch b] [--agent a] "
+                 "[--owns p,...] [--notes n] [--worker w]", file=sys.stderr)
+            return 1
         print(json.dumps(mutate(op_update, project=proj, **kw), indent=2))
     elif cmd == "remove":
         _refuse_if_worker()
@@ -725,6 +758,6 @@ def main(argv):
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]) or 0)
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, TypeError) as e:
         print(str(e).strip('"'), file=sys.stderr)
         sys.exit(1)
