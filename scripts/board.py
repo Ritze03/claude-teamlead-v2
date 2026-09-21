@@ -19,7 +19,7 @@ STATES = ("queued", "running", "returned", "merged", "blocked")
 
 
 def now() -> str:
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _main_checkout(p: str) -> str:
@@ -83,10 +83,27 @@ def _git(project, *args):
         return None
 
 
+def _git_ok(project, *args) -> bool | None:
+    """Like _git, but for commands where a non-zero exit is itself the (non-error)
+    answer — e.g. `diff --quiet` returns 1 to mean 'differs', not 'failed'."""
+    try:
+        r = subprocess.run(["git", "-C", str(project), *args],
+                           capture_output=True, text=True, timeout=10)
+        return r.returncode == 0
+    except Exception:
+        return None
+
+
 def check_git(db: dict, project=None) -> list[str]:
     """The board validates itself; nothing asked git whether 'merged' was true.
     A task marked merged whose commits are not in HEAD is exactly the reported
-    'work never merged back', and was undetectable."""
+    'work never merged back', and was undetectable.
+
+    A squash merge lands the content but its branch commits are never ancestors
+    of HEAD, so rev-list alone would call every squash merge 'not merged'. A task
+    counts as merged when rev-list is 0 OR the owned paths no longer differ from
+    the branch — a task with no owned paths (read-only) has nothing to diff, so
+    it falls back to rev-list only."""
     proj = pathlib.Path(_main_checkout(project or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
     if _git(proj, "rev-parse", "--is-inside-work-tree") != "true":
         return []
@@ -98,7 +115,11 @@ def check_git(db: dict, project=None) -> list[str]:
         if _git(proj, "rev-parse", "--verify", "--quiet", br) is None:
             continue                      # branch already deleted after merging: fine
         n = _git(proj, "rev-list", "--count", f"HEAD..{br}")
-        if n and n != "0":
+        if not n or n == "0":
+            continue                      # ordinary (non-squash) merge
+        owns = t.get("owns") or []
+        squashed = bool(owns) and _git_ok(proj, "diff", "--quiet", "HEAD", br, "--", *owns)
+        if not squashed:
             problems.append(
                 f"task {t['id']} is marked merged but branch {br} has {n} commit(s) "
                 f"not in HEAD — it was not actually merged back")
@@ -154,27 +175,39 @@ def check_plan(db: dict, project=None) -> list[str]:
             f"(board_add with plan: {i})" for i in target if i not in on_board]
 
 
-def validate(db: dict) -> list[str]:
-    """Only unfinished tasks can collide. Finished work shares freely."""
+def _validate_detailed(db: dict) -> list[tuple[frozenset, str]]:
+    """Like validate(), but tags each problem with the task id(s) it involves, so a
+    targeted refusal (mutate) can report only what the edit actually touched while
+    check/status keep reporting everything."""
     problems, seen = [], set()
     live = [t for t in db["tasks"] if t["state"] not in ("merged",)]
+    merged_ids = {t["id"] for t in db["tasks"] if t["state"] == "merged"}
     for t in db["tasks"]:
-        if t["id"] in seen:
-            problems.append(f"duplicate task id {t['id']}")
-        seen.add(t["id"])
+        tid = t["id"]
+        if tid in seen:
+            problems.append((frozenset({tid}), f"duplicate task id {tid}"))
+        seen.add(tid)
         if t["state"] not in STATES:
-            problems.append(f"task {t['id']} has unknown state {t['state']!r}")
+            problems.append((frozenset({tid}), f"task {tid} has unknown state {t['state']!r}"))
         if t["state"] in ("running", "returned") and not t.get("agent"):
-            problems.append(f"task {t['id']} is {t['state']} with no agent")
+            problems.append((frozenset({tid}), f"task {tid} is {t['state']} with no agent"))
+        if t["state"] == "blocked" and t.get("blocked_by") and all(b in merged_ids for b in t["blocked_by"]):
+            problems.append((frozenset({tid}),
+                f"task {tid} is blocked but all its blockers are merged — it should be queued"))
     for i, a in enumerate(live):
         for b in live[i + 1:]:
             for pa in a["owns"]:
                 for pb in b["owns"]:
                     if _overlap(pa, pb):
-                        problems.append(
+                        problems.append((frozenset({a["id"], b["id"]}),
                             f"tasks {a['id']} and {b['id']} are both unfinished and own "
-                            f"overlapping paths ({pa!r} vs {pb!r}) — two writers on one path")
+                            f"overlapping paths ({pa!r} vs {pb!r}) — two writers on one path"))
     return problems
+
+
+def validate(db: dict) -> list[str]:
+    """Only unfinished tasks can collide. Finished work shares freely."""
+    return [msg for _, msg in _validate_detailed(db)]
 
 
 def render(db: dict) -> str:
@@ -212,6 +245,16 @@ def render(db: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+# A real row's first cell is the ✓/blank tick, its second the bare task id — that
+# shape (pipe, tick cell, pipe, digits, pipe) only occurs in data rows: the header's
+# second cell is "ID" and the separator's is ":--:", neither of which is a bare int.
+_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*\d+\s*\|", re.MULTILINE)
+
+
+def _has_task_rows(md: str) -> bool:
+    return bool(_ROW_RE.search(md))
+
+
 def save(db: dict, project=None) -> None:
     j, m = _paths(project)
     j.parent.mkdir(parents=True, exist_ok=True)
@@ -231,6 +274,16 @@ def op_add(db, task, agent=None, owns=None, plan=None, blocked_by=None, **_):
     return t
 
 
+def _auto_unblock(db) -> None:
+    """A blocked task whose blockers have all merged should be queued, not sit
+    flagged until someone notices — so every update sweeps for it, whether this
+    edit just merged the blocker or just set blocked_by to ids already merged."""
+    merged_ids = {t["id"] for t in db["tasks"] if t["state"] == "merged"}
+    for t in db["tasks"]:
+        if t["state"] == "blocked" and t.get("blocked_by") and all(b in merged_ids for b in t["blocked_by"]):
+            t["state"] = "queued"
+
+
 def op_update(db, id, **kw):
     for t in db["tasks"]:
         if t["id"] == int(id):
@@ -242,14 +295,19 @@ def op_update(db, id, **kw):
             if kw.get("blocked_by") is not None:
                 t["blocked_by"] = kw["blocked_by"]
             t["updated"] = now()
+            _auto_unblock(db)
             return t
     raise KeyError(f"no task with id {id}")
 
 
 def mutate(fn, project=None, **kw):
+    """A refusal here only reports problems touching the id(s) this edit added or
+    updated — a pre-existing problem elsewhere on the board must not block an
+    unrelated write. (The explicit `check` command still reports everything.)"""
     db = load(project)
     res = fn(db, **kw)
-    problems = validate(db)
+    touched = {res["id"]} if isinstance(res, dict) and "id" in res else set()
+    problems = [msg for ids, msg in _validate_detailed(db) if not touched or ids & touched]
     if problems:
         raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
     save(db, project)
@@ -321,7 +379,7 @@ def ledger(project=None) -> dict:
     """
     live, seen = {}, {}
     disp = starts = 0
-    recent = (datetime.datetime.now(datetime.UTC)
+    recent = (datetime.datetime.now(datetime.timezone.utc)
               - datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
     for ts, rest in _events(project):
         # A dispatch carries no agent id — the id only exists once SubagentStart
@@ -343,7 +401,7 @@ def ledger(project=None) -> dict:
         elif rest.startswith(("return", "cancel")):
             live.pop(aid, None)
             seen[aid] = tok.get("agent", seen.get(aid, "?"))
-    cutoff = (datetime.datetime.now(datetime.UTC)
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
               - datetime.timedelta(minutes=LEDGER_STALE_MIN)).strftime("%Y-%m-%dT%H:%M:%SZ")
     outstanding = {a: t for a, t in live.items() if t >= cutoff}
     abandoned = {a: t for a, t in live.items() if t < cutoff}
@@ -500,12 +558,24 @@ def main(argv):
     elif cmd == "forget":
         print(json.dumps(forget(pos or ["all"], proj), indent=2))
     elif cmd == "render":                       # re-render md from json
-        save(load(proj), proj); print("rendered")
+        db = load(proj)
+        _, m = _paths(proj)
+        if not db["tasks"] and m.exists() and _has_task_rows(m.read_text()):
+            print("refused — board.json is missing or has no tasks, but board.md still "
+                 "holds task rows; rendering now would overwrite them with an empty board. "
+                 "Investigate board.json before re-rendering.", file=sys.stderr)
+            return 1
+        save(db, proj); print("rendered")
     elif cmd == "check":                        # drift + validity, for the Stop gate
         db = load(proj)
         probs = validate(db) + check_git(db, proj) + check_plan(db, proj)
         _, m = _paths(proj)
-        if m.exists() and m.read_text() != render(db):
+        if not m.exists():
+            if db["tasks"]:
+                probs.append("board.md is missing but board.json has tasks — it is generated. "
+                             "Fix with: board.py render --project <dir>  (and make changes "
+                             "through the board tools, not by editing board.md)")
+        elif m.read_text() != render(db):
             probs.append("board.md has drifted from board.json — it is generated. "
                          "Fix with: board.py render --project <dir>  (and make changes "
                          "through the board tools, not by editing board.md)")
