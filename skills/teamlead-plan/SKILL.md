@@ -464,6 +464,12 @@ it changes what is being built at all, into `## Goal`).
 | A chat answer | the same — the channel does not matter |
 | A line in `Notes from me` | a Decision (or a `Goal` edit), then **removed from Notes** once it is safely represented |
 
+**Numbers are stable for the plan's life.** A question keeps its number when it is
+struck into `### Answered`; new questions continue the sequence — never renumber
+or reuse a spent number, since "1" and "7" must mean the same question next turn
+as they do now. `plan-lint` refuses any `## Open questions` number that repeats
+another open number or falls at or below the highest number already answered.
+
 **Folding is not transcription.** An answer or a note can raise something new — a
 constraint that conflicts with an existing decision, an assumption that turns out
 to be untested, a scope change. When it does, **write the new open question**.

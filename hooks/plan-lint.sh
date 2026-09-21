@@ -171,6 +171,38 @@ bare=$(awk '
   END { if (q && !s) n++; print n+0 }' "$f")
 [ "$bare" -gt 0 ] && add "$bare open question(s) have no '*Suggest:*' line — say what you would do and why, or mark it '*Your call:*' if it is genuinely theirs to decide"
 
+# 10. stable open-question numbers (D6) — a question keeps its number for the
+# plan's life: answered questions move under '### Answered' with their number
+# intact, new ones continue the sequence, nothing is ever renumbered. Scope is
+# strictly the Open questions section (and, separately, Answered), so lettered
+# sub-bullets ('- a) …' options) and numbered lists elsewhere never leak in.
+open_nums=$(awk '/^## Open questions/{o=1;next} /^### Answered/{o=0} /^## /{o=0} o' "$f" \
+  | grep -oE '^[[:space:]]*[0-9]+\.[[:space:]]' | grep -oE '[0-9]+' || true)
+answered_nums=$(awk '/^### Answered/{o=1;next} /^## /{o=0} o' "$f" \
+  | grep -oE '~~[0-9]+\.' | grep -oE '[0-9]+' || true)
+if [ -n "$open_nums" ]; then
+  dupes=$(sort -n <<<"$open_nums" | uniq -d)
+  for n in $dupes; do
+    add "open question $n is used more than once — question numbers must stay unique for the plan's life"
+  done
+  if [ -n "$answered_nums" ]; then
+    max_ans=$(sort -rn <<<"$answered_nums" | head -1)
+    reused=()
+    for n in $open_nums; do
+      [ "$n" -le "$max_ans" ] && reused+=("$n")
+    done
+    if [ "${#reused[@]}" -gt 0 ]; then
+      list=$(IFS=', '; echo "${reused[*]}")
+      nxt=$((max_ans + 1))
+      if [ "${#reused[@]}" -eq 1 ]; then
+        add "open question $list reuses an answered number — numbers are stable for the plan's life; continue from $nxt"
+      else
+        add "open questions $list reuse answered numbers — numbers are stable for the plan's life; continue from $nxt"
+      fi
+    fi
+  fi
+fi
+
 # 8. staleness — the implementation plan must be stamped with the decisions it was built from
 stamp=$(grep -oE 'decisions:[0-9a-f]{4}' "$f" | head -1 | cut -d: -f2)
 if [ -n "$rows" ]; then
