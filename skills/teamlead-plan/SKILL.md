@@ -504,13 +504,27 @@ authoritative while the ground under it has moved.
 
 ## Stage 5 — handoff
 
-Copy the wave table into `.claude/teamlead/board.md`, column for column, via
-`board_add` with `plan: I<n>` set on each row — that field is the actual link
-back to the plan step; board.py renders it as the `— I<n>` suffix on the task
-text. `board-fence.sh` refuses `board_add` while the plan is below stage 5, so
-nothing can land early. And once you're here, `board.py check` (run every turn
-by the gate) reports any current-phase wave-table step with no matching board
-row, so a half-copied table does not go unnoticed.
+Copy **all waves of the current phase** into `.claude/teamlead/board.md` in one
+`board_add` call, column for column: `plan: I<n>` set on each row — that field
+is the actual link back to the plan step; board.py renders it as the `— I<n>`
+suffix on the task text — and `blocked_by` copied from the `After` column, by
+mapping each `I<n>` named in `After` to the board id of that step's row (add
+the rows in wave order so `board_add`'s returned ids are available to
+reference — it assigns them in the order given, and takes several tasks in one
+call; if a task's `After` names a step whose row already exists from an
+earlier `board_add`, use that existing id). This is safe because overlapping
+`Owns` between two unfinished rows is allowed exactly when one is in the
+other's `blocked_by` chain, and a row cannot go `running` or `merged` while
+any blocker is unmerged — so the wave order is enforced by the board itself,
+not by the lead remembering it. `board-fence.sh` refuses `board_add` while the
+plan is below stage 5, so nothing can land early. And once you're here,
+`board.py check` (run every turn by the gate) reports any current-phase
+wave-table step with no matching board row, so a half-copied table does not
+go unnoticed.
+
+Phases still go **one at a time**: board only the current phase's waves. The
+next phase is boarded only after the current one has passed stage 7 and the
+header is back at stage 5 — stage 6/7 testing between phases is the point.
 
 **Leave `.claude/teamlead/.state/active-plan` set.** It used to be cleared here, and
 that is what made the session dangle: implementation would start, plan mode would
@@ -554,7 +568,7 @@ memory; the plan file and the board are the whole handoff (D14):
 | Stage | Action |
 |:----:|---|
 | 3 or 4, with a recorded Go | The user already said Go — write the implementation plan (3) or start implementing (4). |
-| 5 | Put the **current phase's** wave rows on the board — or, when the table has no phase rows, just the **current wave's** — (`board_add`, `plan: I<n>`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
+| 5 | Put **all of the current phase's** wave rows on the board — when the table has no phase rows, the whole table counts as one phase — (`board_add`, `plan: I<n>`, `blocked_by` from `After`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
 | 6 | Run the `verified by: agent` criteria for real. |
 | 7 | Hand the `verified by: user` criteria back to the user. |
 
