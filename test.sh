@@ -1632,6 +1632,136 @@ $d"
 dupes=$(printf '%s\n' "$documented" | uniq -d)
 [ -z "$dupes" ] && ok "  no filename listed twice" || bad "  listed more than once: $dupes"
 
+echo "== D8: owns-overlap allowed along a transitive blocked_by chain =="
+d8p=$T/d8; mkdir -p $d8p
+python3 "$B" add --project $d8p --task "I1" --agent tl-sonnet-high --owns scripts/board.py >/dev/null            # id 1
+check "I2 blocked_by I1, no overlap with I1's owns: accepted" \
+  "$(python3 "$B" add --project $d8p --task "I2" --agent tl-sonnet-high --owns SKILL.md --blocked-by 1 >/dev/null 2>&1; echo $?)" 0   # id 2
+check "I3 owns board.py again, blocked_by I2 (chain reaches I1 through I2): accepted" \
+  "$(python3 "$B" add --project $d8p --task "I3" --agent tl-sonnet-high --owns scripts/board.py --blocked-by 2 >/dev/null 2>&1; echo $?)" 0   # id 3
+python3 "$B" add --project $d8p --task "X" --agent tl-sonnet-high --owns scripts/board.py >"$T/d8out" 2>&1
+rc=$?
+check "unrelated overlap with no blocked_by: refused" "$rc" 1
+grep -q 'overlapping paths' "$T/d8out" && ok "  names the overlap" || bad "  names the overlap"
+
+echo "== D8: direct chain, same path, accepted =="
+d8b=$T/d8direct; mkdir -p $d8b
+python3 "$B" add --project $d8b --task "A" --agent tl-sonnet-high --owns chain/x >/dev/null   # id 1
+check "B blocked_by A, same owns path: accepted" \
+  "$(python3 "$B" add --project $d8b --task "B" --agent tl-sonnet-high --owns chain/x --blocked-by 1 >/dev/null 2>&1; echo $?)" 0
+
+echo "== D8: order of ids must not matter (lower id blocked_by higher id) =="
+d8c=$T/d8order; mkdir -p $d8c/.claude/teamlead/.state
+cat > $d8c/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 3, "tasks": [
+  {"id": 1, "task": "a", "agent": "tl-sonnet-low", "owns": ["ord/x"], "state": "blocked", "branch": null, "plan": null, "blocked_by": [2], "notes": null, "worker": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "b", "agent": "tl-sonnet-low", "owns": ["ord/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "worker": null, "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $d8c >/dev/null 2>&1
+check "lower id blocked_by higher id, same path: still linked, check passes" \
+  "$(python3 "$B" check --project $d8c >/dev/null 2>&1; echo $?)" 0
+
+echo "== D8: a blocked_by cycle terminates instead of hanging =="
+d8d=$T/d8cycle; mkdir -p $d8d/.claude/teamlead/.state
+cat > $d8d/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 3, "tasks": [
+  {"id": 1, "task": "a", "agent": "tl-sonnet-low", "owns": ["cyc/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [2], "notes": null, "worker": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "b", "agent": "tl-sonnet-low", "owns": ["cyc/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [1], "notes": null, "worker": null, "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $d8d >/dev/null 2>&1
+timeout 5 python3 "$B" check --project $d8d >"$T/d8cout" 2>&1
+rc=$?
+[ "$rc" -ne 124 ] && ok "cycle does not hang (terminated within 5s)" || bad "cycle hangs (timed out)"
+check "mutual direct blockers are linked, so the overlap is allowed: check passes" "$rc" 0
+
+echo "== D9: running/merged refused while a blocker is unmerged =="
+d9p=$T/d9; mkdir -p $d9p
+python3 "$B" add --project $d9p --task "I1" --agent tl-sonnet-high --owns scripts/board.py >/dev/null                         # id 1
+python3 "$B" add --project $d9p --task "I2" --agent tl-sonnet-high --owns SKILL.md --blocked-by 1 >/dev/null                 # id 2
+python3 "$B" add --project $d9p --task "I3" --agent tl-sonnet-high --owns scripts/board.py --blocked-by 2 >/dev/null          # id 3
+
+python3 "$B" update --project $d9p --id 3 --state running >"$T/d9out1" 2>&1; rc=$?
+check "I3 running while I2 (its blocker) is blocked: refused" "$rc" 1
+grep -q 'is blocked by 2, which is blocked' "$T/d9out1" && ok "  names the unmerged blocker and its state" || bad "  names the unmerged blocker and its state"
+
+python3 "$B" update --project $d9p --id 3 --state merged >"$T/d9out2" 2>&1; rc=$?
+check "I3 merged while I2 is blocked: refused likewise" "$rc" 1
+grep -q 'is blocked by 2, which is blocked' "$T/d9out2" && ok "  same message for a merged jump" || bad "  same message for a merged jump"
+
+python3 "$B" update --project $d9p --id 1 --state merged >/dev/null 2>&1; rc=$?
+check "I1 merged: ok" "$rc" 0
+st2=$(python3 -c "import json;d=json.load(open('$d9p/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==2][0])")
+check "I2 auto-unblocked to queued once I1 merged" "$st2" "queued"
+python3 "$B" update --project $d9p --id 2 --state running >/dev/null 2>&1; rc=$?
+check "I2 running: ok" "$rc" 0
+
+python3 "$B" update --project $d9p --id 3 --state running >"$T/d9out3" 2>&1; rc=$?
+check "I3 running while I2 is running (not merged): still refused" "$rc" 1
+grep -q 'is blocked by 2, which is running' "$T/d9out3" && ok "  names I2's current state" || bad "  names I2's current state"
+
+python3 "$B" update --project $d9p --id 2 --state merged >/dev/null 2>&1; rc=$?
+check "I2 merged: ok" "$rc" 0
+python3 "$B" update --project $d9p --id 3 --state running >/dev/null 2>&1; rc=$?
+check "I3 running, now that I2 is merged: ok" "$rc" 0
+
+echo "== D9: normal blocked/auto-unblock path is unaffected =="
+d9n=$T/d9normal; mkdir -p $d9n
+python3 "$B" add --project $d9n --task "A" --agent tl-sonnet-high --owns d9n/a >/dev/null                     # id 1
+python3 "$B" add --project $d9n --task "B" --agent tl-sonnet-high --owns d9n/b --blocked-by 1 >/dev/null       # id 2
+stb=$(python3 -c "import json;d=json.load(open('$d9n/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==2][0])")
+check "B starts blocked (has an unmerged blocker)" "$stb" "blocked"
+python3 "$B" update --project $d9n --id 1 --state merged >/dev/null 2>&1; rc=$?
+check "A merged: ok" "$rc" 0
+stb2=$(python3 -c "import json;d=json.load(open('$d9n/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==2][0])")
+check "B auto-unblocked to queued" "$stb2" "queued"
+python3 "$B" update --project $d9n --id 2 --state running >/dev/null 2>&1; rc=$?
+check "B running: accepted" "$rc" 0
+
+echo "== D6: check_git warns when a returned branch is behind main =="
+d6p=$T/d6; mkdir -p $d6p; cd $d6p; git init -q; git config user.email t@t.t; git config user.name t
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
+echo base > a.txt; git add -A >/dev/null; git commit -qm init
+mainbr=$(git rev-parse --abbrev-ref HEAD)
+python3 "$B" add --project $d6p --task w --agent tl-sonnet-high --owns a.txt >/dev/null                 # id 1
+git checkout -q -b feat; echo work > b.txt; git add -A >/dev/null; git commit -qm work; git checkout -q $mainbr
+python3 "$B" update --project $d6p --id 1 --state returned --branch feat >/dev/null
+python3 "$B" check --project $d6p >/dev/null 2>&1; rc=$?
+check "feat contains HEAD: check passes" "$rc" 0
+echo more >> a.txt; git commit -qam advance
+python3 "$B" check --project $d6p >"$T/d6out" 2>&1; rc=$?
+check "master advanced past feat's branch point: check fails" "$rc" 1
+grep -q "branch feat is behind $mainbr — rebase before merging" "$T/d6out" && ok "  names the behind-main warning" || bad "  names the behind-main warning"
+python3 "$B" update --project $d6p --id 1 --state running >/dev/null
+python3 "$B" check --project $d6p >"$T/d6out2" 2>&1
+grep -q 'behind' "$T/d6out2" && bad "  running row still warns (should be skipped)" || ok "  running row is skipped, no behind-main warning"
+git checkout -q feat; git rebase -q $mainbr; git checkout -q $mainbr
+python3 "$B" update --project $d6p --id 1 --state returned >/dev/null
+python3 "$B" check --project $d6p >/dev/null 2>&1; rc=$?
+check "rebased and returned again: check passes" "$rc" 0
+cd $proj
+
+echo "== D7: check_git flags a leftover worktree for a merged row =="
+d7p=$T/d7; mkdir -p $d7p; cd $d7p; git init -q; git config user.email t@t.t; git config user.name t
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
+echo base > a.txt; git add -A >/dev/null; git commit -qm init
+python3 "$B" add --project $d7p --task w --agent tl-sonnet-high --owns a.txt >/dev/null                 # id 1
+git worktree add -q "$T/d7wt" -b wtb >/dev/null 2>&1
+echo work > "$T/d7wt/b.txt"; git -C "$T/d7wt" add -A >/dev/null; git -C "$T/d7wt" commit -qm work
+git merge -q wtb >/dev/null
+python3 "$B" update --project $d7p --id 1 --state merged --branch wtb >/dev/null
+python3 "$B" check --project $d7p >"$T/d7out" 2>&1; rc=$?
+check "merged but the worktree is still there: check fails" "$rc" 1
+grep -q "is merged but worktree $T/d7wt still exists" "$T/d7out" && ok "  names the worktree path" || bad "  names the worktree path"
+grep -q 'git worktree remove' "$T/d7out" && ok "  suggests the removal command" || bad "  suggests the removal command"
+lines=$(grep -c '^  - ' "$T/d7out")
+check "exactly one problem line (real merge, not a squash-mismatch too)" "$lines" 1
+git worktree remove "$T/d7wt"
+python3 "$B" check --project $d7p >/dev/null 2>&1; rc=$?
+check "worktree removed: check passes" "$rc" 0
+cd $proj
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
