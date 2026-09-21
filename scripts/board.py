@@ -527,6 +527,44 @@ def mutate(fn, project=None, **kw):
         return res
 
 
+def worker_start(agent_id, project=None, board=None, branch=None):
+    """D12: PostToolUse(Agent) calls this right after a dispatch whose brief
+    carried `board: N`, with --board=N — row N moves to running/worker/branch
+    through mutate(op_update) so every rule applies, D9's blocked-by gate
+    included. SubagentStart calls it with no --board on EVERY start, including
+    a finished worker resumed via SendMessage (the retry ladder) — that path
+    finds the row this agent id last had 'returned' and reopens it; no match
+    (the common case: the row is already 'running' from the --board call, or
+    this is a scout with no board row) is a silent no-op. Either path is a
+    no-op, never creating a board, when the project has none yet."""
+    j, _ = _paths(project)
+    if not j.exists():
+        return None
+    if board is not None:
+        return mutate(op_update, project=project, id=board, state="running",
+                       worker=agent_id, branch=branch)
+    row = next((t for t in load(project)["tasks"]
+                if t.get("worker") == agent_id and t["state"] == "returned"), None)
+    if row is None:
+        return None
+    return mutate(op_update, project=project, id=row["id"], state="running")
+
+
+def worker_stop(agent_id, project=None):
+    """D12: SubagentStop. The row this agent was running moves to returned —
+    a crashed or killed worker lands here too, which is right: nobody is on
+    it and the lead has to look. No board.json, or no row of this agent in
+    'running', is a no-op."""
+    j, _ = _paths(project)
+    if not j.exists():
+        return None
+    row = next((t for t in load(project)["tasks"]
+                if t.get("worker") == agent_id and t["state"] == "running"), None)
+    if row is None:
+        return None
+    return mutate(op_update, project=project, id=row["id"], state="returned")
+
+
 def forget(ids, project=None, before=None, not_session=None):
     """Close out workers that will never report back.
 
@@ -556,7 +594,24 @@ def forget(ids, project=None, before=None, not_session=None):
             if a in live:
                 fh.write(f"{now()}  cancel    id={a}  reason={reason}\n")
                 done.append(a)
-    return {"forgotten": done, "still_outstanding": ledger(project)["outstanding"]}
+    # D2: a 'running' row whose worker just got cancelled here never reported
+    # back, so the work must be redone — requeue it and say why. Skipped
+    # entirely when there is no board (restore.sh runs forget at every
+    # SessionStart; the events log can exist without a board.json).
+    requeued = []
+    j, _ = _paths(project)
+    if done and j.exists():
+        for a in done:
+            row = next((t for t in load(project)["tasks"]
+                        if t.get("worker") == a and t["state"] == "running"), None)
+            if row is None:
+                continue
+            line = f"requeued: worker {a} lost on restart"
+            notes = line if not row.get("notes") else row["notes"] + "\n" + line
+            mutate(op_update, project=project, id=row["id"], state="queued", notes=notes)
+            requeued.append(row["id"])
+    return {"forgotten": done, "still_outstanding": ledger(project)["outstanding"],
+            "requeued": requeued}
 
 
 def summary(db):
@@ -758,6 +813,10 @@ def main(argv):
             elif k == "owns":
                 kw[k] = _norm_owns(v)
             elif k == "id":
+                # worker-start/-stop take a string agent id (e.g. "ac82e6a6..."),
+                # every other command's --id is a board task id (int).
+                kw[k] = v if cmd in ("worker-start", "worker-stop") else int(v)
+            elif k == "board":
                 kw[k] = int(v)
             elif k == "blocked_by":               # F17 item 5: was landing as a raw string
                 kw[k] = [int(x) for x in v.split(",") if x.strip()]
@@ -788,6 +847,25 @@ def main(argv):
         if rid is None:
             print("usage: board.py remove <id>", file=sys.stderr); return 1
         print(json.dumps(mutate(op_remove, project=proj, id=rid), indent=2))
+    elif cmd == "worker-start":
+        # D12: hook-driven (SubagentStart/PostToolUse carry the worker's id in
+        # the payload, not CLAUDE_AGENT_ID) — no _refuse_if_worker() here. Safe
+        # to leave ungated: all this can do is move a row along its own
+        # lifecycle through mutate, where D9/overlap validation still applies.
+        proj = _write_project(proj)
+        if kw.get("id") is None:
+            print("usage: board.py worker-start --id A [--board N] [--branch B]",
+                 file=sys.stderr)
+            return 1
+        res = worker_start(kw["id"], proj, board=kw.get("board"), branch=kw.get("branch"))
+        print(json.dumps(res if res is not None else {"updated": None}, indent=2))
+    elif cmd == "worker-stop":
+        proj = _write_project(proj)                # D12: hook-driven, see worker-start above
+        if kw.get("id") is None:
+            print("usage: board.py worker-stop --id A", file=sys.stderr)
+            return 1
+        res = worker_stop(kw["id"], proj)
+        print(json.dumps(res if res is not None else {"updated": None}, indent=2))
     elif cmd == "status":
         db, lg = load(proj), ledger(proj)
         live = [t for t in db["tasks"] if t["state"] != "merged"]
