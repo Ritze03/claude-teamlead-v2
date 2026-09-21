@@ -598,14 +598,15 @@ def _call(name, args):
     if name == "board_add":
         _refuse_if_worker()                       # belt-and-braces: board-fence.sh already fences this
         proj = _write_project(None)
-        added = []
-        db = load(proj)
-        for spec in args.get("tasks", []):
-            added.append(op_add(db, **spec))
-        problems = validate(db)
-        if problems:
-            raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
-        save(db, proj)
+        with _board_lock(proj):                    # D5: this is the lead's primary write path too
+            added = []
+            db = load(proj)
+            for spec in args.get("tasks", []):
+                added.append(op_add(db, **spec))
+            problems = validate(db)
+            if problems:
+                raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
+            save(db, proj)
         return {"added": added, "open": summary(db)["open"]}
     if name == "board_update":
         _refuse_if_worker()                       # belt-and-braces: board-fence.sh already fences this

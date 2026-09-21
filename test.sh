@@ -112,6 +112,31 @@ check "race: the two rows have distinct ids" "$ids" "1,2"
 tmpleft=$(find "$lp/.claude/teamlead/.state" -maxdepth 1 -name '*.tmp*' 2>/dev/null | wc -l)
 check "atomic save: no leftover tmp file in .state/" "$tmpleft" 0
 
+echo "== D5: board_add's own MCP write path (_call, outside mutate()) is locked too =="
+mcp_p=$T/lockmcp; mkdir -p $mcp_p
+mcpracer() {
+  python3 -c "
+import sys, time, os
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+os.environ['CLAUDE_PROJECT_DIR'] = '$mcp_p'
+board._call('board_add', {'tasks': [{'task': '$1'}]})
+"
+}
+mcpracer A & mp1=$!
+mcpracer B & mp2=$!
+wait $mp1 $mp2
+mcp_json="$mcp_p/.claude/teamlead/.state/board.json"
+mcp_nrows=$(python3 -c "import json; print(len(json.load(open('$mcp_json'))['tasks']))")
+check "board_add race: both concurrent MCP adds landed as rows" "$mcp_nrows" 2
+mcp_ids=$(python3 -c "import json; d=json.load(open('$mcp_json')); print(','.join(sorted(str(t['id']) for t in d['tasks'])))")
+check "board_add race: the two rows have distinct ids" "$mcp_ids" "1,2"
+
 echo "== D10: update usage guard =="
 check "update without --id prints usage" "$(lcmd update --state running)" 1
 grep -q '^usage: board.py update --id' "$T/lout" && ok "  usage line printed" || bad "  usage line printed"
