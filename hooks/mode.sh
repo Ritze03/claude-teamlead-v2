@@ -57,7 +57,17 @@ if [ "$p" = "go" ] && [ -f "$TL_STATE/active-plan" ]; then
   plan=$(cat "$TL_STATE/active-plan")
   if [ -f "$plan" ]; then
     stage=$(grep -m1 -oiE '^> \*\*stage [0-9]+\*\*' "$plan" | grep -oE '[0-9]+')
-    [ -n "$stage" ] && printf '%s %s\n' "$stage" "$(tl_now)" >> "$TL_STATE/plan-go"
+    if [ -n "$stage" ]; then
+      # F21/D7: "first Go" is judged BEFORE the append below adds this one.
+      first_go=1; [ -s "$TL_STATE/plan-go" ] && first_go=0
+      printf '%s %s\n' "$stage" "$(tl_now)" >> "$TL_STATE/plan-go"
+      # watch-plan.sh:72 marks plan-touched on the first user save it sees. No
+      # mark by the first recorded Go means the user typed Go having only ever
+      # seen the lead's own edits — worth one nudge, not a repeat on every Go.
+      if [ "$first_go" -eq 1 ] && [ ! -f "$TL_STATE/plan-touched" ]; then
+        echo "[teamlead] First Go recorded, but the plan file was never edited by you — answer in the file or in chat if anything in it is wrong."
+      fi
+    fi
   fi
 fi
 

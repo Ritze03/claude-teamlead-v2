@@ -23,13 +23,26 @@ cwd=$(j .cwd); fp=$(j .tool_input.file_path); [ -n "$fp" ] || fp=$(j .tool_input
 
 case "$fp" in /*) ;; *) fp="$cwd/$fp" ;; esac   # relative paths are relative to the worker's cwd
 root=$(realpath -m "$cwd"); target=$(realpath -m "$fp")
+sid=$(j .session_id)
 # The session scratchpad is where the harness tells agents to put temp files.
 # Allowing it costs nothing — nothing there is project state — while the repo
-# itself stays fully fenced.
+# itself stays fully fenced. Scoped to THIS session's own tree
+# (/tmp/claude-<uid>/<project-slug>/<session_id>/...) when we know the session
+# id, so one worker can't write into another session's scratchpad. Without a
+# session id on the event (older harness / synthetic call) fall back to the
+# old broad rule rather than blocking every scratchpad write outright.
 case "$target" in
   "$root"/*)                 exit 0 ;;
-  /tmp/claude-*/*)           exit 0 ;;
 esac
+if [ -n "$sid" ]; then
+  case "$target" in
+    /tmp/claude-*/*/"$sid"/*) exit 0 ;;
+  esac
+else
+  case "$target" in
+    /tmp/claude-*/*)          exit 0 ;;
+  esac
+fi
 jq -n --arg t "$target" --arg r "$root" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
   permissionDecisionReason:("Worker fence: you may only write inside your own worktree (" + $r + "). Refused: " + $t + ". If the task genuinely needs this, stop and report it to the lead instead.")}}'
 exit 0
