@@ -718,6 +718,12 @@ check "worker: session scratchpad allowed" "$(fence '{"cwd":"/wt",'"$W"',"tool_i
 check "worker: other /tmp still denied"   "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"file_path":"/tmp/elsewhere/x"}}')" deny
 check "worker: notebook_path too"     "$(fence '{"cwd":"/wt",'"$W"',"tool_input":{"notebook_path":"/home/u/n.ipynb"}}')" deny
 
+echo "== worker fence: scratchpad is scoped to the calling session (F9) =="
+check "worker: own session's scratchpad allowed" \
+  "$(fence '{"cwd":"/wt",'"$W"',"session_id":"S1","tool_input":{"file_path":"/tmp/claude-1000/x/S1/scratchpad/a"}}')" allow
+check "worker: another session's scratchpad denied" \
+  "$(fence '{"cwd":"/wt",'"$W"',"session_id":"S1","tool_input":{"file_path":"/tmp/claude-1000/x/S2/scratchpad/a"}}')" deny
+
 echo "== plan-lint stage awareness =="
 mkplan(){ cat > "$T/pl.md" <<PEOF
 # T
@@ -1123,6 +1129,7 @@ grep -q 'stage: 3 — working it out' <<<"$stout" && ok "names the stage and its
 grep -q 'go: none recorded' <<<"$stout" && ok "  no Go recorded" || bad "  no Go recorded"
 grep -q 'watcher: NOT running — restart it:' <<<"$stout" && ok "  says the watcher is not running" || bad "  watcher not running"
 grep -q 'watch-plan.sh' <<<"$stout" && ok "    and names watch-plan.sh" || bad "    names watch-plan.sh"
+grep -q "Active plan: $stf" <<<"$stout" && ok "  (F15) prints the literal 'Active plan:' line" || bad "  (F15) prints the literal 'Active plan:' line"
 
 printf '3 2026-01-01T00:00:00Z\n' > $stp/.claude/teamlead/.state/plan-go
 stout=$("$H/state.sh" "$stp")
@@ -1142,6 +1149,24 @@ grep -q 'Session was cleared mid-plan' <<<"$rsout" && ok "stage 6: flags the cle
 printf '# T\n\n> **Stage 3** — x\n' > $stf
 rsout=$(echo '{"hook_event_name":"SessionStart","source":"clear","cwd":"'$stp'"}' | "$H/restore.sh")
 grep -q 'Session was cleared mid-plan' <<<"$rsout" && bad "stage 3: should not flag the clear" || ok "stage 3: does not flag the clear"
+
+echo "== restore.sh: resume and compact also print the lead line and the state block (F23) =="
+rsout_resume=$(echo '{"hook_event_name":"SessionStart","source":"resume","session_id":"RS1","cwd":"'$stp'"}' | "$H/restore.sh")
+grep -q 'You are the lead' <<<"$rsout_resume" && ok "resume: prints the lead line" || bad "resume: prints the lead line"
+grep -q 'stage: 3' <<<"$rsout_resume" && ok "  and the state block" || bad "  and the state block"
+rsout_compact=$(echo '{"hook_event_name":"SessionStart","source":"compact","session_id":"RS1","cwd":"'$stp'"}' | "$H/restore.sh")
+grep -q 'You are the lead' <<<"$rsout_compact" && ok "compact: prints the lead line" || bad "compact: prints the lead line"
+grep -q 'stage: 3' <<<"$rsout_compact" && ok "  and the state block" || bad "  and the state block"
+# compact must never forget, even when a stale foreign-session worker is eligible.
+stpL=$stp/.claude/teamlead/.state/events.log; rm -f "$stpL"
+echo '{"hook_event_name":"SubagentStart","cwd":"'$stp'","agent_type":"tl-sonnet-high","agent_id":"foreign1","session_id":"OTHER"}' \
+  | "$H/record.sh" >/dev/null
+tenago_stp=$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
+sed -i "s/^[^ ]*\(.*id=foreign1.*\)\$/$tenago_stp\1/" "$stpL"
+echo '{"hook_event_name":"SessionStart","source":"compact","session_id":"RS1","cwd":"'$stp'"}' | "$H/restore.sh" >/dev/null
+stp_out=$(python3 "$B" ledger --project $stp | python3 -c 'import json,sys;print(json.load(sys.stdin)["outstanding"])')
+check "compact: a stale foreign-session worker is still outstanding, not forgotten" "$stp_out" "['foreign1']"
+rm -f "$stpL"
 
 echo "== skill text reflects the phase-A changes =="
 grep -q 'stop teamlead' "$SK" && bad "teamlead/SKILL.md still says 'stop teamlead'" || ok "teamlead/SKILL.md no longer says 'stop teamlead'"
@@ -1321,6 +1346,155 @@ grep -q '^## Brainstorm request' "$PS2" && ok "  and the '## Brainstorm request'
 grep -q 'inotifywait' "$PS2" && ok "  and 'inotifywait'" || bad "  'inotifywait'"
 grep -qF 'ran `' "$PS2" && ok "  and the D10 tick-evidence format" || bad "  the D10 tick-evidence format"
 grep -qiE '^## .*phase' "$PS2" && ok "  and a heading about phases" || bad "  a heading about phases"
+
+# ==============================================================================
+# core-fixes (I11): fixtures for hook-side machinery landed on master in this
+# plan — D1 (session-aware ledger forgetting), D2 (gate.sh's plan-stage check
+# 3b), F5 (worktree cwd resolution), F11 (gitignore already-covered), F21
+# (mode.sh's first-Go nudge), D5 (restore.sh renders board.md), and I9 docs.
+# F9 and F15/F23 fixtures were added inline, next to the sections they extend
+# (worker fence, state.sh, restore.sh's clear-mid-plan block).
+# ==============================================================================
+
+echo "== D1: restore.sh closes out a previous session's dead workers on startup, never on compact =="
+d1p=$T/d1kill; mkdir -p $d1p/.claude/teamlead/.state; : > $d1p/.claude/teamlead/.state/active
+d1L=$d1p/.claude/teamlead/.state/events.log; rm -f "$d1L"
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1p'","agent_type":"tl-sonnet-high","agent_id":"old1","session_id":"S0"}' "$H/record.sh" >/dev/null
+grep -qE 'start.*id=old1.*session=S0' "$d1L" && ok "old1's start line carries session=S0" || bad "old1's start line carries session=S0"
+yesterday=$(date -u -d '-1 day' +%Y-%m-%dT%H:%M:%SZ)
+sed -i "s/^[^ ]*\(.*id=old1.*\)\$/$yesterday\1/" "$d1L"
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1p'","agent_type":"tl-sonnet-high","agent_id":"cur1","session_id":"S1"}' "$H/record.sh" >/dev/null
+rsout1=$(echo '{"hook_event_name":"SessionStart","source":"startup","session_id":"S1","cwd":"'$d1p'"}' | "$H/restore.sh")
+grep -q 'Closed out 1 worker(s)' <<<"$rsout1" && ok "startup: closes out 1 worker from the dead session" || bad "startup: closes out 1 worker from the dead session"
+grep -q 'old1' <<<"$rsout1" && ok "  names old1" || bad "  names old1"
+d1ledger(){ python3 "$B" ledger --project $d1p | python3 -c 'import json,sys;print(sorted(json.load(sys.stdin)["outstanding"]))'; }
+check "outstanding is now only cur1" "$(d1ledger)" "['cur1']"
+grep -qE 'cancel.*id=old1.*reason=restart' "$d1L" && ok "  a cancel/restart line was written" || bad "  a cancel/restart line was written"
+
+# A second stale worker from the dead session, to prove compact leaves it alone.
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1p'","agent_type":"tl-sonnet-high","agent_id":"old2","session_id":"S0"}' "$H/record.sh" >/dev/null
+# Before the session boundary but well within the 4h stale-age-out window, so it
+# reads as OUTSTANDING (not abandoned) throughout — the point under test is
+# session-scoping, not staleness.
+tenago=$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
+sed -i "s/^[^ ]*\(.*id=old2.*\)\$/$tenago\1/" "$d1L"
+rsout2=$(echo '{"hook_event_name":"SessionStart","source":"compact","session_id":"S1","cwd":"'$d1p'"}' | "$H/restore.sh")
+grep -q 'Closed out' <<<"$rsout2" && bad "compact: forgets nothing (should not have forgotten anything)" || ok "compact: forgets nothing"
+check "old2 is still outstanding after compact" "$(d1ledger)" "['cur1', 'old2']"
+
+# A NEW start under the current session survives a real startup-triggered forget.
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1p'","agent_type":"tl-sonnet-high","agent_id":"cur2","session_id":"S1"}' "$H/record.sh" >/dev/null
+rsout3=$(echo '{"hook_event_name":"SessionStart","source":"startup","session_id":"S1","cwd":"'$d1p'"}' | "$H/restore.sh")
+grep -q 'old2' <<<"$rsout3" && ok "  a later startup finally sweeps old2" || bad "  a later startup finally sweeps old2"
+check "cur1 and cur2 (this session) still outstanding" "$(d1ledger)" "['cur1', 'cur2']"
+
+echo "== D1: record.sh with .state/active absent still records an outstanding worker's own SubagentStop (F16) =="
+d1bp=$T/d1noactive; mkdir -p $d1bp/.claude/teamlead/.state; : > $d1bp/.claude/teamlead/.state/active
+d1bL=$d1bp/.claude/teamlead/.state/events.log
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1bp'","agent_type":"tl-sonnet-high","agent_id":"nw1"}' "$H/record.sh" >/dev/null
+rm -f $d1bp/.claude/teamlead/.state/active
+check "SubagentStop for an outstanding id, active absent: hook still exits 0" \
+  "$(ev '{"hook_event_name":"SubagentStop","cwd":"'$d1bp'","agent_type":"tl-sonnet-high","agent_id":"nw1","last_assistant_message":"done"}' "$H/record.sh")" 0
+grep -qE 'return.*id=nw1' "$d1bL" && ok "  the return line was appended despite no active flag" || bad "  the return line was appended despite no active flag"
+check "SubagentStop for an unknown id, active absent: hook exits 0" \
+  "$(ev '{"hook_event_name":"SubagentStop","cwd":"'$d1bp'","agent_type":"tl-sonnet-high","agent_id":"ghost","last_assistant_message":"done"}' "$H/record.sh")" 0
+grep -q 'id=ghost' "$d1bL" && bad "  an unknown id got recorded anyway" || ok "  an unknown id recorded nothing"
+
+echo "== D2: gate.sh's plan-stage check (3b) catches a header bump that bypassed plan-fence.sh =="
+d2p=$T/d2gate; mkdir -p $d2p/.claude/teamlead/plan $d2p/.claude/teamlead/.state
+: > $d2p/.claude/teamlead/.state/active
+d2f=$d2p/.claude/teamlead/plan/topic.md
+echo "$d2f" > $d2p/.claude/teamlead/.state/active-plan
+d2write(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$d2f"
+  h=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$d2f" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$h/" "$d2f"
+}
+d2ev(){ echo "$1" | "$H/gate.sh" >"$T/d2out" 2>&1; echo $?; }
+D2STOP='{"hook_event_name":"Stop","cwd":"'$d2p'","stop_hook_active":false}'
+
+d2write 3
+printf '3 %s\n' "$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)" > $d2p/.claude/teamlead/.state/plan-stage
+rm -f $d2p/.claude/teamlead/.state/plan-go
+sed -i 's/Stage 3/Stage 5/' "$d2f"
+check "forward jump Stage 3->5 in one edit: exit 2" "$(d2ev "$D2STOP")" 2
+grep -qF 'moved Stage 3 → 5' "$T/d2out" && ok "  names the jump" || bad "  names the jump"
+
+sed -i 's/Stage 5/Stage 4/' "$d2f"
+check "3->4 with no Go recorded since: exit 2" "$(d2ev "$D2STOP")" 2
+grep -qF 'no "Go" is recorded' "$T/d2out" && ok "  says so" || bad "  says so"
+
+printf '3 %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $d2p/.claude/teamlead/.state/plan-go
+check "3->4 with a Go recorded since: exit 0" "$(d2ev "$D2STOP")" 0
+check "  plan-stage now starts with '4'" "$(cut -d' ' -f1 $d2p/.claude/teamlead/.state/plan-stage)" 4
+
+rm -f $d2p/.claude/teamlead/.state/plan-stage
+check "deleting plan-stage: gate passes and re-seeds it" "$(d2ev "$D2STOP")" 0
+grep -q '^4 ' $d2p/.claude/teamlead/.state/plan-stage && ok "  re-seeded at the current header stage (4)" || bad "  re-seeded at stage 4"
+
+sed -i 's/Stage 4/Stage 2/' "$d2f"
+check "backward move Stage 4->2: accepted" "$(d2ev "$D2STOP")" 0
+check "  plan-stage now starts with '2'" "$(cut -d' ' -f1 $d2p/.claude/teamlead/.state/plan-stage)" 2
+
+echo "== F5: a hook fired from inside a worktree resolves to the main checkout (I2) =="
+f5p=$T/f5proj; mkdir -p $f5p
+git -C $f5p init -q 2>/dev/null; git -C $f5p config user.email t@t.t; git -C $f5p config user.name t
+echo a > $f5p/a.txt; git -C $f5p add -A >/dev/null; git -C $f5p commit -qm init >/dev/null
+# .claude/teamlead is created AFTER the commit and never staged, so the new
+# worktree's checkout of HEAD does not carry it along.
+mkdir -p $f5p/.claude/teamlead/.state; : > $f5p/.claude/teamlead/.state/active
+git -C $f5p worktree add -q "$T/wt5" -b wtb5 2>/dev/null
+f5L=$f5p/.claude/teamlead/.state/events.log; rm -f "$f5L"
+echo '{"hook_event_name":"SubagentStart","cwd":"'"$T"'/wt5","agent_type":"tl-sonnet-high","agent_id":"wtworker"}' \
+  | env -u CLAUDE_PROJECT_DIR "$H/record.sh" >/dev/null 2>&1
+grep -qE 'start.*id=wtworker' "$f5L" && ok "the event lands in the MAIN checkout's events.log" || bad "the event lands in the main checkout's events.log"
+[ -d "$T/wt5/.claude/teamlead" ] && bad "  a .claude/teamlead was created inside the worktree" || ok "  no .claude/teamlead was created inside the worktree"
+git -C $f5p worktree remove --force "$T/wt5" 2>/dev/null
+
+echo "== F11: tl_ensure_gitignore appends nothing when an existing pattern already covers it =="
+f11p=$T/f11gi; mkdir -p $f11p/.claude/teamlead/.state; : > $f11p/.claude/teamlead/.state/active
+git -C $f11p init -q 2>/dev/null; git -C $f11p config user.email t@t.t; git -C $f11p config user.name t
+printf '.claude/\n' > $f11p/.gitignore
+cp $f11p/.gitignore "$T/f11gi.before"
+echo '{"hook_event_name":"SessionStart","source":"startup","cwd":"'$f11p'"}' | "$H/restore.sh" >/dev/null 2>&1
+cmp -s "$T/f11gi.before" "$f11p/.gitignore" && ok "restore.sh leaves an existing '.claude/' pattern's .gitignore untouched" || bad "restore.sh leaves an existing '.claude/' pattern's .gitignore untouched"
+
+echo "== mode.sh: first Go nudges when the plan was never edited by the user (F21) =="
+f21p=$T/f21go; mkdir -p $f21p/.claude/teamlead/plan $f21p/.claude/teamlead/.state
+: > $f21p/.claude/teamlead/.state/active
+f21f=$f21p/.claude/teamlead/plan/topic.md
+printf '# T\n\n> **Stage 3** — x\n' > $f21f
+echo "$f21f" > $f21p/.claude/teamlead/.state/active-plan
+rm -f $f21p/.claude/teamlead/.state/plan-go $f21p/.claude/teamlead/.state/plan-touched
+f21say(){ echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$f21p'","prompt":"'"$1"'"}' | "$H/mode.sh"; }
+out=$(f21say "Go")
+grep -q 'First Go recorded, but the plan file was never edited by you' <<<"$out" && ok "first Go, plan never touched: nudges" || bad "first Go, plan never touched: nudges"
+out2=$(f21say "Go")
+grep -q 'First Go recorded' <<<"$out2" && bad "second Go: nudges again (should not)" || ok "second Go: no repeat nudge"
+rm -f $f21p/.claude/teamlead/.state/plan-go
+: > $f21p/.claude/teamlead/.state/plan-touched
+out3=$(f21say "Go")
+grep -q 'First Go recorded' <<<"$out3" && bad "plan-touched present: still nudges (should not)" || ok "plan-touched present: no nudge on first Go"
+
+echo "== D5: restore.sh renders board.md from board.json, and never creates one where none existed =="
+d5p=$T/d5render; mkdir -p $d5p/.claude/teamlead/.state; : > $d5p/.claude/teamlead/.state/active
+python3 "$B" add --project $d5p --task "render me" --agent tl-sonnet-low --owns d5/a >/dev/null
+rm -f $d5p/.claude/teamlead/board.md
+[ -f $d5p/.claude/teamlead/board.md ] && bad "setup: board.md should be gone before restore" || ok "setup: board.md removed before restore"
+rsout5=$(echo '{"hook_event_name":"SessionStart","source":"startup","cwd":"'$d5p'"}' | "$H/restore.sh")
+[ -f $d5p/.claude/teamlead/board.md ] && ok "restore.sh recreated board.md from board.json" || bad "restore.sh recreated board.md from board.json"
+grep -q 'render me' <<<"$rsout5" && ok "  and restore.sh's own output lists the recreated row" || bad "  restore.sh's output lists the recreated row"
+
+d5p2=$T/d5none; mkdir -p $d5p2/.claude/teamlead/.state; : > $d5p2/.claude/teamlead/.state/active
+echo '{"hook_event_name":"SessionStart","source":"startup","cwd":"'$d5p2'"}' | "$H/restore.sh" >/dev/null
+[ -f $d5p2/.claude/teamlead/board.md ] && bad "a board-less project got an empty board.md created" || ok "a board-less project gets no board.md created"
+
+echo "== I9 docs: CLI table and enforcement.md name the newly landed mechanisms =="
+grep -qE 'board\.py remove <id>' "$SK" && ok "skills/teamlead/SKILL.md documents 'board.py remove <id>'" || bad "SKILL.md documents 'board.py remove <id>'"
+ENFDOC="$CLAUDE_PLUGIN_ROOT/docs/enforcement.md"
+gate_row=$(grep '`gate.sh`' "$ENFDOC")
+grep -q 'plan-stage' <<<"$gate_row" && ok "enforcement.md's gate.sh row mentions plan-stage" || bad "enforcement.md's gate.sh row mentions plan-stage"
+restore_row=$(grep '`restore.sh`' "$ENFDOC")
+grep -q 'forget' <<<"$restore_row" && ok "enforcement.md's restore.sh row mentions forget" || bad "enforcement.md's restore.sh row mentions forget"
 
 echo "== docs/enforcement.md names exactly the files under hooks/ and scripts/ =="
 ENF="$CLAUDE_PLUGIN_ROOT/docs/enforcement.md"
