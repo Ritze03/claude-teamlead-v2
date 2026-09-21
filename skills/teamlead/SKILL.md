@@ -300,7 +300,7 @@ around is a bug that stays.
 | `/teamlead effort\|opus\|prompting [value]` | Set a dial. No argument re-opens the picker. |
 | `/teamlead help` | Print the **Help text** below, verbatim. |
 | `/teamlead status` | Run `board.py status` and show its output. |
-| `/teamlead board` | Print `.claude/teamlead/board.md` inline, verbatim. |
+| `/teamlead board` | Print `.claude/teamlead/board.md` as plain markdown — the tables and headings as they are in the file, **never inside a code fence**, and without the leading `<!-- GENERATED … -->` comment — so the terminal renders it as a table. |
 
 
 ## Help text (print verbatim for `/teamlead help`)
