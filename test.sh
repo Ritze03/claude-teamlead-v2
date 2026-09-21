@@ -334,8 +334,26 @@ check "uninstall restores the original" "$(sl)" 'bash "/tmp/prior.sh"'
 printf '{"statusLine":{"type":"command","command":"bash \\"$HOME/.claude/plugins/cache/x/y/1.2.3/s.sh\\""}}\n' > $ic/settings.json
 rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; run --combined >/dev/null
 grep -q '/x/y/\*/s.sh' $ic/statusline.sh && ok "un-pins a versioned plugin path" || bad "un-pins a versioned plugin path"
-# a glob inside quotes never expands, so the de-pinned path must be unquoted
-grep -qE '"bash [^"]*/x/y/\*/s\.sh"' $ic/statusline.sh && ok "  leaves the glob unquoted so it expands" || bad "  glob must be unquoted"
+# I5: de-pinning now resolves the newest version at RUN time (so a later plugin
+# update is picked up without reinstalling) via a quoted `compgen -G`, fully
+# quoted — never a bare unquoted `*`, which a two-version cache would explode
+# into multiple words for `bash -c` (D7: "bash: /path1 /path2: No such file").
+depinned=$(grep -m1 'compgen -G' $ic/statusline.sh)
+grep -qE "compgen -G '[^']*/x/y/\*/s\.sh'" <<<"$depinned" && ok "  uses compgen -G on the glob" || bad "  uses compgen -G on the glob ($depinned)"
+stripped=$(sed "s/'[^']*'//g" <<<"$depinned")
+[ "${stripped/\*/}" = "$stripped" ] && ok "  every * sits inside single quotes" || bad "  unquoted * found outside quotes: $depinned"
+# with two real cache versions on disk, the depinned command actually resolves
+# to the newest and runs it exactly once (this is the case D7 broke: an unquoted
+# glob over two versions runs `bash v1 v2`, "No such file", not the newest twice).
+cache=$T/plugins/cache/x/y; mkdir -p "$cache/1.0.0" "$cache/1.1.0"
+printf 'echo v1.0.0\n' > "$cache/1.0.0/s.sh"; printf 'echo v1.1.0\n' > "$cache/1.1.0/s.sh"
+printf '{"statusLine":{"type":"command","command":"bash \\"%s/1.0.0/s.sh\\""}}\n' "$cache" > $ic/settings.json
+rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; run --combined >/dev/null
+# workspace.current_dir points at $ic itself (no .claude/teamlead there) so the
+# combined script's OWN teamlead segment stays silent and does not contaminate
+# the output — cwd here is otherwise whatever project the caller last cd'd into.
+out=$(printf '{"workspace":{"current_dir":"%s"}}' "$ic" | bash "$ic/statusline.sh" 2>&1)
+check "the newest cache version runs, exactly once" "$out" "v1.1.0"
 # a path containing spaces stays quoted and therefore stays pinned
 printf '{"statusLine":{"type":"command","command":"bash \\"/a b/plugins/cache/x/y/1.2.3/s.sh\\""}}\n' > $ic/settings.json
 rm -f $ic/statusline.sh $ic/.teamlead-statusline-prev; run --combined >/dev/null
@@ -440,6 +458,143 @@ grep -q 'teamlead-board' <<<"$mcpout" && ok "server initializes" || bad "server 
 for t in board_list board_add board_update; do
   grep -q "\"$t\"" <<<"$mcpout" && ok "  exposes $t" || bad "  exposes $t"
 done
+grep -q '"board_remove"' <<<"$mcpout" && bad "remove is exposed over MCP (it is a hand-repair op, CLI-only)" || ok "remove is not exposed over MCP"
+
+echo "== D4 (I7): board writes are the lead's, and never resolve from cwd =="
+d4p=$T/d4; mkdir -p $d4p
+check "worker (CLAUDE_AGENT_ID set) add: refused" \
+  "$(CLAUDE_AGENT_ID=x python3 "$B" add --project $d4p --task t --agent tl-sonnet-low >"$T/d4out" 2>&1; echo $?)" 1
+grep -q 'workers report, the lead records' "$T/d4out" && ok "  names the reason" || bad "  names the reason"
+python3 "$B" add --project $d4p --task real --agent tl-sonnet-low --owns d4/a >/dev/null   # id 1, for the update case below
+check "worker (CLAUDE_AGENT_ID set) update: refused" \
+  "$(CLAUDE_AGENT_ID=x python3 "$B" update --project $d4p --id 1 --notes x >"$T/d4out2" 2>&1; echo $?)" 1
+grep -q 'workers report, the lead records' "$T/d4out2" && ok "  names the reason" || bad "  names the reason"
+
+mkdir -p $d4p/sub
+before_bj=$([ -f $d4p/.claude/teamlead/.state/board.json ] && cat $d4p/.claude/teamlead/.state/board.json)
+check "no --project, no CLAUDE_PROJECT_DIR, from a subdir: refused" \
+  "$(cd $d4p/sub && env -u CLAUDE_PROJECT_DIR python3 "$B" add --task t --agent tl-sonnet-low >"$T/d4out3" 2>&1; echo $?)" 1
+grep -q 'board writes never resolve from cwd' "$T/d4out3" && ok "  names the reason" || bad "  names the reason"
+after_bj=$(cat $d4p/.claude/teamlead/.state/board.json)
+check "  the real board.json is unchanged" "$after_bj" "$before_bj"
+check "list without --project from inside the project still works" \
+  "$(cd $d4p && env -u CLAUDE_PROJECT_DIR python3 "$B" list >/dev/null 2>&1; echo $?)" 0
+
+echo "== D4 (I7): remove =="
+rmp=$T/rm; mkdir -p $rmp
+python3 "$B" add --project $rmp --task "queued one" --agent tl-sonnet-low --owns rm/a >/dev/null       # id 1
+check "remove a queued task: exit 0" "$(python3 "$B" remove 1 --project $rmp >/dev/null 2>&1; echo $?)" 0
+check "  gone from board.json" \
+  "$(python3 -c "import json;print(len(json.load(open('$rmp/.claude/teamlead/.state/board.json'))['tasks']))")" 0
+check "  gone from board.md" "$(grep -c 'queued one' $rmp/.claude/teamlead/board.md)" 0
+
+python3 "$B" add --project $rmp --task "running one" --agent tl-sonnet-low --owns rm/b >/dev/null      # id 2
+python3 "$B" update --project $rmp --id 2 --state running --branch wr >/dev/null
+check "remove a running task: exit 1" "$(python3 "$B" remove 2 --project $rmp >"$T/rmout" 2>&1; echo $?)" 1
+grep -qi 'running' "$T/rmout" && ok "  names the state" || bad "  names the state"
+
+python3 "$B" update --project $rmp --id 2 --state returned >/dev/null
+check "remove a returned task: exit 1" "$(python3 "$B" remove 2 --project $rmp >"$T/rmout2" 2>&1; echo $?)" 1
+grep -qi 'returned' "$T/rmout2" && ok "  names the state" || bad "  names the state"
+
+check "remove an unknown id: exit 1" "$(python3 "$B" remove 999 --project $rmp >/dev/null 2>&1; echo $?)" 1
+
+python3 "$B" add --project $rmp --task "blocker" --agent tl-sonnet-low --owns rm/c >/dev/null          # id 3
+python3 "$B" add --project $rmp --task "blocked one" --agent tl-sonnet-low --owns rm/d --blocked-by 3 >/dev/null  # id 4
+python3 "$B" remove 3 --project $rmp >/dev/null
+st4=$(python3 -c "import json;d=json.load(open('$rmp/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==4][0];print(t['state']+','+str(t['blocked_by']))")
+check "removing a blocker requeues the task that was blocked on it" "$st4" "queued,[]"
+
+echo "== D5 (I1): board.json / board.md integrity =="
+d5p=$T/d5; mkdir -p $d5p
+python3 "$B" add --project $d5p --task "one" --agent tl-sonnet-low --owns d5/a >/dev/null
+rm -f $d5p/.claude/teamlead/.state/board.json
+before_md=$(cat $d5p/.claude/teamlead/board.md)
+check "board.json deleted, board.md has rows: render refuses" \
+  "$(python3 "$B" render --project $d5p >"$T/d5out" 2>&1; echo $?)" 1
+grep -q 'board.md' "$T/d5out" && ok "  stderr names board.md" || bad "  stderr names board.md"
+after_md=$(cat $d5p/.claude/teamlead/board.md)
+check "  board.md is byte-identical afterwards" "$after_md" "$before_md"
+
+d5p2=$T/d5b; mkdir -p $d5p2
+python3 "$B" add --project $d5p2 --task "two" --agent tl-sonnet-low --owns d5b/a >/dev/null
+rm -f $d5p2/.claude/teamlead/board.md
+check "board.md deleted, board.json non-empty: check fails" \
+  "$(python3 "$B" check --project $d5p2 >"$T/d5out2" 2>&1; echo $?)" 1
+grep -q 'board.md is missing' "$T/d5out2" && ok "  names it" || bad "  names it"
+check "  render recreates it" "$(python3 "$B" render --project $d5p2 >/dev/null 2>&1; echo $?)" 0
+check "  check passes now" "$(python3 "$B" check --project $d5p2 >/dev/null 2>&1; echo $?)" 0
+
+echo "== D6 (I6): plan-lint's stable open-question numbers reject reuse of an answered one =="
+mknum(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" | cat -s > "$T/num.md"
+  "$PL" "$T/num.md" >"$T/numout" 2>&1; echo $?; }
+check "open '1.' while Answered already struck '1.': fails" \
+  "$(mknum '1. Q?\n   *Suggest:* x — *y.*' '- ~~1. Old one?~~ → yes → **D1**')" 1
+grep -q 'reuses an answered number' "$T/numout" && ok "  names it" || bad "  names it"
+answered9=$(for i in 1 2 3 4 5 6 7 8 9; do printf -- '- ~~%s. Q%s?~~ \xe2\x86\x92 yes \xe2\x86\x92 **D1**\n' "$i" "$i"; done)
+check "open '10.' with answered 1-9: ok (continues the sequence)" \
+  "$(mknum '10. Q?\n   *Suggest:* x — *y.*' "$answered9")" 0
+check "open '3.' used twice: fails" \
+  "$(mknum '3. QA?\n   *Suggest:* a — *r.*\n3. QB?\n   *Suggest:* b — *r.*' '')" 1
+grep -q 'used more than once' "$T/numout" && ok "  names it" || bad "  names it"
+scrambled=$'- ~~5. Q5?~~ \xe2\x86\x92 yes \xe2\x86\x92 **D1**\n- ~~2. Q2?~~ \xe2\x86\x92 yes \xe2\x86\x92 **D1**\n- ~~9. Q9?~~ \xe2\x86\x92 yes \xe2\x86\x92 **D1**'
+check "no open questions + scrambled answered numbers: ok" "$(mknum '*(none open)*' "$scrambled")" 0
+grep -q "Numbers are stable for the plan's life" "$PS2" && ok "  the skill documents the rule" || bad "  skill documents the rule"
+
+echo "== F2: blocked_by / auto-unblock =="
+f2p=$T/f2; mkdir -p $f2p
+python3 "$B" add --project $f2p --task "t1" --agent tl-sonnet-low --owns f2/a >/dev/null           # id 1
+python3 "$B" add --project $f2p --task "t2" --agent tl-sonnet-low --owns f2/b --blocked-by 1 >/dev/null  # id 2
+st=$(python3 -c "import json;d=json.load(open('$f2p/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==2][0];print(t['state'])")
+check "task 2 starts blocked" "$st" "blocked"
+python3 "$B" update --project $f2p --id 1 --state merged >/dev/null
+st2=$(python3 -c "import json;d=json.load(open('$f2p/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==2][0];print(t['state'])")
+check "task 2 auto-unblocks once its blocker merges" "$st2" "queued"
+
+f2p2=$T/f2b; mkdir -p $f2p2/.claude/teamlead/.state
+cat > $f2p2/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 3, "tasks": [
+  {"id": 1, "task": "a", "agent": "tl-sonnet-low", "owns": ["f2b/a"], "state": "merged", "branch": null, "plan": null, "blocked_by": [], "notes": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "b", "agent": "tl-sonnet-low", "owns": ["f2b/b"], "state": "blocked", "branch": null, "plan": null, "blocked_by": [1], "notes": null, "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $f2p2 >/dev/null 2>&1     # regenerate board.md to match, so only the invariant below is under test
+python3 "$B" check --project $f2p2 >"$T/f2out" 2>&1; rc=$?
+check "check flags a hand-written 'blocked' task whose blockers are already merged" "$rc" 1
+grep -q 'all its blockers are merged' "$T/f2out" && ok "  names it" || bad "  names it"
+
+echo "== CLI --blocked-by parses to a list of ints, not a string (I7) =="
+bbp=$T/bbint; mkdir -p $bbp
+python3 "$B" add --project $bbp --task "base" --agent tl-sonnet-low --owns bb/a >/dev/null          # id 1
+python3 "$B" add --project $bbp --task "dep" --agent tl-sonnet-low --owns bb/b --blocked-by 1 >/dev/null  # id 2
+bt=$(python3 -c "import json;d=json.load(open('$bbp/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==2][0];print(repr(t['blocked_by']))")
+check "blocked_by is stored as [1] (ints), not ['1'] or a raw string" "$bt" "[1]"
+
+echo "== F6: datetime.UTC is not used (Python 3.10 compat) =="
+check "no datetime.UTC usage in board.py" "$(grep -c 'datetime.UTC' "$CLAUDE_PLUGIN_ROOT/scripts/board.py")" 0
+
+echo "== F10: resolve.sh's hardcoded agent tiers match agents/*.md exactly =="
+resolved=$(sed -n '15,21p' "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" | grep -oE 'tl-(opus|sonnet)-[a-z]+' | sort -u)
+actual_agents=$(cd "$CLAUDE_PLUGIN_ROOT" && ls agents/*.md | xargs -n1 basename | sed 's/\.md$//' | sort -u)
+check "resolve.sh's tiers == agents/*.md basenames (set equality)" "$resolved" "$actual_agents"
+
+echo "== F12: mutate refuses only the overlap it touches, not a pre-existing unrelated one =="
+f12p=$T/f12; mkdir -p $f12p/.claude/teamlead/.state
+cat > $f12p/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 4, "tasks": [
+  {"id": 1, "task": "a", "agent": "tl-sonnet-low", "owns": ["f12/shared"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "b", "agent": "tl-sonnet-low", "owns": ["f12/shared"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "created": "x", "updated": "x"},
+  {"id": 3, "task": "c", "agent": "tl-sonnet-low", "owns": ["f12/other"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $f12p >/dev/null 2>&1
+check "update on the unrelated task (3): exit 0" \
+  "$(python3 "$B" update --project $f12p --id 3 --notes x >/dev/null 2>&1; echo $?)" 0
+check "update on a task IN the pre-existing overlap (1): exit 1" \
+  "$(python3 "$B" update --project $f12p --id 1 --notes x >"$T/f12out" 2>&1; echo $?)" 1
+grep -q 'overlapping' "$T/f12out" && ok "  names the overlap" || bad "  names the overlap"
+python3 "$B" check --project $f12p >"$T/f12out2" 2>&1
+grep -q 'overlapping' "$T/f12out2" && ok "  check still reports it" || bad "  check still reports it"
 
 echo "== decompose =="
 echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"go"}' | "$H/mode.sh" >/dev/null
@@ -615,7 +770,10 @@ echo "== 'merged' is verified against git, not trusted =="
 gp=$T/gp; mkdir -p $gp; cd $gp; git init -q; git config user.email t@t.t; git config user.name t
 printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
 echo base > a.txt; git add -A >/dev/null; git commit -qm init
-python3 "$B" add --project $gp --task w --agent tl-sonnet-high --owns src/x >/dev/null
+# D3: the task must own the path the branch actually changes — owning src/x (a
+# path 'feat' never touches) makes the owned-path diff vacuously clean and the
+# task legitimately counts as merged, which is no longer a bug to catch here.
+python3 "$B" add --project $gp --task w --agent tl-sonnet-high --owns b.txt >/dev/null
 git checkout -q -b feat; echo work > b.txt; git add -A >/dev/null; git commit -qm work; git checkout -q master
 python3 "$B" update --project $gp --id 1 --state merged --branch feat >/dev/null
 python3 "$B" check --project $gp >"$T/gout" 2>&1; rc=$?
@@ -625,6 +783,34 @@ git merge -q feat
 check "true 'merged' passes" "$(python3 "$B" check --project $gp >/dev/null 2>&1; echo $?)" 0
 python3 "$B" update --project $gp --id 1 --branch "" >/dev/null 2>&1 || true
 cd $proj
+
+echo "== D3: squash merges are recognized as merged (owned-path diff, not rev-list) =="
+sqp=$T/sq; mkdir -p $sqp; git -C $sqp init -q; git -C $sqp config user.email t@t.t; git -C $sqp config user.name t
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > $sqp/.gitignore
+echo base > $sqp/a.txt; git -C $sqp add -A >/dev/null; git -C $sqp commit -qm init
+python3 "$B" add --project $sqp --task sq1 --agent tl-sonnet-high --owns c.txt >/dev/null   # id 1
+git -C $sqp checkout -q -b sqfeat; echo work > $sqp/c.txt; git -C $sqp add -A >/dev/null; git -C $sqp commit -qm work; git -C $sqp checkout -q master
+git -C $sqp merge -q --squash sqfeat >/dev/null; git -C $sqp commit -qm 'squash merge sqfeat' >/dev/null
+python3 "$B" update --project $sqp --id 1 --state merged --branch sqfeat >/dev/null
+check "a real squash merge (owned path caught up): check passes" \
+  "$(python3 "$B" check --project $sqp >/dev/null 2>&1; echo $?)" 0
+
+python3 "$B" add --project $sqp --task sq2 --agent tl-sonnet-high --owns d.txt >/dev/null   # id 2
+git -C $sqp checkout -q -b sqfeat2; echo work2 > $sqp/d.txt; git -C $sqp add -A >/dev/null; git -C $sqp commit -qm work2; git -C $sqp checkout -q master
+python3 "$B" update --project $sqp --id 2 --state merged --branch sqfeat2 >/dev/null
+python3 "$B" check --project $sqp >"$T/sqout" 2>&1; rc=$?
+check "a claimed squash merge whose owned path still differs: caught" "$rc" 1
+grep -q 'not actually merged back' "$T/sqout" && ok "  names it" || bad "  names it"
+git -C $sqp merge -q --squash sqfeat2 >/dev/null; git -C $sqp commit -qm 'squash merge sqfeat2' >/dev/null
+check "  and once actually squash-merged, check passes again" \
+  "$(python3 "$B" check --project $sqp >/dev/null 2>&1; echo $?)" 0
+
+python3 "$B" add --project $sqp --task sq3 --agent tl-sonnet-high >/dev/null                # id 3, read-only (no --owns)
+git -C $sqp checkout -q -b sqfeat3; echo work3 > $sqp/e.txt; git -C $sqp add -A >/dev/null; git -C $sqp commit -qm work3; git -C $sqp checkout -q master
+python3 "$B" update --project $sqp --id 3 --state merged --branch sqfeat3 >/dev/null
+python3 "$B" check --project $sqp >"$T/sqout2" 2>&1; rc2=$?
+check "a read-only task (no owns) with an unmerged branch: still caught (rev-list only)" "$rc2" 1
+grep -q 'not actually merged back' "$T/sqout2" && ok "  names it" || bad "  names it"
 
 echo "== status command =="
 python3 "$B" status --project $gp > "$T/st" 2>&1
