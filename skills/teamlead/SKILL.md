@@ -240,17 +240,23 @@ rediscover — and rediscovery costs a fresh read of the codebase, which is exac
 the token bill delegation exists to avoid. **A long brief is cheap; a worker
 re-deriving your context is not.** Write briefs that are thorough, not short.
 
-1. **Goal** — what done looks like.
-2. **Scope** — the `Owns` path, and what it must not touch.
-3. **Inputs — the important one.** Everything from *your* context the worker would
+1. **`board: <id>`** — on its own line, first thing in the brief, for any brief
+   that implements a board row. A `PostToolUse` hook reads it and marks the row
+   `running` with the worker's id and branch, and `SubagentStop` moves it to
+   `returned` — so you never do that update by hand. The hook accepts the line
+   anywhere in the brief, but put it first so it is never lost in an edit. A
+   brief with no board row (a scout, a QC pass on no row) has no such line.
+2. **Goal** — what done looks like.
+3. **Scope** — the `Owns` path, and what it must not touch.
+4. **Inputs — the important one.** Everything from *your* context the worker would
    otherwise have to find out: scout findings, relevant file paths and line numbers,
    the conventions in play, the user's actual words where wording matters, prior
    workers' relevant results, constraints, and any known exception ("`about.html`
    already has a `<p>` — do not add a second"). Quote rather than paraphrase when
    the exact text matters.
-4. **Return format** — what you need back. Workers report in full to you; ask for
+5. **Return format** — what you need back. Workers report in full to you; ask for
    the specifics you will need (paths, values, diffs, exact error text).
-5. **Self-check** — the concrete command or criteria to verify before returning.
+6. **Self-check** — the concrete command or criteria to verify before returning.
 
 The cost asymmetry is the whole point: your context is expensive and already paid
 for. Spending it into a brief is how the cheap tier does the work correctly the
@@ -272,6 +278,7 @@ never read the plugin's source to work out a command.**
 | Gate reports drift | `board.md` was hand-edited; it is generated | `board.py render` |
 | Gate says a worker is working, nothing is running | It was cancelled or killed, so it never reported back. A restart closes these out by itself | Only needed for a cancel in the *current* session: `board.py forget` |
 | Gate refuses to end the turn | A task is sitting in `returned` | Act on it and move it to `merged` (or `blocked`) |
+| Gate says `task N branch X is behind <main> — rebase before merging` | Someone merged since that worker branched; merging as-is would land on a stale base | Rebase the worktree onto HEAD before merging — dispatch the worker to do it (`SendMessage` if it is still out, a fresh worker otherwise), never rebase it yourself |
 | Gate flags something you believe is fine | It blocks once, never traps you | Say plainly what you are skipping and why, then continue |
 | Gate fires on the same wrong thing repeatedly | That is a bug in the check, not in you | Say so to the user — a check that fires on a correct state is worse than no check |
 | A board write is refused | Two unfinished tasks would own overlapping paths | Narrow the scopes or sequence the tasks; the refusal names both |
