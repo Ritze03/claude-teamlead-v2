@@ -45,6 +45,28 @@ def root(project: str | None = None) -> pathlib.Path:
     return pathlib.Path(_main_checkout(p)) / ".claude" / "teamlead"
 
 
+def _refuse_if_worker() -> None:
+    """D4/F17: a worker can reach the CLI as easily as the lead's shell. The MCP
+    tools are fenced by board-fence.sh (it sees agent_id on the hook payload);
+    the CLI has no such gate, so it needs the same refusal here. CLAUDE_AGENT_ID
+    is set by the harness for subagents and absent from the lead's own shell."""
+    if os.environ.get("CLAUDE_AGENT_ID"):
+        raise ValueError("refused — board writes are the lead's; workers report, "
+                         "the lead records (CLAUDE_AGENT_ID is set)")
+
+
+def _write_project(project: str | None) -> str:
+    """F17: a worker's throwaway temp dir is often itself a git repo, and
+    _main_checkout would happily resolve that up to whatever checkout it lives
+    under — which can BE the real project. Reads may fall back to cwd; writes
+    must not — only an explicit --project or CLAUDE_PROJECT_DIR is trusted."""
+    p = project or os.environ.get("CLAUDE_PROJECT_DIR")
+    if not p:
+        raise ValueError("refused — pass --project <main checkout> "
+                         "(board writes never resolve from cwd)")
+    return p
+
+
 def _paths(project=None):
     r = root(project)
     return r / ".state" / "board.json", r / "board.md"
@@ -300,6 +322,27 @@ def op_update(db, id, **kw):
     raise KeyError(f"no task with id {id}")
 
 
+def op_remove(db, id, **_):
+    """F17/D4: a repair op, not a workflow op — the only way today to drop a
+    stray task (e.g. one a worker's CLI write left behind) is hand-editing
+    board.json. Running or returned means a worker may still act on it, or
+    the lead hasn't yet looked at its report, so those are refused."""
+    id = int(id)
+    idx = next((i for i, t in enumerate(db["tasks"]) if t["id"] == id), None)
+    if idx is None:
+        raise KeyError(f"no task with id {id}")
+    t = db["tasks"][idx]
+    if t["state"] in ("running", "returned"):
+        raise ValueError(f"refused — task {id} is {t['state']}, not removable "
+                         f"(only queued/blocked/merged tasks can be removed)")
+    del db["tasks"][idx]
+    for other in db["tasks"]:                    # drop the ghost from blocked_by
+        if other.get("blocked_by") and id in other["blocked_by"]:
+            other["blocked_by"] = [b for b in other["blocked_by"] if b != id]
+    _auto_unblock(db)
+    return {"id": id, "removed": True, "state": t["state"]}
+
+
 def mutate(fn, project=None, **kw):
     """A refusal here only reports problems touching the id(s) this edit added or
     updated — a pre-existing problem elsewhere on the board must not block an
@@ -314,15 +357,26 @@ def mutate(fn, project=None, **kw):
     return res
 
 
-def forget(ids, project=None):
+def forget(ids, project=None, before=None, not_session=None):
     """Close out workers that will never report back.
 
     A killed or cancelled agent fires no SubagentStop, so its start sits
     outstanding until the stale age-out — far too long when the user cancelled
     minutes ago. This writes the missing close, rather than editing history.
+
+    D1/I7: on SessionStart, restore.sh wants to close out ids from BEFORE this
+    session without touching ids the current session itself just started —
+    `before` narrows by each id's latest start/resume timestamp, `not_session`
+    by whether that line's session= token matches the running session. Both
+    combine (AND) with each other and with `ids == ["all"]`.
     """
     lg = ledger(project)
     targets = lg["outstanding"] + lg["abandoned"] if ids in (["all"], "all") else list(ids)
+    if before:
+        targets = [a for a in targets if lg["started"].get(a, "") < before]
+    if not_session:
+        targets = [a for a in targets if lg["session"].get(a) != not_session]
+    reason = "restart" if before else ("pre-session" if not_session else "cancelled by the lead")
     live = set(lg["outstanding"]) | set(lg["abandoned"])
     done = []
     f = root(project) / ".state" / "events.log"
@@ -330,7 +384,7 @@ def forget(ids, project=None):
     with f.open("a") as fh:
         for a in targets:
             if a in live:
-                fh.write(f"{now()}  cancel    id={a}  reason=cancelled by the lead\n")
+                fh.write(f"{now()}  cancel    id={a}  reason={reason}\n")
                 done.append(a)
     return {"forgotten": done, "still_outstanding": ledger(project)["outstanding"]}
 
@@ -377,7 +431,7 @@ def ledger(project=None) -> dict:
     Pairing start/resume against return by agent id is exact. The age-out only
     catches ids that never stopped at all.
     """
-    live, seen = {}, {}
+    live, seen, started, session = {}, {}, {}, {}
     disp = starts = 0
     recent = (datetime.datetime.now(datetime.timezone.utc)
               - datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -398,6 +452,8 @@ def ledger(project=None) -> dict:
         if rest.startswith(("start", "resume")):
             live[aid] = ts
             seen[aid] = tok.get("agent", seen.get(aid, "?"))
+            started[aid] = ts                     # I7: latest start/resume, for forget --before
+            session[aid] = tok.get("session")      # I7: its session=, for forget --not-session
         elif rest.startswith(("return", "cancel")):
             live.pop(aid, None)
             seen[aid] = tok.get("agent", seen.get(aid, "?"))
@@ -407,7 +463,8 @@ def ledger(project=None) -> dict:
     abandoned = {a: t for a, t in live.items() if t < cutoff}
     pending = max(0, disp - starts)
     return {"outstanding": sorted(outstanding), "pending": pending,
-            "abandoned": sorted(abandoned), "known": sorted(seen), "agents": seen}
+            "abandoned": sorted(abandoned), "known": sorted(seen), "agents": seen,
+            "started": started, "session": session}
 
 
 # ---- MCP (stdio JSON-RPC, no dependencies) ----------------------------------
@@ -452,17 +509,21 @@ def _call(name, args):
     if name == "board_list":
         return summary(load())
     if name == "board_add":
+        _refuse_if_worker()                       # belt-and-braces: board-fence.sh already fences this
+        proj = _write_project(None)
         added = []
-        db = load()
+        db = load(proj)
         for spec in args.get("tasks", []):
             added.append(op_add(db, **spec))
         problems = validate(db)
         if problems:
             raise ValueError("refused — the board would be invalid:\n  " + "\n  ".join(problems))
-        save(db)
+        save(db, proj)
         return {"added": added, "open": summary(db)["open"]}
     if name == "board_update":
-        t = mutate(op_update, **args)
+        _refuse_if_worker()                       # belt-and-braces: board-fence.sh already fences this
+        proj = _write_project(None)
+        t = mutate(op_update, project=proj, **args)
         return {"updated": t}
     raise KeyError(f"unknown tool {name}")
 
@@ -526,6 +587,8 @@ def main(argv):
                 kw[k] = _norm_owns(v)
             elif k == "id":
                 kw[k] = int(v)
+            elif k == "blocked_by":               # F17 item 5: was landing as a raw string
+                kw[k] = [int(x) for x in v.split(",") if x.strip()]
             else:
                 kw[k] = v
             i += 2
@@ -535,9 +598,20 @@ def main(argv):
     if cmd == "list":
         print(json.dumps(summary(load(proj)), indent=2))
     elif cmd == "add":
+        _refuse_if_worker()
+        proj = _write_project(proj)
         print(json.dumps(mutate(op_add, project=proj, **kw), indent=2))
     elif cmd == "update":
+        _refuse_if_worker()
+        proj = _write_project(proj)
         print(json.dumps(mutate(op_update, project=proj, **kw), indent=2))
+    elif cmd == "remove":
+        _refuse_if_worker()
+        proj = _write_project(proj)
+        rid = pos[0] if pos else kw.get("id")
+        if rid is None:
+            print("usage: board.py remove <id>", file=sys.stderr); return 1
+        print(json.dumps(mutate(op_remove, project=proj, id=rid), indent=2))
     elif cmd == "status":
         db, lg = load(proj), ledger(proj)
         live = [t for t in db["tasks"] if t["state"] != "merged"]
@@ -556,7 +630,10 @@ def main(argv):
     elif cmd == "ledger":
         print(json.dumps(ledger(proj), indent=2))
     elif cmd == "forget":
-        print(json.dumps(forget(pos or ["all"], proj), indent=2))
+        proj = _write_project(proj)
+        print(json.dumps(forget(pos or ["all"], proj,
+                                 before=kw.get("before"), not_session=kw.get("not_session")),
+                          indent=2))
     elif cmd == "render":                       # re-render md from json
         db = load(proj)
         _, m = _paths(proj)
