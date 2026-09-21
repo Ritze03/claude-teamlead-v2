@@ -112,6 +112,47 @@ check "race: the two rows have distinct ids" "$ids" "1,2"
 tmpleft=$(find "$lp/.claude/teamlead/.state" -maxdepth 1 -name '*.tmp*' 2>/dev/null | wc -l)
 check "atomic save: no leftover tmp file in .state/" "$tmpleft" 0
 
+echo "== QC1: render's load->save must not race a locked mutate() =="
+rndp=$T/rndlock; mkdir -p $rndp
+python3 "$B" add --project $rndp --task "renderable" --agent tl-sonnet-low --owns rnd/x >/dev/null  # id 1
+render_mutate_racer() {
+  python3 -c "
+import sys, time
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+board.mutate(board.op_update, project='$rndp', id=1, state='running', worker='X')
+"
+}
+render_cli_racer() {
+  python3 -c "
+import sys, time
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+# give the other racer time to acquire the lock and update its in-memory copy
+# first (still short of its own delayed save) — without the fix, this is the
+# window where render's unlocked load reads stale data; with it, render's
+# own lock acquisition simply queues behind the mutate() and this sleep is
+# immaterial. Makes the race deterministic instead of a coin flip.
+time.sleep(0.1)
+board.main(['render', '--project', '$rndp'])
+"
+}
+render_mutate_racer >/dev/null & rr1=$!
+render_cli_racer >/dev/null & rr2=$!
+wait $rr1 $rr2
+rnd_row=$(python3 -c "import json; d=json.load(open('$rndp/.claude/teamlead/.state/board.json')); t=[x for x in d['tasks'] if x['id']==1][0]; print(t['state']+','+str(t['worker']))")
+check "race: mutate's write to running/worker=X survives render's unlocked load->save" "$rnd_row" "running,X"
+
 echo "== D5: board_add's own MCP write path (_call, outside mutate()) is locked too =="
 mcp_p=$T/lockmcp; mkdir -p $mcp_p
 mcpracer() {
@@ -571,6 +612,28 @@ python3 "$B" add --project $rmp --task "blocked one" --agent tl-sonnet-low --own
 python3 "$B" remove 3 --project $rmp >/dev/null
 st4=$(python3 -c "import json;d=json.load(open('$rmp/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==4][0];print(t['state']+','+str(t['blocked_by']))")
 check "removing a blocker requeues the task that was blocked on it" "$st4" "queued,[]"
+
+echo "== QC2: op_remove's cascade must not escape the targeted refusal =="
+rc2p=$T/rmcascade; mkdir -p $rc2p
+python3 "$B" add --project $rc2p --task "I1" --agent tl-sonnet-low --owns shared/x >/dev/null                    # id 1
+python3 "$B" add --project $rc2p --task "I2" --agent tl-sonnet-low --owns shared/y --blocked-by 1 >/dev/null     # id 2
+python3 "$B" add --project $rc2p --task "I3" --agent tl-sonnet-low --owns shared/x --blocked-by 2 >/dev/null     # id 3
+check "remove 2 (the chain link keeping I1/I3's shared owns apart): refused" \
+  "$(python3 "$B" remove 2 --project $rc2p >"$T/rc2out" 2>&1; echo $?)" 1
+grep -q 'overlapping paths' "$T/rc2out" && ok "  names the overlap" || bad "  names the overlap"
+n_rc2=$(python3 "$B" list --project $rc2p | python3 -c 'import json,sys;print(json.load(sys.stdin)["open"])')
+check "  board unchanged: still 3 open rows" "$n_rc2" 3
+t2_rc2=$(python3 -c "import json;d=json.load(open('$rc2p/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==2][0])")
+check "  row 2 (I2) intact, still blocked" "$t2_rc2" "blocked"
+
+rc2p2=$T/rmcascade-ok; mkdir -p $rc2p2
+python3 "$B" add --project $rc2p2 --task "I1" --agent tl-sonnet-low --owns shared2/x >/dev/null                  # id 1
+python3 "$B" add --project $rc2p2 --task "I2" --agent tl-sonnet-low --owns shared2/y --blocked-by 1 >/dev/null   # id 2
+python3 "$B" add --project $rc2p2 --task "I3" --agent tl-sonnet-low --owns shared2/z --blocked-by 2 >/dev/null   # id 3 (disjoint owns)
+check "remove 2 when the freed row's owns is disjoint: accepted" \
+  "$(python3 "$B" remove 2 --project $rc2p2 >/dev/null 2>&1; echo $?)" 0
+t3_rc2=$(python3 -c "import json;d=json.load(open('$rc2p2/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==3][0];print(t['state']+','+str(t['blocked_by']))")
+check "  I3 (no longer blocked, no overlap) becomes queued" "$t3_rc2" "queued,[]"
 
 echo "== D5 (I1): board.json / board.md integrity =="
 d5p=$T/d5; mkdir -p $d5p
@@ -1835,6 +1898,93 @@ st3d2=$(python3 -c "import json;d=json.load(open('$d2p/.claude/teamlead/.state/b
 check "row 3 (returned, worker k1) is NOT requeued — the work already came back" "$st3d2" "returned"
 
 check "board is still valid after the requeue" "$(python3 "$B" check --project $d2p >/dev/null 2>&1; echo $?)" 0
+
+echo "== QC3: worker_stop and forget's requeue must not use a stale precondition =="
+qc3p=$T/qc3; mkdir -p $qc3p
+python3 "$B" add --project $qc3p --task "qc3 row" --agent tl-sonnet-low --owns qc3/a >/dev/null   # id 1
+python3 "$B" update --project $qc3p --id 1 --state running --worker A >/dev/null
+NOWQC3=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  start     agent=teamlead:tl-sonnet-medium  id=A\n' "$NOWQC3" > $qc3p/.claude/teamlead/.state/events.log
+python3 -c "
+import sys, json
+sys.path.insert(0, '$bd')
+import board
+board.worker_stop('A', '$qc3p')
+res = board.forget(['A'], '$qc3p')
+row = [t for t in board.load('$qc3p')['tasks'] if t['id'] == 1][0]
+print(json.dumps({'requeued': res['requeued'], 'state': row['state']}))
+" > "$T/qc3out"
+req3=$(python3 -c "import json; print(json.load(open('$T/qc3out'))['requeued'])")
+check "sequential stop-then-forget: requeued is empty (row already returned)" "$req3" "[]"
+state3=$(python3 -c "import json; print(json.load(open('$T/qc3out'))['state'])")
+check "  row is returned, not overwritten to queued" "$state3" "returned"
+
+qc3rp=$T/qc3race; mkdir -p $qc3rp
+qc3_stop_racer() {
+  python3 -c "
+import sys, time
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+board.worker_stop('A', '$qc3rp')
+"
+}
+qc3_forget_racer() {
+  python3 -c "
+import sys, time
+sys.path.insert(0, '$bd')
+import board
+orig = board.save
+def slow(db, project=None):
+    time.sleep(0.5)
+    orig(db, project)
+board.save = slow
+board.forget(['A'], '$qc3rp')
+"
+}
+for i in 1 2 3; do
+  rm -rf $qc3rp; mkdir -p $qc3rp
+  python3 "$B" add --project $qc3rp --task "qc3 race row" --agent tl-sonnet-low --owns "qc3r/$i" >/dev/null  # id 1
+  python3 "$B" update --project $qc3rp --id 1 --state running --worker A >/dev/null
+  printf '%s  start     agent=teamlead:tl-sonnet-medium  id=A\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    > $qc3rp/.claude/teamlead/.state/events.log
+  qc3_stop_racer & sp1=$!
+  qc3_forget_racer & sp2=$!
+  wait $sp1 $sp2
+  race3=$(python3 -c "import json; d=json.load(open('$qc3rp/.claude/teamlead/.state/board.json')); t=[x for x in d['tasks'] if x['id']==1][0]; print(t['state']+'|'+str(t['notes']))")
+  check "race iteration $i: row 1 is returned with no requeue note (stop wins, precondition re-checked under the lock)" "$race3" "returned|None"
+done
+
+echo "== QC4: forget's requeue lands on 'blocked', not 'queued', when a blocker is unmerged =="
+qc4p=$T/qc4; mkdir -p $qc4p/.claude/teamlead/.state
+cat > $qc4p/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 3, "tasks": [
+  {"id": 1, "task": "blocker", "agent": "tl-sonnet-low", "owns": ["qc4/a"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "worker": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "dependant", "agent": "tl-sonnet-low", "owns": ["qc4/b"], "state": "running", "branch": null, "plan": null, "blocked_by": [1], "notes": null, "worker": "Z", "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $qc4p >/dev/null 2>&1
+printf '%s  start     agent=teamlead:tl-sonnet-medium  id=Z\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  > $qc4p/.claude/teamlead/.state/events.log
+python3 "$B" forget Z --project $qc4p >"$T/qc4out" 2>&1
+req4=$(python3 -c "import json;print(json.load(open('$T/qc4out'))['requeued'])")
+check "forget Z reports row 2 requeued" "$req4" "[2]"
+row2qc4=$(python3 -c "import json;d=json.load(open('$qc4p/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==2][0];print(t['state']+'|'+t['notes'])")
+check "row 2 (blocker unmerged) lands on 'blocked', with the requeue note" "$row2qc4" \
+  "blocked|requeued: worker Z lost on restart"
+
+qc4bp=$T/qc4b; mkdir -p $qc4bp
+python3 "$B" add --project $qc4bp --task "plain" --agent tl-sonnet-low --owns qc4b/a >/dev/null   # id 1
+python3 "$B" update --project $qc4bp --id 1 --state running --worker Q >/dev/null
+printf '%s  start     agent=teamlead:tl-sonnet-medium  id=Q\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  > $qc4bp/.claude/teamlead/.state/events.log
+python3 "$B" forget Q --project $qc4bp >/dev/null 2>&1
+st1qc4b=$(python3 -c "import json;print([t['state'] for t in json.load(open('$qc4bp/.claude/teamlead/.state/board.json'))['tasks'] if t['id']==1][0])")
+check "no blockers: requeue still lands in queued" "$st1qc4b" "queued"
 
 echo "== I5/D3/D4: hooks.json wires PostToolUse(Agent) -> record.sh =="
 check "hooks.json declares the PostToolUse Agent matcher" \
