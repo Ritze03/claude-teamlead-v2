@@ -299,10 +299,12 @@ def op_add(db, task, agent=None, owns=None, plan=None, blocked_by=None, **_):
 def _auto_unblock(db) -> None:
     """A blocked task whose blockers have all merged should be queued, not sit
     flagged until someone notices — so every update sweeps for it, whether this
-    edit just merged the blocker or just set blocked_by to ids already merged."""
+    edit just merged the blocker or just set blocked_by to ids already merged.
+    An empty blocked_by (I7: op_remove just dropped the last one) is vacuously
+    satisfied too — all() of an empty list is True, so that falls out for free."""
     merged_ids = {t["id"] for t in db["tasks"] if t["state"] == "merged"}
     for t in db["tasks"]:
-        if t["state"] == "blocked" and t.get("blocked_by") and all(b in merged_ids for b in t["blocked_by"]):
+        if t["state"] == "blocked" and all(b in merged_ids for b in (t.get("blocked_by") or [])):
             t["state"] = "queued"
 
 
