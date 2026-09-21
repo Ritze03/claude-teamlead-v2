@@ -1762,6 +1762,80 @@ python3 "$B" check --project $d7p >/dev/null 2>&1; rc=$?
 check "worktree removed: check passes" "$rc" 0
 cd $proj
 
+echo "== D12: worker-start/worker-stop lifecycle =="
+wsp=$T/ws; mkdir -p $wsp
+python3 "$B" add --project $wsp --task a --agent tl-sonnet-low --owns ws/x >/dev/null                # id 1
+python3 "$B" add --project $wsp --task b --agent tl-sonnet-low --owns ws/y --blocked-by 1 >/dev/null # id 2
+
+check "worker-start --board 1 --branch: exit 0" \
+  "$(python3 "$B" worker-start --id w1 --board 1 --branch worktree-agent-w1 --project $wsp >/dev/null 2>&1; echo $?)" 0
+row1=$(python3 -c "import json;d=json.load(open('$wsp/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==1][0];print(t['state']+','+t['worker']+','+t['branch'])")
+check "  row 1 is running/w1/worktree-agent-w1" "$row1" "running,w1,worktree-agent-w1"
+
+python3 "$B" worker-start --id w1 --board 2 --project $wsp >"$T/wsout1" 2>&1; rc=$?
+check "worker-start --board 2 while its blocker (1) is unmerged: refused" "$rc" 1
+grep -q 'is blocked by' "$T/wsout1" && ok "  names the blocker" || bad "  names the blocker"
+
+python3 "$B" worker-start --id w1 --board 99 --project $wsp >"$T/wsout2" 2>&1; rc=$?
+check "worker-start --board 99 (no such row): refused" "$rc" 1
+grep -q 'no task with id 99' "$T/wsout2" && ok "  names the missing id" || bad "  names the missing id"
+
+check "worker-stop --id w1: exit 0" \
+  "$(python3 "$B" worker-stop --id w1 --project $wsp >/dev/null 2>&1; echo $?)" 0
+st1=$(python3 -c "import json;d=json.load(open('$wsp/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==1][0])")
+check "  row 1 is returned" "$st1" "returned"
+
+check "worker-stop --id w1 again (no running row for w1): exit 0, no-op" \
+  "$(python3 "$B" worker-stop --id w1 --project $wsp >/dev/null 2>&1; echo $?)" 0
+st1b=$(python3 -c "import json;d=json.load(open('$wsp/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==1][0])")
+check "  row 1 unchanged by the no-op" "$st1b" "returned"
+
+check "worker-start --id w1, no --board (resume path): moves the returned row to running" \
+  "$(python3 "$B" worker-start --id w1 --project $wsp >/dev/null 2>&1; echo $?)" 0
+st1c=$(python3 -c "import json;d=json.load(open('$wsp/.claude/teamlead/.state/board.json'));print([t['state'] for t in d['tasks'] if t['id']==1][0])")
+check "  row 1 is running again" "$st1c" "running"
+
+check "worker-start --id nobody (no row of that worker in 'returned'): exit 0, no-op" \
+  "$(python3 "$B" worker-start --id nobody --project $wsp >/dev/null 2>&1; echo $?)" 0
+
+echo "== D12: worker-start/worker-stop are no-ops with no board.json, and never create one =="
+nbp=$T/ws-noboard; mkdir -p $nbp
+check "worker-start --id w1, no board.json: exit 0" \
+  "$(python3 "$B" worker-start --id w1 --project $nbp >/dev/null 2>&1; echo $?)" 0
+check "worker-stop --id w1, no board.json: exit 0" \
+  "$(python3 "$B" worker-stop --id w1 --project $nbp >/dev/null 2>&1; echo $?)" 0
+check "  no board.json created" "$([ -f $nbp/.claude/teamlead/.state/board.json ] && echo yes || echo no)" no
+check "  no board.md created" "$([ -f $nbp/.claude/teamlead/board.md ] && echo yes || echo no)" no
+
+check "worker-start with no --project and no CLAUDE_PROJECT_DIR: refused" \
+  "$(env -u CLAUDE_PROJECT_DIR python3 "$B" worker-start --id w1 >"$T/wsout3" 2>&1; echo $?)" 1
+grep -q 'pass --project' "$T/wsout3" && ok "  names the fix" || bad "  names the fix"
+
+echo "== D2: forget requeues a running row whose worker is being cancelled =="
+d2p=$T/d2; mkdir -p $d2p
+python3 "$B" add --project $d2p --task "k1 work" --agent tl-sonnet-low --owns d2/k1 >/dev/null              # id 1
+python3 "$B" add --project $d2p --task "k2 work" --agent tl-sonnet-low --owns d2/k2 >/dev/null              # id 2
+python3 "$B" add --project $d2p --task "k1's earlier task" --agent tl-sonnet-low --owns d2/k1b >/dev/null   # id 3
+python3 "$B" update --project $d2p --id 1 --state running --worker k1 >/dev/null
+python3 "$B" update --project $d2p --id 2 --state running --worker k2 >/dev/null
+python3 "$B" update --project $d2p --id 3 --state returned --worker k1 >/dev/null
+NOWF2=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  start     agent=teamlead:tl-sonnet-medium  id=k1\n' "$NOWF2" > $d2p/.claude/teamlead/.state/events.log
+python3 "$B" forget k1 --project $d2p >"$T/d2out" 2>&1
+req=$(python3 -c "import json;print(json.load(open('$T/d2out'))['requeued'])")
+check "forget k1 reports row 1 requeued" "$req" "[1]"
+
+st1d2=$(python3 -c "import json;d=json.load(open('$d2p/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==1][0];print(t['state']+'|'+t['worker']+'|'+(t['notes'] or ''))")
+check "row 1 (k1, was running) requeued, worker kept, note appended" "$st1d2" "queued|k1|requeued: worker k1 lost on restart"
+
+st2d2=$(python3 -c "import json;d=json.load(open('$d2p/.claude/teamlead/.state/board.json'));print([x['state'] for x in d['tasks'] if x['id']==2][0])")
+check "row 2 (k2, not forgotten) is untouched" "$st2d2" "running"
+
+st3d2=$(python3 -c "import json;d=json.load(open('$d2p/.claude/teamlead/.state/board.json'));print([x['state'] for x in d['tasks'] if x['id']==3][0])")
+check "row 3 (returned, worker k1) is NOT requeued — the work already came back" "$st3d2" "returned"
+
+check "board is still valid after the requeue" "$(python3 "$B" check --project $d2p >/dev/null 2>&1; echo $?)" 0
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
