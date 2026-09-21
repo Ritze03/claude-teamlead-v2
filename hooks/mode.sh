@@ -86,6 +86,20 @@ fi
 
 echo "[teamlead] Concise output style is active for what you say to the USER: lead with the result, skip preamble and narration. It does NOT apply to dispatch briefs — those stay thorough, carrying every piece of your context the worker would otherwise rediscover."
 
+# Plan Go nudge (D7): record each bare "Go" against the active plan in
+# .state/plan-go. On the FIRST one, if watch-plan.sh (:72) never saw a save to
+# the plan file (.state/plan-touched absent), the user typed Go having only
+# ever seen the lead's own edits — worth one nudge, not a repeat on every Go.
+if [ -f "$TL_STATE/active-plan" ]; then
+  case "$p" in
+    go|go.|go!) first=1; [ -s "$TL_STATE/plan-go" ] && first=0
+      date +%s > "$TL_STATE/plan-go"
+      if [ "$first" -eq 1 ] && [ ! -f "$TL_STATE/plan-touched" ]; then
+        echo "[teamlead] First Go recorded, but the plan file was never edited by you — answer in the file or in chat if anything in it is wrong."
+      fi ;;
+  esac
+fi
+
 # Active. ponytail: say nothing when there is nothing to say.
 [ -f "$TL_STATE/board.json" ] || exit 0
 open=$(python3 "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/scripts/board.py" list --project "$TL_PROJECT" 2>/dev/null \
