@@ -554,7 +554,7 @@ memory; the plan file and the board are the whole handoff (D14):
 | Stage | Action |
 |:----:|---|
 | 3 or 4, with a recorded Go | The user already said Go — write the implementation plan (3) or start implementing (4). |
-| 5 | Put the **current phase's** wave rows on the board (`board_add`, `plan: I<n>`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
+| 5 | Put the **current phase's** wave rows on the board — or, when the table has no phase rows, just the **current wave's** — (`board_add`, `plan: I<n>`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
 | 6 | Run the `verified by: agent` criteria for real. |
 | 7 | Hand the `verified by: user` criteria back to the user. |
 
