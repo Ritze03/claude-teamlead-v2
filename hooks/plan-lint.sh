@@ -12,7 +12,7 @@ add() { fail+="  - $1"$'\n'; }
 # 1. sections present, in order  (checks are numbered as in the skill: 1 sections,
 # 2 dependency waves, 3 Owns overlap, 4 agent tier, 5 decisions covered,
 # 6 unpromoted answers, 7 placeholder marker at stage 4, 8 staleness stamp,
-# 9 bare open questions)
+# 9 bare open questions, 10 stable open-question numbers)
 # 'Done when' and 'Implementation plan' are both written at stage 4, from the same
 # settled decisions, so before then they are simply absent. Both land ABOVE the two
 # inboxes: 'Open questions' and 'Notes from me' are the user's half of the file and
