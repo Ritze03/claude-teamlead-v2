@@ -531,6 +531,8 @@ mknum(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n##
 check "open '1.' while Answered already struck '1.': fails" \
   "$(mknum '1. Q?\n   *Suggest:* x — *y.*' '- ~~1. Old one?~~ → yes → **D1**')" 1
 grep -q 'reuses an answered number' "$T/numout" && ok "  names it" || bad "  names it"
+check "open '1.' still open while 2 and 3 were answered later: passes (exact membership, not <= max)" \
+  "$(mknum '1. Q1 still open?\n   *Suggest:* keep it — *because.*' '- ~~2. Q2?~~ → yes → **D1**\n- ~~3. Q3?~~ → yes → **D1**')" 0
 answered9=$(for i in 1 2 3 4 5 6 7 8 9; do printf -- '- ~~%s. Q%s?~~ \xe2\x86\x92 yes \xe2\x86\x92 **D1**\n' "$i" "$i"; done)
 check "open '10.' with answered 1-9: ok (continues the sequence)" \
   "$(mknum '10. Q?\n   *Suggest:* x — *y.*' "$answered9")" 0
@@ -550,6 +552,11 @@ check "task 2 starts blocked" "$st" "blocked"
 python3 "$B" update --project $f2p --id 1 --state merged >/dev/null
 st2=$(python3 -c "import json;d=json.load(open('$f2p/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==2][0];print(t['state'])")
 check "task 2 auto-unblocks once its blocker merges" "$st2" "queued"
+
+python3 "$B" add --project $f2p --task "t3" --agent tl-sonnet-low --owns f2/c >/dev/null            # id 3
+python3 "$B" update --project $f2p --id 3 --state blocked >/dev/null
+st3=$(python3 -c "import json;d=json.load(open('$f2p/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==3][0];print(t['state'])")
+check "'blocked' with no blocked_by is not vacuously auto-unblocked — it stays blocked" "$st3" "blocked"
 
 f2p2=$T/f2b; mkdir -p $f2p2/.claude/teamlead/.state
 cat > $f2p2/.claude/teamlead/.state/board.json <<'JSON'
@@ -776,9 +783,14 @@ echo "== 'merged' is verified against git, not trusted =="
 gp=$T/gp; mkdir -p $gp; cd $gp; git init -q; git config user.email t@t.t; git config user.name t
 printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
 echo base > a.txt; git add -A >/dev/null; git commit -qm init
-# D3: the task must own the path the branch actually changes — owning src/x (a
-# path 'feat' never touches) makes the owned-path diff vacuously clean and the
-# task legitimately counts as merged, which is no longer a bug to catch here.
+# D3: the task must own the path the branch actually changes. `diff --quiet`
+# is clean whenever the pathspec matches nothing on either side, so owning
+# src/x (a path 'feat' never touches) used to pass vacuously even though the
+# branch's real commits were never merged. The shortcut now only counts when
+# the branch's name-only diff against the merge-base under `owns` is
+# non-empty; an untouched (or typo'd) `owns` falls back to rev-list, which
+# still flags the unmerged commits below and in the dedicated case further
+# down.
 python3 "$B" add --project $gp --task w --agent tl-sonnet-high --owns b.txt >/dev/null
 git checkout -q -b feat; echo work > b.txt; git add -A >/dev/null; git commit -qm work; git checkout -q master
 python3 "$B" update --project $gp --id 1 --state merged --branch feat >/dev/null
@@ -817,6 +829,15 @@ python3 "$B" update --project $sqp --id 3 --state merged --branch sqfeat3 >/dev/
 python3 "$B" check --project $sqp >"$T/sqout2" 2>&1; rc2=$?
 check "a read-only task (no owns) with an unmerged branch: still caught (rev-list only)" "$rc2" 1
 grep -q 'not actually merged back' "$T/sqout2" && ok "  names it" || bad "  names it"
+
+echo "== D3: a typo'd/untouched 'owns' no longer passes 'diff --quiet' vacuously =="
+mkdir -p $sqp/src/d
+python3 "$B" add --project $sqp --task sq4 --agent tl-sonnet-high --owns src/d-typo >/dev/null   # id 4, owns a path the branch never touches
+git -C $sqp checkout -q -b sqfeat4; echo work4 > $sqp/src/d/file.txt; git -C $sqp add -A >/dev/null; git -C $sqp commit -qm work4; git -C $sqp checkout -q master
+python3 "$B" update --project $sqp --id 4 --state merged --branch sqfeat4 >/dev/null
+python3 "$B" check --project $sqp >"$T/sqout3" 2>&1; rc3=$?
+check "typo'd owns (branch never touched it): not merged, caught by rev-list fallback" "$rc3" 1
+grep -q 'not actually merged back' "$T/sqout3" && ok "  names it" || bad "  names it"
 
 echo "== status command =="
 python3 "$B" status --project $gp > "$T/st" 2>&1
@@ -1399,6 +1420,17 @@ grep -qE 'return.*id=nw1' "$d1bL" && ok "  the return line was appended despite 
 check "SubagentStop for an unknown id, active absent: hook exits 0" \
   "$(ev '{"hook_event_name":"SubagentStop","cwd":"'$d1bp'","agent_type":"tl-sonnet-high","agent_id":"ghost","last_assistant_message":"done"}' "$H/record.sh")" 0
 grep -q 'id=ghost' "$d1bL" && bad "  an unknown id got recorded anyway" || ok "  an unknown id recorded nothing"
+
+echo "== D1: record.sh's id anchoring — id=w1 must not substring-match id=w10 (F16) =="
+d1cp=$T/d1anchor; mkdir -p $d1cp/.claude/teamlead/.state; : > $d1cp/.claude/teamlead/.state/active
+d1cL=$d1cp/.claude/teamlead/.state/events.log
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1cp'","agent_type":"tl-sonnet-high","agent_id":"w10"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$d1cp'","agent_type":"tl-sonnet-high","agent_id":"w10","last_assistant_message":"done"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStart","cwd":"'$d1cp'","agent_type":"tl-sonnet-high","agent_id":"w1"}' "$H/record.sh" >/dev/null
+rm -f $d1cp/.claude/teamlead/.state/active
+check "w10 already returned, active absent: SubagentStop for w1 still exits 0" \
+  "$(ev '{"hook_event_name":"SubagentStop","cwd":"'$d1cp'","agent_type":"tl-sonnet-high","agent_id":"w1","last_assistant_message":"done"}' "$H/record.sh")" 0
+grep -qE '  return .*  id=w1(  |$)' "$d1cL" && ok "  w1's return line was appended (id=w1 not swallowed by w10's id=w10)" || bad "  w1's return line was appended (id=w1 not swallowed by w10's id=w10)"
 
 echo "== D2: gate.sh's plan-stage check (3b) catches a header bump that bypassed plan-fence.sh =="
 d2p=$T/d2gate; mkdir -p $d2p/.claude/teamlead/plan $d2p/.claude/teamlead/.state

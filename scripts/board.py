@@ -125,7 +125,11 @@ def check_git(db: dict, project=None) -> list[str]:
     of HEAD, so rev-list alone would call every squash merge 'not merged'. A task
     counts as merged when rev-list is 0 OR the owned paths no longer differ from
     the branch — a task with no owned paths (read-only) has nothing to diff, so
-    it falls back to rev-list only."""
+    it falls back to rev-list only. `diff --quiet` is also clean when the
+    pathspec matches nothing on either side, so a typo'd or untouched `owns`
+    would otherwise pass as merged with real unmerged commits on the branch;
+    the diff shortcut only counts when the branch actually touched something
+    under `owns` (its name-only diff against the merge-base is non-empty)."""
     proj = pathlib.Path(_main_checkout(project or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
     if _git(proj, "rev-parse", "--is-inside-work-tree") != "true":
         return []
@@ -140,7 +144,9 @@ def check_git(db: dict, project=None) -> list[str]:
         if not n or n == "0":
             continue                      # ordinary (non-squash) merge
         owns = t.get("owns") or []
-        squashed = bool(owns) and _git_ok(proj, "diff", "--quiet", "HEAD", br, "--", *owns)
+        mb = _git(proj, "merge-base", "HEAD", br) if owns else None
+        touched = bool(mb) and bool(_git(proj, "diff", "--name-only", mb, br, "--", *owns))
+        squashed = touched and _git_ok(proj, "diff", "--quiet", "HEAD", br, "--", *owns)
         if not squashed:
             problems.append(
                 f"task {t['id']} is marked merged but branch {br} has {n} commit(s) "
@@ -300,11 +306,15 @@ def _auto_unblock(db) -> None:
     """A blocked task whose blockers have all merged should be queued, not sit
     flagged until someone notices — so every update sweeps for it, whether this
     edit just merged the blocker or just set blocked_by to ids already merged.
-    An empty blocked_by (I7: op_remove just dropped the last one) is vacuously
-    satisfied too — all() of an empty list is True, so that falls out for free."""
+    An empty blocked_by is NOT vacuously satisfied: 'blocked' with no blockers is
+    a legitimate state (the lead can mark a task blocked before it knows why, or
+    for a reason outside blocked_by) and must not be silently reverted to queued
+    in the same call that set it. op_remove handles the "last blocker dropped"
+    case explicitly instead of relying on this sweep."""
     merged_ids = {t["id"] for t in db["tasks"] if t["state"] == "merged"}
     for t in db["tasks"]:
-        if t["state"] == "blocked" and all(b in merged_ids for b in (t.get("blocked_by") or [])):
+        by = t.get("blocked_by") or []
+        if t["state"] == "blocked" and by and all(b in merged_ids for b in by):
             t["state"] = "queued"
 
 
@@ -341,6 +351,10 @@ def op_remove(db, id, **_):
     for other in db["tasks"]:                    # drop the ghost from blocked_by
         if other.get("blocked_by") and id in other["blocked_by"]:
             other["blocked_by"] = [b for b in other["blocked_by"] if b != id]
+            # removing the sole blocker requeues the dependant explicitly —
+            # _auto_unblock no longer treats an empty blocked_by as satisfied
+            if not other["blocked_by"] and other["state"] == "blocked":
+                other["state"] = "queued"
     _auto_unblock(db)
     return {"id": id, "removed": True, "state": t["state"]}
 

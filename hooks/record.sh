@@ -18,10 +18,13 @@ if [ ! -f "$TL_STATE/active" ]; then
   # SubagentStop still needs recording, or it stays "outstanding" in the ledger
   # forever until `forget`. Every other event stays gated on the flag as before.
   aid=$(tl_json .agent_id)
+  # Ledger lines are two-space-separated key=value tokens, so id=$aid must be
+  # anchored to the whole token (followed by two spaces or end-of-line) —
+  # otherwise id=w1 substring-matches id=w10.
   if [ "$ev" = "SubagentStop" ] && [ -n "$aid" ] \
-     && { grep -q "  start.*id=$aid" "$TL_EVENTS" 2>/dev/null \
-          || grep -q "  resume.*id=$aid" "$TL_EVENTS" 2>/dev/null; } \
-     && ! grep -q "  return.*id=$aid" "$TL_EVENTS" 2>/dev/null; then
+     && { grep -qE "  start .*  id=$aid(  |$)" "$TL_EVENTS" 2>/dev/null \
+          || grep -qE "  resume .*  id=$aid(  |$)" "$TL_EVENTS" 2>/dev/null; } \
+     && ! grep -qE "  return .*  id=$aid(  |$)" "$TL_EVENTS" 2>/dev/null; then
     :   # outstanding for this worker — fall through and record the stop below
   else
     exit 0

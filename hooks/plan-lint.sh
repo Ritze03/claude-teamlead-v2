@@ -186,14 +186,14 @@ if [ -n "$open_nums" ]; then
     add "open question $n is used more than once — question numbers must stay unique for the plan's life"
   done
   if [ -n "$answered_nums" ]; then
-    max_ans=$(sort -rn <<<"$answered_nums" | head -1)
     reused=()
     for n in $open_nums; do
-      [ "$n" -le "$max_ans" ] && reused+=("$n")
+      grep -qx "$n" <<<"$answered_nums" && reused+=("$n")
     done
     if [ "${#reused[@]}" -gt 0 ]; then
       list=$(IFS=', '; echo "${reused[*]}")
-      nxt=$((max_ans + 1))
+      all_max=$(sort -rn <<<"$(printf '%s\n%s\n' "$open_nums" "$answered_nums")" | head -1)
+      nxt=$((all_max + 1))
       if [ "${#reused[@]}" -eq 1 ]; then
         add "open question $list reuses an answered number — numbers are stable for the plan's life; continue from $nxt"
       else

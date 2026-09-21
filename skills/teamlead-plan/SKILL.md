@@ -468,7 +468,7 @@ it changes what is being built at all, into `## Goal`).
 struck into `### Answered`; new questions continue the sequence — never renumber
 or reuse a spent number, since "1" and "7" must mean the same question next turn
 as they do now. `plan-lint` refuses any `## Open questions` number that repeats
-another open number or falls at or below the highest number already answered.
+an answered number or another open one.
 
 **Folding is not transcription.** An answer or a note can raise something new — a
 constraint that conflicts with an existing decision, an assumption that turns out
