@@ -14,6 +14,12 @@
 # (Write to a path that doesn't exist yet) is never blocked — there is no
 # "before" to compare against — it just seeds $TL_STATE/plan-stage.
 #
+# $TL_STATE/plan-stage is rewritten on every write this hook ACCEPTS, even one
+# that leaves the stage unchanged — it is "the stage last confirmed", not just
+# "the stage last changed". gate.sh's Stop-time check (D2) relies on that: it is
+# the net for writers this hook's Edit|Write|MultiEdit matcher never sees at all
+# (a Bash/python write to the plan file, F1).
+#
 # ponytail: "after this edit, what would the file say" is computed in python3
 # (already a dependency via scripts/board.py) rather than hand-rolled in bash.
 set -uo pipefail
@@ -144,5 +150,9 @@ if [ -n "$old_stage" ] && [ -n "$new_stage" ] && [ "$new_stage" -gt "$old_stage"
   esac
 fi
 
-[ -n "$new_stage" ] && [ "$new_stage" != "$old_stage" ] && record_stage "$new_stage"
+# Record on every accepted write, not only ones that change the stage: gate.sh's
+# Stop-time check (D2) compares the header against this file, and the header can
+# also be moved by a Bash/python write this hook never sees (F1) — so an accepted
+# same-stage edit still needs to refresh the pointer to "confirmed current".
+[ -n "$new_stage" ] && record_stage "$new_stage"
 exit 0

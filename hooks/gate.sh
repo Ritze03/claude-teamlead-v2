@@ -7,6 +7,8 @@
 #   1b. board       — internal validity, drift, and whether "merged" is true in git
 #   2. decompose    — the tree changed but no task list was ever written
 #   3. worktrees    — work left behind by a worker that has FINISHED
+#   3b. plan-stage  — header stage vs. last-accepted (D2): catches a plan-file
+#                      write that bypassed plan-fence.sh entirely (F1)
 #   4. plan footer  — during planning (stage <=4), the turn must end on the fixed line
 #   5. plan-lint    — stage 4: the implementation plan itself must pass lint
 #   6. stage 5->6   — every board task merged but the plan header was never bumped
@@ -106,6 +108,47 @@ if [ -f "$TL_STATE/active-plan" ]; then
   plan_file=$(cat "$TL_STATE/active-plan" 2>/dev/null)
   if [ -n "$plan_file" ] && [ -f "$plan_file" ]; then
     plan_stage=$(grep -m1 -oiE '^> \*\*stage [0-9]+\*\*' "$plan_file" 2>/dev/null | grep -oE '[0-9]+')
+  fi
+fi
+
+# 3b. plan-stage consistency (D2). plan-fence.sh only guards Edit|Write|MultiEdit,
+# so a Bash/python write to the plan file (F1) never runs its checks at all. This
+# re-derives the header stage independently and compares it to the stage
+# plan-fence last accepted ($TL_STATE/plan-stage, "<stage> <ISO-8601 ts>") — the
+# net that catches every writer, whatever tool it used.
+if [ -n "$plan_stage" ]; then
+  cur="$plan_stage"
+  rec=""; rec_ts=""
+  [ -f "$TL_STATE/plan-stage" ] && read -r rec rec_ts < "$TL_STATE/plan-stage" 2>/dev/null
+  if [ -z "$rec" ]; then
+    # first run, or a plan predating this check — nothing to compare against yet.
+    printf '%s %s\n' "$cur" "$(tl_now)" > "$TL_STATE/plan-stage"
+  elif [ "$cur" -gt "$rec" ] 2>/dev/null && [ $((cur - rec)) -gt 1 ]; then
+    problems+=$'\n'"- plan header moved Stage $rec → $cur without passing through $((rec + 1)) — set it back to $((rec + 1)) (a Go advances exactly one stage)"
+  else
+    # Same "Go newer than the last accepted bump" rule as plan-fence.sh (not
+    # extracted to lib.sh — that file belongs to another worker's step).
+    go_needed=""
+    case "$rec-$cur" in
+      3-4|4-5) go_needed=1 ;;
+    esac
+    go_ok=1
+    if [ -n "$go_needed" ]; then
+      go_ok=0
+      if [ -f "$TL_STATE/plan-go" ]; then
+        while IFS=' ' read -r _ go_ts; do
+          [ -n "$go_ts" ] || continue
+          if [ -z "$rec_ts" ] || [[ "$go_ts" > "$rec_ts" ]]; then go_ok=1; fi
+        done < "$TL_STATE/plan-go"
+      fi
+    fi
+    if [ "$go_ok" != 1 ]; then
+      problems+=$'\n'"- plan header moved Stage $rec → $cur but no \"Go\" is recorded since the last stage change — get a Go from the user, or set the header back to $rec"
+    else
+      # Accepted (delta 0 or 1 with Go rules satisfied) — record so the next
+      # Stop compares against this, not a jump already handled.
+      printf '%s %s\n' "$cur" "$(tl_now)" > "$TL_STATE/plan-stage"
+    fi
   fi
 fi
 
