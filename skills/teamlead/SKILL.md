@@ -48,8 +48,10 @@ tools:
 
 **When work is cancelled, close out its workers.** A killed or abandoned agent
 never emits a stop event, so the ledger keeps counting it as working until a long
-stale timeout. Whenever the user cancels, aborts, or you abandon a dispatch —
-including cancelling a plan mid-way — run:
+stale timeout. Workers left over from a *previous* session are already handled —
+`forget` now runs automatically on SessionStart for those. By hand, `forget` is
+only for a cancellation within the *current* session: whenever the user cancels,
+aborts, or you abandon a dispatch — including cancelling a plan mid-way — run:
 
 ```
 python3 <plugin-root>/scripts/board.py forget --project "$PWD"          # all stuck
@@ -93,6 +95,7 @@ set in your shell):
 | `board.py check --project "$PWD"` | Run the board checks yourself — after fixing something the Stop gate flagged, to confirm it is actually fixed. |
 | `board.py render --project "$PWD"` | Regenerate `board.md` from the JSON. **This is the fix when the gate reports drift.** |
 | `board.py forget [id] --project "$PWD"` | Close out a cancelled or killed worker that will never report back. |
+| `board.py remove <id> --project "$PWD"` | Drop a stray row (a worker's accidental write, a task that will never run). Refused for `running`/`returned`. |
 
 If the board tools are unavailable, the same operations exist as a CLI:
 `python3 <plugin-root>/scripts/board.py add|update|list|check --project "$PWD" …`
@@ -267,11 +270,13 @@ never read the plugin's source to work out a command.**
 | symptom | what it means | do |
 |---|---|---|
 | Gate reports drift | `board.md` was hand-edited; it is generated | `board.py render` |
-| Gate says a worker is working, nothing is running | It was cancelled or killed, so it never reported back | `board.py forget` |
+| Gate says a worker is working, nothing is running | It was cancelled or killed, so it never reported back. A restart closes these out by itself | Only needed for a cancel in the *current* session: `board.py forget` |
 | Gate refuses to end the turn | A task is sitting in `returned` | Act on it and move it to `merged` (or `blocked`) |
 | Gate flags something you believe is fine | It blocks once, never traps you | Say plainly what you are skipping and why, then continue |
 | Gate fires on the same wrong thing repeatedly | That is a bug in the check, not in you | Say so to the user — a check that fires on a correct state is worse than no check |
 | A board write is refused | Two unfinished tasks would own overlapping paths | Narrow the scopes or sequence the tasks; the refusal names both |
+| Gate refuses: plan header moved Stage N → M | The header was bumped past one stage (or 3→4 / 4→5 without a Go), usually by a script write that bypassed the fence | Set the header back to the stage the gate names, then advance one stage at a time |
+| A board write is refused with "workers report, the lead records" | A worker tried the CLI; only the lead writes | Do the write yourself, from the lead |
 | Your plan edits are not being noticed | The watcher is off, or you are the one holding control | Expected while you write; restart it when you hand back |
 | `CLAUDE_PLUGIN_ROOT` is empty | It is not set in your shell, only in hooks | Read `.claude/teamlead/.state/plugin-root` |
 
