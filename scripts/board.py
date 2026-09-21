@@ -116,6 +116,19 @@ def _git_ok(project, *args) -> bool | None:
         return None
 
 
+def _worktree_branches(proj) -> dict:
+    """`git worktree list --porcelain` parsed once into {'refs/heads/<name>':
+    <path>} — D7 needs this per check_git call, not per row."""
+    out = _git(proj, "worktree", "list", "--porcelain") or ""
+    branches, path = {}, None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line.startswith("branch ") and path:
+            branches[line[len("branch "):]] = path
+    return branches
+
+
 def check_git(db: dict, project=None) -> list[str]:
     """The board validates itself; nothing asked git whether 'merged' was true.
     A task marked merged whose commits are not in HEAD is exactly the reported
@@ -134,6 +147,8 @@ def check_git(db: dict, project=None) -> list[str]:
     if _git(proj, "rev-parse", "--is-inside-work-tree") != "true":
         return []
     problems = []
+    main = _git(proj, "rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
+    wt_by_branch = _worktree_branches(proj)
     for t in db["tasks"]:
         br = (t.get("branch") or "").strip()
         if t["state"] != "merged" or not br or br in ("-", "—"):
@@ -151,6 +166,34 @@ def check_git(db: dict, project=None) -> list[str]:
             problems.append(
                 f"task {t['id']} is marked merged but branch {br} has {n} commit(s) "
                 f"not in HEAD — it was not actually merged back")
+    # D7: independent of the check above — a merged row can be both "not
+    # actually merged back" AND still hold a worktree; both lines are useful,
+    # the second tells the lead what to do once the first is fixed. Never
+    # removes anything.
+    for t in db["tasks"]:
+        br = (t.get("branch") or "").strip()
+        if t["state"] != "merged" or not br or br in ("-", "—"):
+            continue
+        path = wt_by_branch.get(f"refs/heads/{br}")
+        if path:
+            problems.append(
+                f"task {t['id']} is merged but worktree {path} still exists — "
+                f"`git worktree remove {path}`")
+    # D6: a 'returned' branch about to be merged should not have fallen
+    # behind main since the worker branched off. 'running' rows are skipped
+    # on purpose — a running row falls behind every time anyone else merges,
+    # and a warning the lead cannot act on trains it to ignore the gate.
+    for t in db["tasks"]:
+        if t["state"] != "returned":
+            continue
+        br = (t.get("branch") or "").strip()
+        if not br or br in ("-", "—"):
+            continue
+        if _git(proj, "rev-parse", "--verify", "--quiet", br) is None:
+            continue                      # branch already gone: nothing to warn about
+        if _git_ok(proj, "merge-base", "--is-ancestor", "HEAD", br) is False:
+            problems.append(
+                f"task {t['id']} branch {br} is behind {main} — rebase before merging")
     return problems
 
 
@@ -246,11 +289,39 @@ def check_plan(db: dict, project=None) -> list[str]:
             f"(board_add with plan: {i})" for i in target if i not in on_board]
 
 
+def _chain_reaches(start: int, target: int, by_id: dict) -> bool:
+    """BFS over blocked_by from `start`; True if `target` is reached. Rows of
+    any state — merged included — count as links: a merged row in the middle
+    of a chain still connects its neighbours. `seen` guards a blocked_by
+    cycle; a dangling id that names no row is just a dead end."""
+    seen, frontier = {start}, [start]
+    while frontier:
+        nxt = []
+        for tid in frontier:
+            for b in (by_id.get(tid, {}).get("blocked_by") or []):
+                if b == target:
+                    return True
+                if b not in seen:
+                    seen.add(b)
+                    nxt.append(b)
+        frontier = nxt
+    return False
+
+
+def _chain_linked(a_id: int, b_id: int, by_id: dict) -> bool:
+    """D8: two unfinished rows may own overlapping paths iff one is in the
+    other's blocked_by chain, transitively — blocked_by only points from a
+    row to what it waits on, so the id order of the pair doesn't say which
+    direction to walk; try both."""
+    return _chain_reaches(a_id, b_id, by_id) or _chain_reaches(b_id, a_id, by_id)
+
+
 def _validate_detailed(db: dict) -> list[tuple[frozenset, str]]:
     """Like validate(), but tags each problem with the task id(s) it involves, so a
     targeted refusal (mutate) can report only what the edit actually touched while
     check/status keep reporting everything."""
     problems, seen = [], set()
+    by_id = {t["id"]: t for t in db["tasks"]}
     live = [t for t in db["tasks"] if t["state"] not in ("merged",)]
     merged_ids = {t["id"] for t in db["tasks"] if t["state"] == "merged"}
     for t in db["tasks"]:
@@ -265,8 +336,21 @@ def _validate_detailed(db: dict) -> list[tuple[frozenset, str]]:
         if t["state"] == "blocked" and t.get("blocked_by") and all(b in merged_ids for b in t["blocked_by"]):
             problems.append((frozenset({tid}),
                 f"task {tid} is blocked but all its blockers are merged — it should be queued"))
+        # D9: board_update accepts arbitrary state jumps, so gating only
+        # 'running' would leave 'queued -> merged' open — and a merged row's
+        # overlaps are never checked again (D8), so that gap would reopen
+        # the overlap hole this same change closes. One problem per unmerged
+        # blocker; a blocked_by id naming no row is ignored, not invented.
+        if t["state"] in ("running", "merged"):
+            for b in t.get("blocked_by") or []:
+                blocker = by_id.get(b)
+                if blocker and blocker["state"] != "merged":
+                    problems.append((frozenset({tid, b}),
+                        f"task {tid} is blocked by {b}, which is {blocker['state']}"))
     for i, a in enumerate(live):
         for b in live[i + 1:]:
+            if _chain_linked(a["id"], b["id"], by_id):
+                continue               # D8: linked through blocked_by — overlap is fine
             for pa in a["owns"]:
                 for pb in b["owns"]:
                     if _overlap(pa, pb):
