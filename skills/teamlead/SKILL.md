@@ -331,7 +331,7 @@ COMMANDS
 DIALS (asked once per project, change anytime; no argument re-opens the picker)
   /teamlead effort <level>         low | xlow | medium | xmedium | high | xhigh
                                    biases which worker tier I reach for first
-  /teamlead opus <mode>            on-demand | role-dependant | never
+  /teamlead opus <mode>            on-demand | role-dependant | always | never
                                    on-demand (default): Opus only after Sonnet fails
                                    never: no Opus workers; I reason through blockers myself
   /teamlead prompting <mode>       sequential | qc
@@ -372,7 +372,7 @@ questions × 4 options, which is why effort splits in two):
 
 - **Q1 Direction** — Low / **Medium** (recommended) / High
 - **Q2 Hard cap?** — **No, bias only** (recommended) / Yes, hard cap
-- **Q3 Opus Usage** — **on-demand** (recommended) / role-dependant / never
+- **Q3 Opus Usage** — never / **on-demand** (recommended) / role-dependant / always
 - **Q4 Prompting** — **Sequential** (recommended) / QC Prompting
 
 Write the answers to `.claude/teamlead/settings.md` as three lines

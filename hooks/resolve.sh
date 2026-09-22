@@ -33,6 +33,18 @@ if [ "$opus" = "never" ]; then
   esc=""; ban="${ban:+$ban, }tl-opus-*"
 fi
 
+# always is never's opposite pole: promote every worker to Opus at the
+# effort-appropriate tier and ban Sonnet outright. Vision stays exempt as always.
+if [ "$opus" = "always" ]; then
+  case "$effort" in
+    xlow|low)       work=tl-opus-low;    scout=tl-opus-low ;;
+    medium|xmedium) work=tl-opus-medium; scout=tl-opus-low ;;
+    high|xhigh)     work=tl-opus-high;   scout=tl-opus-medium ;;
+  esac
+  esc=$ceil
+  ban="${ban:+$ban, }tl-sonnet-*"
+fi
+
 echo "effort: $effort · opus: $opus · prompting: $prompting"
 if [ -n "$esc" ]; then
   echo "Workhorse: $work · Scout: $scout · Escalate to: $esc (ceiling $ceil)"
@@ -48,5 +60,7 @@ case "$opus" in
     # Without this line the setting produced output identical to the default, so
     # choosing it had no visible effect and the lead behaved as if on-demand.
     echo "Opus may be dispatched FIRST-CHOICE when the role calls for it — genuine architecture/design calls, ambiguous cross-system debugging — as well as via the retry ladder. Ordinary execution still starts on Sonnet." ;;
+  always)
+    echo "Every task goes to an Opus worker first-choice; Sonnet is not dispatched at all. The effort dial now only picks WHICH Opus tier." ;;
 esac
 exit 0
