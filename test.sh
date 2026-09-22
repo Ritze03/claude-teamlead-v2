@@ -269,20 +269,23 @@ for lvl in low xlow xmedium high xhigh; do
 done
 grep -q 'effort=medium' "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "medium is not the default in resolve.sh"
 ok "effort levels in help match resolve.sh"
-for m in on-demand role-dependant never; do
+for m in on-demand role-dependant always never; do
   grep -q "$m" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "help names opus mode '$m' that resolve.sh lacks"
 done
 ok "opus modes in help match resolve.sh"
 
 # every opus mode must produce a distinguishable guidance line
 rdp=$T/rd; mkdir -p $rdp/.claude/teamlead
-for m in on-demand role-dependant never; do
+for m in on-demand role-dependant always never; do
   printf 'effort: medium\nopus: %s\n' "$m" > $rdp/.claude/teamlead/settings.md
   "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $rdp > "$T/r-$m"
 done
 if diff -q "$T/r-on-demand" "$T/r-role-dependant" >/dev/null; then
   bad "role-dependant is indistinguishable from on-demand"
 else ok "each opus mode gives distinct guidance"; fi
+if diff -q "$T/r-on-demand" "$T/r-always" >/dev/null; then
+  bad "always is indistinguishable from on-demand"
+else ok "always gives distinct guidance from on-demand"; fi
 
 echo "== status line segment =="
 SL="$H/statusline.sh"
@@ -738,7 +741,7 @@ echo "== F6: datetime.UTC is not used (Python 3.10 compat) =="
 check "no datetime.UTC usage in board.py" "$(grep -c 'datetime.UTC' "$CLAUDE_PLUGIN_ROOT/scripts/board.py")" 0
 
 echo "== F10: resolve.sh's hardcoded agent tiers match agents/*.md exactly =="
-resolved=$(sed -n '15,21p' "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" | grep -oE 'tl-(opus|sonnet)-[a-z]+' | sort -u)
+resolved=$(sed -n '/^case "\$effort" in/,/^esac/p' "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" | grep -oE 'tl-(opus|sonnet)-[a-z]+' | sort -u)
 actual_agents=$(cd "$CLAUDE_PLUGIN_ROOT" && ls agents/*.md | xargs -n1 basename | sed 's/\.md$//' | sort -u)
 check "resolve.sh's tiers == agents/*.md basenames (set equality)" "$resolved" "$actual_agents"
 
@@ -1042,6 +1045,14 @@ grep -q 'Workhorse: tl-sonnet-medium' <<<"$r" && ok "xlow lowers the workhorse" 
 grep -q 'tl-opus-\*' <<<"$r" && ok "never bans Opus" || bad "never bans Opus"
 grep -q 'Vision.*tl-opus-medium' <<<"$r" && ok "vision survives opus:never + xlow" || bad "vision survives opus:never + xlow"
 grep -q 'Never tl-opus-high for vision' <<<"$r" && ok "vision capped below high" || bad "vision capped below high"
+printf 'effort: medium\nopus: always\n' > .claude/teamlead/settings.md
+r=$("$H/resolve.sh" "$proj")
+grep -q 'Workhorse: tl-opus-medium · Scout: tl-opus-low' <<<"$r" && ok "always promotes workhorse+scout to Opus" || bad "always promotes workhorse+scout to Opus"
+grep -q 'tl-sonnet-\*' <<<"$r" && ok "always bans Sonnet" || bad "always bans Sonnet"
+grep -q 'Vision.*tl-opus-medium' <<<"$r" && ok "vision survives opus:always" || bad "vision survives opus:always"
+printf 'effort: high\nopus: always\n' > .claude/teamlead/settings.md
+r=$("$H/resolve.sh" "$proj")
+grep -q 'Workhorse: tl-opus-high' <<<"$r" && ok "always still discriminates on effort (high != medium)" || bad "always still discriminates on effort (high != medium)"
 
 echo "== a question carries the lead's recommendation =="
 mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" | cat -s > "$T/q.md"
