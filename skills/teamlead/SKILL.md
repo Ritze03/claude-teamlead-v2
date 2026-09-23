@@ -97,7 +97,8 @@ set in your shell):
 | `board.py forget [id] --project "$PWD"` | Close out a cancelled or killed worker that will never report back. |
 | `board.py remove <id> --project "$PWD"` | Drop a stray row (a worker's accidental write, a task that will never run). Refused for `running`/`returned`. |
 | `board.py clean --project "$PWD"` | Drop every `merged` row. Open rows and `next_id` are untouched; the `## Done` table and its `### How it was solved` notes are rendered from those rows, so both go with them. Asks nothing. |
-| `board.py drop --project "$PWD"` | Empty the board entirely, open rows included. Reports what it will destroy **before** it acts, backs `board.json` up to `.state/board.json.dropped`, resets `next_id` to 1, clears the ledger. Ask the user first (see the Commands table). |
+| `board.py drop --dry-run --project "$PWD"` | **Look first.** Prints exactly the pre-flight report the real drop prints — open/merged counts, which workers it would stop, whether a plan is active — and changes nothing: no backup, no rows touched, no ledger truncated, no `board.json` created. This is where the numbers for your confirmation question come from. |
+| `board.py drop --project "$PWD"` | Empty the board entirely, open rows included. Prints the same report, then backs `board.json` up to `.state/board.json.dropped`, resets `next_id` to 1, clears the ledger. Run it only after a yes — `--dry-run` first, always (see *Confirming `board clean` and `board drop`*). |
 
 If the board tools are unavailable, the same operations exist as a CLI:
 `python3 <plugin-root>/scripts/board.py add|update|list|check --project "$PWD" …`
@@ -306,7 +307,7 @@ around is a bug that stays.
 | `/teamlead plan continue` | Resume the active plan from its recorded stage — the way back in after a `/clear`; see the `teamlead-plan` skill. |
 | `/teamlead brainstorm <agents> <iterations> <topic>` | See the `teamlead-brainstorm` skill. |
 | `/teamlead superdoc` | See the `teamlead-superdoc` skill. Also reachable as `/superdoc` or by saying "init superdoc" — aliases, not separate commands. |
-| `/teamlead settings` | Open the dial picker for both dials — the same `AskUserQuestion` call as first-run setup, minus the questions already answered. |
+| `/teamlead settings` | Open the dial picker for both dials — the same `AskUserQuestion` call as first-run setup. Every dial is already answered by the time this is run; re-ask them all. |
 | `/teamlead effort [level]` | Set the effort dial. No argument re-opens the picker. |
 | `/teamlead opus [mode]` | Set the Opus Usage dial. No argument re-opens the picker. |
 | `/teamlead help` | Print the **Help text** below, verbatim. |
@@ -322,11 +323,53 @@ Neither script prompts on stdin. The confirmation is **yours**, through
 
 - **`clean` asks nothing.** Nothing open is touched and merged rows are history, not
   working state. Run it and report what went.
-- **`drop` asks exactly once.** Run `board.py drop` only after a yes. The question
-  must name, from the report the command prints before it mutates anything: how many
-  open rows are about to go, the ids and agent names of the workers still out, and —
-  when a plan is active — that the plan's board rows go with the board. Then one
-  question, yes or no: drop the board. Not a chain of confirmations.
+- **`drop` asks exactly once, and you look before you ask.** The facts the question
+  needs live only in the pre-flight report, so get that report the one way that does
+  not destroy what it describes — `--dry-run`:
+
+  1. Run it:
+
+     ```
+     python3 <plugin-root>/scripts/board.py drop --dry-run --project "$PWD"
+     ```
+
+     It prints the pre-flight block and returns. Nothing is changed: no backup, no
+     rows touched, no ledger truncated, and if the project has no board, none is
+     created. The block comes from the same function the real run uses, so what you
+     read here is exactly what the real run will print. Its last line is:
+
+     ```
+       dry run — nothing was changed; run the same command without --dry-run to do it
+     ```
+
+     If instead it prints `drop — nothing to drop: this project has no board
+     (.state/board.json does not exist)` (followed by `  no files were created`),
+     there is nothing to confirm — say so and stop. Do not run the real command.
+
+  2. Build **one** `AskUserQuestion` out of that block, quoting its numbers rather
+     than any you remember: the open-task count (`N open task(s) and M merged
+     task(s) will be removed`), the workers it will stop (`workers still out …`,
+     with the ids and agent names as printed, or `no workers out`), and — when the
+     block says `plan ACTIVE: <path>` — that the plan's board rows go with the
+     board. Then one question, yes or no: drop the board. Not a chain of
+     confirmations.
+
+  3. On a yes, run the **same command without `--dry-run`**. On a no, do nothing.
+
+  **If the block carries the parse warning**, one extra line is inserted — five lines
+  where there are normally four — and it sits *above* the count line, deliberately, so
+  the count cannot be read without the caveat:
+
+  ```
+    ! .state/board.json could not be parsed — the counts below are NOT trustworthy; the file may still hold rows as readable text
+  ```
+
+  Then the counts are `load()`'s empty-board fallback and mean nothing. Do **not**
+  present them to the user as fact — say the board file is damaged and unreadable, so
+  how much is at stake cannot be determined. Still offer the drop, and still point at
+  the backup: it is a byte copy of `board.json`, not a re-serialisation, so it
+  preserves the damaged original's recoverable text — which is exactly the case where
+  a backup is worth most.
 - `drop` **never refuses because workers are still out.** A stuck worker is precisely
   when a reset is the right move. It stops them; it does **not** touch their
   worktrees.
@@ -336,11 +379,41 @@ Neither script prompts on stdin. The confirmation is **yours**, through
   worktree with unmerged commits destroys the only copy of that work. Two very
   different prices must not ride on one click.
 - `drop` deliberately leaves `.claude/teamlead/.state/active-plan` alone, so an active
-  plan is not stranded. Until it is re-boarded or archived, `check` will report its
-  steps missing — say so when you report the drop.
+  plan is not stranded. The consequence is not cosmetic: `gate.sh` runs `board.py
+  check` at Stop and blocks on any output, so **every turn will end blocked** — "plan
+  step I1 has no board task", one line per step — until the plan is re-boarded or
+  archived. Say this when you report the drop, in those words, and give the way out:
+
+  - **Re-board it** — copy each step back from the plan's wave table with `board_add`
+    (`plan: I1`, …). This is the right move when the plan is still being built.
+  - **Archive it** — the right move when the drop *was* the abandonment. Archiving is
+    `scripts/plan-archive.sh`, run by hand; there is no `/teamlead` command for it:
+
+    ```
+    bash "$(cat .claude/teamlead/.state/plugin-root)/scripts/plan-archive.sh" \
+        .claude/teamlead/plan/<the-plan>.md --project "$PWD" --abandon
+    ```
+
+    It datestamps the file into `.claude/teamlead/plan/done/` (as
+    `YYYY-MM-DD-abandoned-<name>.md` — it never deletes), removes `.state/active-plan`,
+    `.state/plan-watch`, `.state/plan-touched` and the plan's snapshot, kills the plan
+    watcher, and — because `--abandon` was passed — runs `board.py forget` to close out
+    any worker still outstanding. With `active-plan` gone, `check` has nothing to
+    complain about and the gate lets the turn end. Archiving is a user-facing decision
+    — ask before you run it.
+
+    Without `--abandon` the script **refuses** a plan whose `Done when` boxes are not
+    all ticked, and refuses a plan with no `Done when` criteria at all. After a drop
+    that is the normal state, so `--abandon` is normally the flag you need. Use the
+    plain form only for a plan genuinely finished and confirmed.
 - The backup at `.state/board.json.dropped` is **overwritten on every drop; there is
   no rotation.** A second drop destroys the first backup. Say this when you offer the
-  backup as a way back.
+  backup as a way back. Say the other half too: it backs up the **board only**, while
+  `drop` also truncates `events.log`, so restoring it restores rows without the ledger
+  entries that paired with them — a restored `running` row has no worker behind it and
+  `check` fails the turn immediately (`board.json marks 1 task(s) 'running' but only 0
+  worker(s) are still working`). The JSON round-trips byte-for-byte; the board/ledger
+  *pairing* does not survive. Expect to `forget` the orphaned rows after a restore.
 - Both are **lead-only**, behind the same `_refuse_if_worker()` guard as
   `add`/`update`/`remove`.
 
@@ -361,17 +434,17 @@ TEAMLEAD — you think, cheap workers implement.
 Mode is per project and persists across sessions until you run /teamlead stop.
 
 COMMANDS
-  /teamlead                       activate for this project
-  /teamlead stop                  deactivate
-  /teamlead help                  this text
-  /teamlead status                open tasks, workers out, problems
-  /teamlead board                 the full board table, inline
-  /teamlead board clean           forget the finished tasks (and their solution notes)
-  /teamlead board drop            empty the board completely — I ask you first
-  /teamlead plan <topic>          work a plan out with me, in a file you keep open
-  /teamlead plan continue         resume the active plan (after /clear)
-  /teamlead brainstorm <n> <r> <t> n agents over r rounds on topic t, then an Opus verify
-  /teamlead superdoc              set up / audit the agent-facing docs in superdoc/
+  /teamlead                         activate for this project
+  /teamlead stop                    deactivate
+  /teamlead help                    this text
+  /teamlead status                  open tasks, workers out, problems
+  /teamlead board                   the full board table, inline
+  /teamlead board clean             forget the finished tasks (and their solution notes)
+  /teamlead board drop              empty the board completely — I ask you first
+  /teamlead plan <topic>            work a plan out with me, in a file you keep open
+  /teamlead plan continue           resume the active plan (after /clear)
+  /teamlead brainstorm <n> <r> <t>  n agents over r rounds on topic t, then an Opus verify
+  /teamlead superdoc                set up / audit the agent-facing docs in superdoc/
 
 DIALS (asked once per project, change anytime; no argument re-opens the picker)
   /teamlead settings               re-open the picker for both dials at once
