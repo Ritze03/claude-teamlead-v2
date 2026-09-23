@@ -29,7 +29,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 |---|---|---|
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
 | **2 Create and show** | Create the near-empty plan — the five sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
-| **3 Work it out** | Scout, then ask. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
+| **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | You alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
 | **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. | They all pass |
@@ -55,7 +55,7 @@ file while there is still something to watch it for.
 
 The header tracks this: the file says `Stage 2` while the scout runs (the status
 line then reads *"open it in your editor"*, which is exactly the thing to do), and
-becomes `Stage 3` when you post the questions and are genuinely waiting on them.
+becomes `Stage 3` when you post that first question and are genuinely waiting on it.
 
 **"Go" advances exactly one stage.** From 3 it means *write the implementation
 plan, then stop*. From 4 it means *start implementing*. One word, never a skip
@@ -119,6 +119,33 @@ is byte-exact — a paraphrase reads fine to a person and fails a string compare
 Before asking the user anything, dispatch scouts to gather what the repo can
 answer. Findings go in `## Context`. Research first, questions second — never ask
 what you could have looked up.
+
+## Stage 3 asks one question first, and derives the rest
+
+After the scout reports, the **only** thing you ask is what the user actually wants
+out of this. One open question, in chat and in `## Open questions`. Nothing else
+goes with it.
+
+Do **not** open stage 3 with a list of questions worked up from the topic. A topic
+plus your own reading generates the questions *you* found interesting; handing those
+over as a menu makes the user read five of yours to reach the one that was theirs,
+and the one that was theirs may not be on the list at all. The scout tells you what
+the repo is. It does not tell you what they want.
+
+So the order is: **scout → ask what they want → derive the specific questions from
+their answer.** The detailed questions come out of what they say, not out of the
+topic. Once their answer is in hand you almost always have fewer questions than you
+would have invented, and every one of them is load-bearing — an ambiguity their
+answer actually created, not one you supplied.
+
+Write that first question the same way as any other (see *Never ask a bare
+question*): your `*Suggest:*` for what this probably is, or `*Your call:*` when it
+is genuinely only theirs. It is numbered like any other question and it keeps that
+number for the plan's life — the questions you derive next simply continue the
+sequence (see *Everything ends up in Decisions*). Nothing is ever renumbered.
+
+Everything else about stage 3 is unchanged: the watcher is running, they can answer
+in chat *or* type into the file and save, and either channel folds the same way.
 
 The scout reports facts — file:line, what exists, what is already enforced and
 where — never improvement proposals or a change list. Those come only from a

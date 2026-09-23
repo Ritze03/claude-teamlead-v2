@@ -71,7 +71,7 @@ claude --plugin-dir /path/to/claude-teamlead-v2
 ```
 
 Then say `/teamlead` — or just ask it to act as a team lead. Activation is per project and
-**persists across sessions** until you say `stop teamlead`.
+**persists across sessions** until you say `/teamlead stop`.
 
 ## Modes
 
@@ -90,7 +90,7 @@ $ claude
 ✅ TEAMLEAD ACTIVATED
 ```
 
-First run in a project asks four questions once (effort, hard cap, Opus policy, prompting)
+First run in a project asks three questions once (effort direction, hard cap, Opus policy)
 and never asks again. Then give it work:
 
 ```
@@ -108,6 +108,22 @@ teamlead — 2 open task(s), 1 worker(s) out
   #4   blocked   QC over 3
 ```
 
+## Commands
+
+| | |
+|---|---|
+| `/teamlead` | Activate. Persistent, per project. |
+| `/teamlead stop` | Deactivate. This exact command is the only phrase that deactivates the mode — loose wordings are deliberately not matched, because a subagent quoting one used to kill the mode. |
+| `/teamlead help` | Print the help card. |
+| `/teamlead status` | Open tasks, workers still out, and anything the checks would flag. |
+| `/teamlead board` | The full board table, inline in the terminal. |
+| `/teamlead board clean` | Forget every finished task, and with it the "how it was solved" notes. Open tasks are untouched and ids keep counting up. No confirmation — nothing live is at risk. |
+| `/teamlead board drop` | Empty the board completely, open tasks included. It tells you first how many open rows and which workers it is about to stop, then asks once. Workers are stopped; **their worktrees are not touched** — removing those is a separate question it asks afterwards, naming any worktree holding commits you have not merged. The old board is backed up to `.state/board.json.dropped`, which is overwritten by the next drop, so it is one level of undo and no more. |
+| `/teamlead plan <topic>` | Interactive planning — see below. |
+| `/teamlead plan continue` | Resume the active plan from where it left off; the way back in after a `/clear`. |
+| `/teamlead brainstorm <agents> <iterations> <topic>` | N thinkers over M rounds, then an Opus verify. |
+| `/teamlead superdoc` | Set up / audit the agent-facing docs in `superdoc/`. |
+
 ## Dials
 
 Asked once per project, stored in `.claude/teamlead/settings.md`, changeable anytime.
@@ -116,8 +132,8 @@ Running any of these with no argument re-opens the picker.
 | | |
 |---|---|
 | `/teamlead effort <level>` | `low` · `xlow` · **`medium`** · `xmedium` · `high` · `xhigh` — biases which worker tier gets reached for first. The `x` levels are hard caps, not just a bias. |
-| `/teamlead opus <mode>` | **`on-demand`** (Opus only after a Sonnet worker actually fails) · `role-dependant` (Opus first-choice when the role calls for it) · `never` (no Opus workers at all — a stuck worker reports its blocker and the lead reasons through it) |
-| `/teamlead prompting <mode>` | **`sequential`** · `qc` — how briefs are written when a dispatch fans out |
+| `/teamlead opus <mode>` | **`on-demand`** (Opus only after a Sonnet worker actually fails) · `role-dependant` (Opus first-choice when the role calls for it, ordinary execution still starts on Sonnet) · `always` (every task goes to an Opus worker first-choice, Sonnet is never dispatched, and the effort dial only picks which Opus tier) · `never` (no Opus workers at all — a stuck worker reports its blocker and the lead reasons through it) |
+| `/teamlead settings` | Re-opens the picker for both dials at once. |
 
 **Vision is exempt from both dials.** Anything whose input is an image goes to
 `tl-opus-medium` automatically — Opus reads images materially better and there's no Sonnet
@@ -200,7 +216,7 @@ Open tasks, workers still out, and anything the checks would flag.
 
 ```
 .claude/teamlead/
-├── settings.md      effort / opus / prompting        (committed)
+├── settings.md      effort / opus                    (committed)
 ├── board.md         live working set                 (gitignored)
 ├── plan/            plan files you open              (committed)
 ├── brainstorm/      live brainstorm runs             (committed)
