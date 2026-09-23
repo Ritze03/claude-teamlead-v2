@@ -439,6 +439,86 @@ for s in clean drop; do
   else bad "  /teamlead board $s is implemented as board.py '$s' (board.py says: $bsubs)"; fi
 done
 
+echo "== SKILL.md: the board-drop worktree confirmation names a RUNNABLE source =="
+# The second confirmation has to name which worktrees hold unmerged commits, and for
+# a long time the file said so without ever saying how to find that out. A grep for
+# the word "worktree" passes on that broken text, so this test does two things a
+# grep cannot: it EXECUTES the command SKILL.md documents, against a fixture with one
+# clean worktree and one holding an unmerged commit, and it matches the output shapes
+# SKILL.md quotes against what state.sh really printed. Quoting a string state.sh
+# does not print, or documenting a command that does not run, fails here.
+wcsec=$T/wc-section
+awk '/^- \*\*Removing those worktrees/,/^- `drop` deliberately leaves/' "$SK" | head -n -1 > $wcsec
+[ -s $wcsec ] && ok "the drop worktree-confirmation bullet is still findable" \
+  || bad "the drop worktree-confirmation bullet is still findable"
+wccmd=$(grep -m1 'state\.sh' $wcsec | sed 's/^ *//')
+[ -n "$wccmd" ] && ok "  and it names hooks/state.sh as the source of that list" \
+  || bad "  it names NO source — hooks/state.sh appears nowhere in the bullet"
+grep -qF '.claude/teamlead/.state/plugin-root' <<<"$wccmd" \
+  && ok "  spelled via .state/plugin-root (CLAUDE_PLUGIN_ROOT is unset in the lead's shell)" \
+  || bad "  the documented command does not read .state/plugin-root: $wccmd"
+
+# A real project: master, one clean merged worktree, one with a commit of its own.
+wcp=$T/wcproj; mkdir -p $wcp/.claude/teamlead/.state
+echo "$CLAUDE_PLUGIN_ROOT" > $wcp/.claude/teamlead/.state/plugin-root
+git -C $wcp init -q; git -C $wcp config user.email t@t.t; git -C $wcp config user.name t
+git -C $wcp commit -q --allow-empty -m base
+git -C $wcp worktree add -q $wcp/wt-clean -b wtclean 2>/dev/null
+git -C $wcp worktree add -q $wcp/wt-work -b wtwork 2>/dev/null
+git -C $wcp/wt-work commit -q --allow-empty -m unmerged
+wcout=$(cd $wcp && eval "$wccmd" 2>&1)
+grep -qE 'safe to remove\): .*/wt-clean$' <<<"$wcout" \
+  && ok "  running it verbatim clears the clean, merged worktree" \
+  || bad "  running it verbatim clears the clean, merged worktree (got: $wcout)"
+grep -qE 'HOLDING WORK .*/wt-work$' <<<"$wcout" \
+  && ok "  and flags the worktree holding an unmerged commit" \
+  || bad "  and flags the worktree holding an unmerged commit (got: $wcout)"
+grep 'safe to remove' <<<"$wcout" | grep -qE '/wt-work$' \
+  && bad "  the unmerged worktree must NEVER be called safe to remove" \
+  || ok "  the unmerged worktree is never called safe to remove"
+
+# The quoted shapes must be the ones state.sh actually emits. <branch>, <path> and
+# the commit count are the only placeholders; the rest compares literally.
+grep -oP '^    \Kworktree .*' $wcsec > $T/wc-shapes
+check "  SKILL.md quotes all three output shapes" "$(wc -l < $T/wc-shapes)" "3"
+wcmatch(){ python3 -c '
+import re,sys
+rx=re.escape(sys.argv[1]).replace("<branch>","[^,)]+").replace("<why>",".+").replace("<path>",".+")
+print("yes" if re.search("^  "+rx+"$",sys.stdin.read(),re.M) else "no")' "$1"; }
+while read -r shape; do
+  case "$shape" in
+    *"CANNOT BE CHECKED"*)
+      # Not reproducible from a healthy fixture, so pin it against the script text.
+      grep -qF "${shape% <path>}" "$H/state.sh" \
+        && ok "  the CANNOT-BE-CHECKED shape is verbatim from hooks/state.sh" \
+        || bad "  SKILL.md quotes a CANNOT-BE-CHECKED line state.sh never prints: $shape" ;;
+    *)
+      check "  state.sh really prints: $shape" "$(wcmatch "$shape" <<<"$wcout")" yes ;;
+  esac
+done < $T/wc-shapes
+# <why> is a placeholder, so pin its four documented values against the script that
+# composes them — otherwise the bullet could list reasons state.sh never emits.
+for why in 'uncommitted changes' 'commit(s) not in' 'status check FAILED' 'unmerged-commit check FAILED'; do
+  if grep -qF "$why" $wcsec && grep -qF "$why" "$H/state.sh"; then
+    ok "  HOLDING WORK reason '$why' is documented AND emitted by state.sh"
+  else bad "  HOLDING WORK reason '$why' is missing from SKILL.md or from hooks/state.sh"; fi
+done
+
+# 'safe to remove' is the ONLY clearance; the other two shapes both forbid deletion.
+wcflat=$(tr '\n' ' ' < $wcsec)
+grep -qF 'safe to remove' $wcsec \
+  && grep -qE 'HOLDING WORK.*CANNOT BE CHECKED|CANNOT BE CHECKED.*HOLDING WORK' <<<"$wcflat" \
+  && ok "  the bullet names the one clearing string and both forbidding ones" \
+  || bad "  the bullet does not distinguish the clearing string from the forbidding ones"
+# The carve-out to "Do not re-check any of it" (:18-23) must be stated on both sides,
+# or the two instructions contradict each other at exactly the destructive moment.
+grep -qE 'Do not re-check' "$SK" && grep -A3 'Do not re-check' "$SK" | grep -qi 'exception' \
+  && ok "  the injected-state section flags the exception to 'Do not re-check'" \
+  || bad "  'Do not re-check any of it' still contradicts the drop-time re-check"
+grep -qi 're-check' $wcsec \
+  && ok "  and the drop bullet states the carve-out where it is used" \
+  || bad "  the drop bullet never reconciles itself with 'Do not re-check any of it'"
+
 echo "== status line segment =="
 SL="$H/statusline.sh"
 slp=$T/sl; mkdir -p $slp/.claude/teamlead/.state; cd $slp; git init -q
