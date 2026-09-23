@@ -27,7 +27,7 @@ echo "== inactive project must cost nothing =="
 check "gate no-ops without the flag" "$(ev "$STOP" "$H/gate.sh")" 0
 
 mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active
-printf 'effort: medium\nopus: on-demand\nprompting: sequential\n' > .claude/teamlead/settings.md
+printf 'effort: medium\nopus: on-demand\n' > .claude/teamlead/settings.md
 
 echo "== gate on a clean, empty project =="
 check "no ledger, no changes -> silent" "$(ev "$STOP" "$H/gate.sh")" 0
@@ -264,11 +264,22 @@ for c in "/teamlead plan" "/teamlead brainstorm" "/teamlead superdoc" "/teamlead
 done
 ok "advertised commands all defined"
 # the dials it names must match resolve.sh
-for lvl in low xlow xmedium high xhigh; do
+# medium belongs in this loop: since resolve.sh was restructured it is an explicit
+# case arm like the rest, not a bare default assignment.
+for lvl in low xlow medium xmedium high xhigh; do
   grep -q "  $lvl)" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "help names effort level '$lvl' that resolve.sh lacks"
 done
-grep -q 'effort=medium' "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "medium is not the default in resolve.sh"
 ok "effort levels in help match resolve.sh"
+# The old assertion here was `grep -q 'effort=medium' resolve.sh`, which stopped
+# asserting anything once the default arm went away — it now matches only line 13's
+# `effort=${effort:-medium}`. Assert the BEHAVIOUR instead: medium must route.
+medp=$T/medium; mkdir -p $medp/.claude/teamlead
+printf 'effort: medium\nopus: on-demand\n' > $medp/.claude/teamlead/settings.md
+medout=$("$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $medp)
+check "effort: medium routes to the medium tier" \
+  "$(grep -m1 '^Workhorse:' <<<"$medout")" \
+  "Workhorse: tl-sonnet-high · Scout: tl-sonnet-medium · Escalate to: tl-opus-medium (ceiling tl-opus-high)"
+check "  and the banner summary says medium" "$(head -1 <<<"$medout")" "effort: medium · opus: on-demand"
 for m in on-demand role-dependant always never; do
   grep -q "$m" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "help names opus mode '$m' that resolve.sh lacks"
 done
@@ -286,6 +297,88 @@ else ok "each opus mode gives distinct guidance"; fi
 if diff -q "$T/r-on-demand" "$T/r-always" >/dev/null; then
   bad "always is indistinguishable from on-demand"
 else ok "always gives distinct guidance from on-demand"; fi
+
+echo "== resolve.sh: an invalid dial value degrades to the default and says so =="
+# A bad value must never take the banner down with it: the routing line below has to
+# stay usable, so the dial falls back and the complaint is appended last.
+ivp=$T/invalid; mkdir -p $ivp/.claude/teamlead
+rs(){ printf "$1" > $ivp/.claude/teamlead/settings.md; "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $ivp; }
+
+ivout=$(rs 'effort: turbo\nopus: on-demand\n')
+grep -q 'INVALID SETTING' <<<"$ivout" && ok "effort: turbo -> INVALID SETTING" || bad "effort: turbo -> INVALID SETTING"
+grep -q 'INVALID SETTING: effort: turbo does not exist' <<<"$ivout" && ok "  quotes back what was actually typed" || bad "  quotes back what was actually typed"
+grep -q 'degraded to effort: medium' <<<"$ivout" && ok "  names the default it fell back to" || bad "  names the default it fell back to"
+ivlvls=$(grep 'INVALID SETTING: effort' <<<"$ivout")
+miss=""; for lvl in low xlow medium xmedium high xhigh; do
+  grep -qE "(^| |, )$lvl(,| |$)" <<<"$ivlvls" || miss="$miss $lvl"; done
+[ -z "$miss" ] && ok "  lists all six valid levels" || bad "  lists all six valid levels (missing:$miss)"
+grep -q '^Workhorse: ' <<<"$ivout" && ok "  routing still printed — the banner stays usable" || bad "  routing still printed"
+# The summary must show the CORRECTED value, never the raw one: a summary reading
+# 'effort: turbo' would contradict the Workhorse line directly beneath it.
+check "  the summary line shows the corrected value, not the typo" "$(head -1 <<<"$ivout")" "effort: medium · opus: on-demand"
+
+ivout=$(rs 'effort: medium\nopus: banana\n')
+grep -q 'INVALID SETTING: opus: banana does not exist' <<<"$ivout" && ok "opus: banana -> INVALID SETTING naming banana" || bad "opus: banana -> INVALID SETTING naming banana"
+grep -q 'degraded to opus: on-demand' <<<"$ivout" && ok "  names the default it fell back to" || bad "  names the default it fell back to"
+ivmodes=$(grep 'INVALID SETTING: opus' <<<"$ivout")
+miss=""; for m in on-demand role-dependant always never; do
+  grep -qE "(^| |, )$m(,| |$)" <<<"$ivmodes" || miss="$miss $m"; done
+[ -z "$miss" ] && ok "  lists all four valid modes" || bad "  lists all four valid modes (missing:$miss)"
+grep -q '^Workhorse: ' <<<"$ivout" && ok "  routing still printed" || bad "  routing still printed"
+check "  the summary line shows the corrected mode" "$(head -1 <<<"$ivout")" "effort: medium · opus: on-demand"
+
+ivout=$(rs 'effort: turbo\nopus: banana\n')
+check "both dials invalid: two warnings" "$(grep -c 'INVALID SETTING' <<<"$ivout")" 2
+check "  and the summary is fully corrected" "$(head -1 <<<"$ivout")" "effort: medium · opus: on-demand"
+
+# Absent is not invalid: an unconfigured project already gets the defaults, and
+# complaining about a file that was never written is noise.
+rm -f $ivp/.claude/teamlead/settings.md
+ivout=$("$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $ivp)
+grep -q 'INVALID SETTING' <<<"$ivout" && bad "a MISSING settings.md must be silent" || ok "a MISSING settings.md is silent"
+: > $ivp/.claude/teamlead/settings.md
+ivout=$("$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $ivp)
+grep -q 'INVALID SETTING' <<<"$ivout" && bad "an EMPTY settings.md must be silent" || ok "an EMPTY settings.md is silent"
+check "  and it still routes on the defaults" "$(head -1 <<<"$ivout")" "effort: medium · opus: on-demand"
+
+echo "== SKILL.md: the Commands table and the help fence must name the same command SET =="
+# Two hand-written copies of the same list is deliberate — the table is written for
+# the model, the fence is printed verbatim to the user — so the drift is killed by
+# this test rather than by generating one from the other.
+#
+# Both extractors cut a command at the first placeholder or at the description
+# gutter (a run of 2+ spaces), which is what makes the table's
+# `brainstorm <agents> <iterations> <topic>` and the fence's `brainstorm <n> <r> <t>`
+# compare equal. Cutting at the placeholder is load-bearing, not cosmetic: the
+# fence's brainstorm line has only ONE space before its gloss, so a gutter-only
+# rule silently loses that command (and the older `/teamlead( [a-z]+)*` rule would
+# instead swallow any gloss that began with a lowercase word).
+cmdset_table(){ awk '/^## Commands/,/^## Help text/' "$1" \
+  | grep -oP '^\| `\K/teamlead[^`]*' | sed -E 's/\s*[<[].*$//' | sort -u; }
+cmdset_fence(){ awk '/^## Help text/,/^## Project setup/' "$1" \
+  | grep -oP '^  \K/teamlead.*' | sed -E 's/(\s{2,}|\s*[<[]).*$//' | sort -u; }
+cmdset_table "$SK" > "$T/cs-table"; cmdset_fence "$SK" > "$T/cs-fence"
+check "both copies are non-empty (the extractors still match the file's shape)" \
+  "$([ -s "$T/cs-table" ] && [ -s "$T/cs-fence" ] && echo ok || echo empty)" ok
+only_t=$(comm -23 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
+only_f=$(comm -13 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
+[ -z "$only_t" ] && ok "every Commands-table command is in the help fence" \
+  || bad "in the Commands table but MISSING from the help fence:$( echo " $only_t" | sed 's/ *$//')"
+[ -z "$only_f" ] && ok "every help-fence command is in the Commands table" \
+  || bad "in the help fence but MISSING from the Commands table:$( echo " $only_f" | sed 's/ *$//')"
+# Pin the set itself too, so a command added to BOTH copies still gets looked at here.
+check "the shared set is exactly the commands that exist today" \
+  "$(tr '\n' ' ' < "$T/cs-table")" \
+  "/teamlead /teamlead board /teamlead board clean /teamlead board drop /teamlead brainstorm /teamlead effort /teamlead help /teamlead opus /teamlead plan /teamlead plan continue /teamlead settings /teamlead status /teamlead stop /teamlead superdoc "
+# A third source: board.py's own usage line, so `/teamlead board <sub>` cannot name a
+# subcommand the script does not implement.
+python3 "$B" no-such-command --project $T >"$T/bcmds" 2>&1
+bsubs=$(grep -m1 '^commands: ' "$T/bcmds")
+for s in clean drop; do
+  if grep -q "^/teamlead board $s$" "$T/cs-table" && grep -qE "(: |, )$s(,|$)" <<<"$bsubs"; then
+    ok "  /teamlead board $s is implemented as board.py '$s'"
+  else bad "  /teamlead board $s is implemented as board.py '$s' (board.py says: $bsubs)"; fi
+done
 
 echo "== status line segment =="
 SL="$H/statusline.sh"
@@ -2116,6 +2209,117 @@ echo "$PTE" | "$H/record.sh" >"$T/outE" 2>&1; rc=$?
 check "PostToolUse with a marker but no board.json: exit 0" "$rc" 0
 check "  no board.json created" "$([ -f "$p5h/.claude/teamlead/.state/board.json" ] && echo yes || echo no)" no
 check "  no stderr noise" "$(cat "$T/outE")" ""
+
+echo "== D2: board.py clean cuts the merged rows and nothing else =="
+clnp=$T/clean; mkdir -p $clnp
+ccmd(){ python3 "$B" "$@" --project $clnp >"$T/cout" 2>&1; echo $?; }
+for t in A B C D; do
+  python3 "$B" add --project $clnp --task $t --agent tl-sonnet-low --owns cln/$t >/dev/null
+done
+python3 "$B" update --project $clnp --id 1 --state merged --notes 'swapped the loader' >/dev/null
+python3 "$B" update --project $clnp --id 2 --state merged --notes 'fixed the parser' >/dev/null
+python3 "$B" update --project $clnp --id 3 --state running --worker cw1 >/dev/null
+cln_json=$clnp/.claude/teamlead/.state/board.json
+cln_md=$clnp/.claude/teamlead/board.md
+cln_open(){ python3 -c "import json; d=json.load(open('$cln_json')); print(json.dumps(sorted([t for t in d['tasks'] if t['state']!='merged'], key=lambda x: x['id']), sort_keys=True))"; }
+cln_nid(){ python3 -c "import json; print(json.load(open('$cln_json'))['next_id'])"; }
+cln_before=$(cln_open); cln_nid_before=$(cln_nid)
+# sanity: the headings must be there BEFORE, or their absence after proves nothing
+grep -q '^## Done' $cln_md && ok "before clean: board.md has '## Done'" || bad "before clean: board.md has '## Done'"
+grep -q 'How it was solved' $cln_md && ok "before clean: board.md has '### How it was solved'" || bad "before clean: board.md has '### How it was solved'"
+check "clean exits 0" "$(ccmd clean)" 0
+grep -q 'cleaned 2 merged task(s): #1, #2' "$T/cout" && ok "  names the rows it cut" || bad "  names the rows it cut ($(cat "$T/cout"))"
+check "  no merged row survives" \
+  "$(python3 -c "import json; print(len([t for t in json.load(open('$cln_json'))['tasks'] if t['state']=='merged']))")" 0
+check "  every open row is byte-identical to before" "$(cln_open)" "$cln_before"
+check "  next_id is NOT reset by clean" "$(cln_nid)" "$cln_nid_before"
+grep -q '^## Done' $cln_md && bad "  '## Done' must be gone from board.md" || ok "  '## Done' is gone from board.md"
+grep -q 'How it was solved' $cln_md && bad "  '### How it was solved' must be gone" || ok "  '### How it was solved' is gone from board.md"
+check "  check passes after clean" "$(ccmd check)" 0
+
+echo "== D2: clean refuses rather than leave the board invalid =="
+# A merged row can be the middle link of the blocked_by chain that is the only
+# reason two OPEN rows may own the same path; cutting it would strand them.
+clnr=$T/cleanrefuse; mkdir -p $clnr/.claude/teamlead/.state
+cat > $clnr/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 4, "tasks": [
+  {"id": 1, "task": "a", "agent": "tl-sonnet-low", "owns": ["chn/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "worker": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "b", "agent": "tl-sonnet-low", "owns": ["chn/y"], "state": "merged", "branch": null, "plan": null, "blocked_by": [1], "notes": "done", "worker": null, "created": "x", "updated": "x"},
+  {"id": 3, "task": "c", "agent": "tl-sonnet-low", "owns": ["chn/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [2], "notes": null, "worker": null, "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $clnr >/dev/null 2>&1
+check "clean refuses when cutting the merged rows would invalidate the board" \
+  "$(python3 "$B" clean --project $clnr >"$T/crout" 2>&1; echo $?)" 1
+grep -q 'refused — cleaning would leave the board invalid' "$T/crout" && ok "  names the reason" || bad "  names the reason"
+grep -q 'two writers on one path' "$T/crout" && ok "  names the overlap it would have created" || bad "  names the overlap it would have created"
+check "  a refused clean mutates nothing" \
+  "$(python3 -c "import json; print(len(json.load(open('$clnr/.claude/teamlead/.state/board.json'))['tasks']))")" 3
+
+echo "== D3/D12: board.py drop reports BEFORE it mutates, then empties the board =="
+drpp=$T/drop; mkdir -p $drpp/.claude/teamlead/plan
+python3 "$B" add --project $drpp --task "keep me" --agent tl-sonnet-low --owns drp/a >/dev/null
+python3 "$B" add --project $drpp --task "me too"  --agent tl-sonnet-low --owns drp/b >/dev/null
+drp_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  dispatch  agent=tl-sonnet-high\n%s  start     agent=tl-sonnet-high  id=w0ffee\n' \
+  "$drp_now" "$drp_now" > $drpp/.claude/teamlead/.state/events.log
+drp_plan=$drpp/.claude/teamlead/plan/topic.md
+printf '# T\n\n> **Stage 5** — building it\n' > $drp_plan
+echo "$drp_plan" > $drpp/.claude/teamlead/.state/active-plan
+drp_ap_before=$(cat $drpp/.claude/teamlead/.state/active-plan)
+drp_json=$drpp/.claude/teamlead/.state/board.json
+drp_bak=$drp_json.dropped
+python3 "$B" drop --project $drpp >"$T/drout" 2>&1; drc=$?
+check "drop exits 0 even with a worker still out" "$drc" 0
+# Ordering, not just presence: the report is only a report if it lands before the act.
+drl(){ grep -n -- "$1" "$T/drout" | head -1 | cut -d: -f1; }
+l_hdr=$(drl 'drop — about to empty the board:')
+l_cnt=$(drl 'open task(s) and 0 merged task(s) will be removed')
+l_wrk=$(drl 'workers still out')
+l_pln=$(drl 'plan ACTIVE:')
+l_mut=$(drl 'dropped 2 task(s); next_id reset to 1')
+l_bak=$(drl '  backup: ')
+check "  the report opens the output" "$l_hdr" 1
+if [ -n "$l_mut" ] && [ -n "$l_cnt" ] && [ -n "$l_wrk" ] && [ -n "$l_pln" ] \
+   && [ "$l_cnt" -lt "$l_mut" ] && [ "$l_wrk" -lt "$l_mut" ] && [ "$l_pln" -lt "$l_mut" ]; then
+  ok "  every pre-flight line is printed BEFORE the mutation line"
+else bad "  pre-flight must precede the mutation (cnt=$l_cnt wrk=$l_wrk pln=$l_pln mut=$l_mut)"; fi
+if [ -n "$l_bak" ] && [ -n "$l_mut" ] && [ "$l_bak" -gt "$l_mut" ]; then
+  ok "  the backup path is reported after the mutation"
+else bad "  the backup path is reported after the mutation (bak=$l_bak mut=$l_mut)"; fi
+grep -q '^  2 open task(s) and 0 merged task(s) will be removed$' "$T/drout" && ok "  report states the open-row count" || bad "  report states the open-row count"
+grep -q 'w0ffee (tl-sonnet-high)' "$T/drout" && ok "  report names the worker still out, with its agent" || bad "  report names the worker still out, with its agent"
+grep -q 'worktrees are NOT touched' "$T/drout" && ok "  report says the worktrees are not touched" || bad "  report says the worktrees are not touched"
+grep -qF "plan ACTIVE: $drp_plan" "$T/drout" && ok "  report flags the active plan by path" || bad "  report flags the active plan by path"
+grep -q 'active-plan is left alone' "$T/drout" && ok "  report warns check will now miss the plan's steps" || bad "  report warns check will now miss the plan's steps"
+grep -q 'stopped worker(s): w0ffee' "$T/drout" && ok "  reports which workers it stopped" || bad "  reports which workers it stopped"
+check "  tasks emptied" "$(python3 -c "import json; print(len(json.load(open('$drp_json'))['tasks']))")" 0
+check "  next_id reset to 1" "$(python3 -c "import json; print(json.load(open('$drp_json'))['next_id'])")" 1
+check "  events.log truncated" "$(wc -c < $drpp/.claude/teamlead/.state/events.log)" 0
+check "  backup written" "$([ -f $drp_bak ] && echo 0 || echo 1)" 0
+check "  backup parses as JSON holding the pre-drop rows" \
+  "$(python3 -c "import json; d=json.load(open('$drp_bak')); print(','.join(sorted(t['task'] for t in d['tasks'])))")" "keep me,me too"
+check "  .state/active-plan survives drop, unchanged" "$(cat $drpp/.claude/teamlead/.state/active-plan)" "$drp_ap_before"
+check "  the plan file itself is untouched" "$([ -f $drp_plan ] && echo 0 || echo 1)" 0
+check "  check passes after drop" "$(python3 "$B" check --project $drpp >/dev/null 2>&1; echo $?)" 0
+# Documented, not accidental: the backup is a single slot, overwritten every time.
+python3 "$B" add --project $drpp --task "after the drop" --agent tl-sonnet-low >/dev/null
+python3 "$B" drop --project $drpp >/dev/null 2>&1
+check "  a second drop OVERWRITES the backup — there is no rotation" \
+  "$(python3 -c "import json; d=json.load(open('$drp_bak')); print(','.join(t['task'] for t in d['tasks']))")" "after the drop"
+check "  and leaves no rotated copy behind" "$(ls $drpp/.claude/teamlead/.state/ | grep -c dropped)" 1
+
+echo "== D4: clean and drop are lead-only, like every other board write =="
+check "worker (CLAUDE_AGENT_ID set) clean: refused" \
+  "$(CLAUDE_AGENT_ID=x python3 "$B" clean --project $clnp >"$T/cdout" 2>&1; echo $?)" 1
+grep -q 'workers report, the lead records' "$T/cdout" && ok "  names the reason" || bad "  names the reason"
+check "worker (CLAUDE_AGENT_ID set) drop: refused" \
+  "$(CLAUDE_AGENT_ID=x python3 "$B" drop --project $clnp >"$T/cdout2" 2>&1; echo $?)" 1
+grep -q 'workers report, the lead records' "$T/cdout2" && ok "  names the reason" || bad "  names the reason"
+check "  the refused drop wrote no backup" \
+  "$([ -f $clnp/.claude/teamlead/.state/board.json.dropped ] && echo yes || echo no)" no
+check "  the refused drop left the rows alone" \
+  "$(python3 -c "import json; print(len(json.load(open('$cln_json'))['tasks']))")" 2
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
