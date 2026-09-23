@@ -96,6 +96,8 @@ set in your shell):
 | `board.py render --project "$PWD"` | Regenerate `board.md` from the JSON. **This is the fix when the gate reports drift.** |
 | `board.py forget [id] --project "$PWD"` | Close out a cancelled or killed worker that will never report back. |
 | `board.py remove <id> --project "$PWD"` | Drop a stray row (a worker's accidental write, a task that will never run). Refused for `running`/`returned`. |
+| `board.py clean --project "$PWD"` | Drop every `merged` row. Open rows and `next_id` are untouched; the `## Done` table and its `### How it was solved` notes are rendered from those rows, so both go with them. Asks nothing. |
+| `board.py drop --project "$PWD"` | Empty the board entirely, open rows included. Reports what it will destroy **before** it acts, backs `board.json` up to `.state/board.json.dropped`, resets `next_id` to 1, clears the ledger. Ask the user first (see the Commands table). |
 
 If the board tools are unavailable, the same operations exist as a CLI:
 `python3 <plugin-root>/scripts/board.py add|update|list|check --project "$PWD" …`
@@ -303,11 +305,52 @@ around is a bug that stays.
 | `/teamlead plan <topic>` | Interactive planning — see the `teamlead-plan` skill. |
 | `/teamlead plan continue` | Resume the active plan from its recorded stage — the way back in after a `/clear`; see the `teamlead-plan` skill. |
 | `/teamlead brainstorm <agents> <iterations> <topic>` | See the `teamlead-brainstorm` skill. |
-| `/teamlead superdoc` | See the `teamlead-superdoc` skill. |
-| `/teamlead effort\|opus\|prompting [value]` | Set a dial. No argument re-opens the picker. |
+| `/teamlead superdoc` | See the `teamlead-superdoc` skill. Also reachable as `/superdoc` or by saying "init superdoc" — aliases, not separate commands. |
+| `/teamlead settings` | Open the dial picker for both dials — the same `AskUserQuestion` call as first-run setup, minus the questions already answered. |
+| `/teamlead effort [level]` | Set the effort dial. No argument re-opens the picker. |
+| `/teamlead opus [mode]` | Set the Opus Usage dial. No argument re-opens the picker. |
 | `/teamlead help` | Print the **Help text** below, verbatim. |
 | `/teamlead status` | Run `board.py status` and show its output. |
 | `/teamlead board` | Print `.claude/teamlead/board.md` as plain markdown — the tables and headings as they are in the file, **never inside a code fence**, and without the leading `<!-- GENERATED … -->` comment — so the terminal renders it as a table. |
+| `/teamlead board clean` | Run `board.py clean`. Drops every `merged` row, and with it the `## Done` table and the `### How it was solved` notes. **Ask nothing** — no confirmation, nothing open is touched. Refused (exit 1) in the rare case where cutting the merged rows would leave the board invalid: a merged row can be the middle link of a `blocked_by` chain that is the only reason two open rows may own the same path. |
+| `/teamlead board drop` | Run `board.py drop`. Empties the board entirely, open tasks included. **One `AskUserQuestion` first** — see below. |
+
+### Confirming `board clean` and `board drop`
+
+Neither script prompts on stdin. The confirmation is **yours**, through
+`AskUserQuestion` — the script does the work, you route to it.
+
+- **`clean` asks nothing.** Nothing open is touched and merged rows are history, not
+  working state. Run it and report what went.
+- **`drop` asks exactly once.** Run `board.py drop` only after a yes. The question
+  must name, from the report the command prints before it mutates anything: how many
+  open rows are about to go, the ids and agent names of the workers still out, and —
+  when a plan is active — that the plan's board rows go with the board. Then one
+  question, yes or no: drop the board. Not a chain of confirmations.
+- `drop` **never refuses because workers are still out.** A stuck worker is precisely
+  when a reset is the right move. It stops them; it does **not** touch their
+  worktrees.
+- **Removing those worktrees is a second, separate confirmation** — asked only after
+  the first yes, never folded into it, and it must name which of the worktrees hold
+  commits that are not in `HEAD`. Stopping an agent costs a re-dispatch; deleting a
+  worktree with unmerged commits destroys the only copy of that work. Two very
+  different prices must not ride on one click.
+- `drop` deliberately leaves `.claude/teamlead/.state/active-plan` alone, so an active
+  plan is not stranded. Until it is re-boarded or archived, `check` will report its
+  steps missing — say so when you report the drop.
+- The backup at `.state/board.json.dropped` is **overwritten on every drop; there is
+  no rotation.** A second drop destroys the first backup. Say this when you offer the
+  backup as a way back.
+- Both are **lead-only**, behind the same `_refuse_if_worker()` guard as
+  `add`/`update`/`remove`.
+
+### When the routing banner carries an `INVALID SETTING:` line
+
+`resolve.sh` validates both dials where it reads them. An unknown value falls back to
+its safe default (`medium` / `on-demand`) so the Workhorse/Scout line above it is still
+usable, and the warning names what was actually typed. Do what the line says: tell the
+user that option does not exist, print the valid strings, and offer to re-open the
+picker. A missing or empty `settings.md` is silent — absent is not invalid.
 
 
 ## Help text (print verbatim for `/teamlead help`)
@@ -323,19 +366,30 @@ COMMANDS
   /teamlead help                  this text
   /teamlead status                open tasks, workers out, problems
   /teamlead board                 the full board table, inline
+  /teamlead board clean           forget the finished tasks (and their solution notes)
+  /teamlead board drop            empty the board completely — I ask you first
   /teamlead plan <topic>          work a plan out with me, in a file you keep open
   /teamlead plan continue         resume the active plan (after /clear)
-  /teamlead brainstorm <n> <r> <t> n thinkers over r rounds, then an Opus verify
+  /teamlead brainstorm <n> <r> <t> n agents over r rounds on topic t, then an Opus verify
   /teamlead superdoc              set up / audit the agent-facing docs in superdoc/
 
 DIALS (asked once per project, change anytime; no argument re-opens the picker)
+  /teamlead settings               re-open the picker for both dials at once
   /teamlead effort <level>         low | xlow | medium | xmedium | high | xhigh
-                                   biases which worker tier I reach for first
+                                   biases which worker tier I reach for first.
+                                   the x levels are HARD CAPS, not a bias: xlow and
+                                   xmedium ban every *-high worker, xhigh bans *-low
   /teamlead opus <mode>            on-demand | role-dependant | always | never
                                    on-demand (default): Opus only after Sonnet fails
+                                   role-dependant: Opus first-choice when the role
+                                     calls for it — real architecture calls, ambiguous
+                                     cross-system debugging — plus the retry ladder;
+                                     ordinary execution still starts on Sonnet
+                                   always: every task goes to Opus first-choice, no
+                                     Sonnet at all; effort only picks which Opus tier
                                    never: no Opus workers; I reason through blockers myself
-  /teamlead prompting <mode>       sequential | qc
   Vision is exempt from both: images always go to tl-opus-medium.
+  Typo a value and I fall back to the default, say so, and offer the picker again.
 
 PLAN MODE
   Stage 1  I ask what we're planning and make the file
@@ -360,21 +414,27 @@ WHAT I WILL NOT DO
 WHERE THINGS LIVE (all per project, nothing in your home folder)
   .claude/teamlead/board.md        generated — read it, don't edit it
   .claude/teamlead/plan/*.md       plan files; yours to edit
+  .claude/teamlead/plan/done/      finished plans, archived out of the way
   .claude/teamlead/settings.md     the dials
   .claude/teamlead/.state/         mine; gitignored automatically
+    board.json.dropped             the last board I dropped; overwritten each drop
   superdoc/                        agent-facing docs (docs/ stays yours)
 ```
 
 ## Project setup (first run only)
 
-One `AskUserQuestion` call, four questions, all tappable (the tool caps at 4
-questions × 4 options, which is why effort splits in two):
+One `AskUserQuestion` call, three questions, all tappable. Effort is asked as two
+questions rather than one because six levels do not fit the tool's four options per
+question — direction and hard-cap are the two axes the six levels are built from:
 
 - **Q1 Direction** — Low / **Medium** (recommended) / High
 - **Q2 Hard cap?** — **No, bias only** (recommended) / Yes, hard cap
 - **Q3 Opus Usage** — never / **on-demand** (recommended) / role-dependant / always
-- **Q4 Prompting** — **Sequential** (recommended) / QC Prompting
 
-Write the answers to `.claude/teamlead/settings.md` as three lines
-(`effort:`, `opus:`, `prompting:`) and never ask again. Q1+Q2 combine into the six
-effort levels: `low`/`xlow`, `medium`/`xmedium`, `high`/`xhigh`.
+Write the answers to `.claude/teamlead/settings.md` as two lines
+(`effort:`, `opus:`) and never ask again. Q1+Q2 combine into the six
+effort levels: `low`/`xlow`, `medium`/`xmedium`, `high`/`xhigh` — the `x` forms are
+hard caps and produce a ban list, not merely a bias.
+
+`/teamlead settings` re-opens this same picker later, so the dials are reachable on
+purpose rather than only by passing a dial name with no value.
