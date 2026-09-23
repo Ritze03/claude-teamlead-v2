@@ -280,8 +280,15 @@ check "effort: medium routes to the medium tier" \
   "$(grep -m1 '^Workhorse:' <<<"$medout")" \
   "Workhorse: tl-sonnet-high · Scout: tl-sonnet-medium · Escalate to: tl-opus-medium (ceiling tl-opus-high)"
 check "  and the banner summary says medium" "$(head -1 <<<"$medout")" "effort: medium · opus: on-demand"
+# F9: a BARE `grep -q "$m"` here asserted nothing — every mode name also occurs in
+# resolve.sh's prose (the vision line) and in the INVALID SETTING message, so the
+# four words survive even when the mode is deleted from the validation `case`.
+# Anchor to the arm that actually decides whether the value is accepted:
+#   `  on-demand|role-dependant|always|never) ;;`
+# Deleting a name from that alternation now fails here, which is the point.
 for m in on-demand role-dependant always never; do
-  grep -q "$m" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" || bad "help names opus mode '$m' that resolve.sh lacks"
+  grep -qE "^  ([a-z-]+\|)*$m(\|[a-z-]+)*\) *;;" "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" \
+    || bad "opus mode '$m' is not an accepted value in resolve.sh's validation case arm"
 done
 ok "opus modes in help match resolve.sh"
 
@@ -290,6 +297,16 @@ rdp=$T/rd; mkdir -p $rdp/.claude/teamlead
 for m in on-demand role-dependant always never; do
   printf 'effort: medium\nopus: %s\n' "$m" > $rdp/.claude/teamlead/settings.md
   "$CLAUDE_PLUGIN_ROOT/hooks/resolve.sh" $rdp > "$T/r-$m"
+done
+# F9 (sibling): these diffs would pass for the WRONG reason if a mode were dropped
+# from the validation case — the output then differs only because of an injected
+# INVALID SETTING line, i.e. the mode was rejected, not honoured. So assert first
+# that every mode was ACCEPTED, then that the accepted modes still differ.
+for m in on-demand role-dependant always never; do
+  grep -q 'INVALID SETTING: opus:' "$T/r-$m" \
+    && bad "opus: $m is rejected by resolve.sh as an invalid value" \
+    || ok "opus: $m is accepted as a valid setting"
+  check "  and the banner echoes it back" "$(head -1 < "$T/r-$m")" "effort: medium · opus: $m"
 done
 if diff -q "$T/r-on-demand" "$T/r-role-dependant" >/dev/null; then
   bad "role-dependant is indistinguishable from on-demand"
@@ -353,13 +370,37 @@ echo "== SKILL.md: the Commands table and the help fence must name the same comm
 # fence's brainstorm line has only ONE space before its gloss, so a gutter-only
 # rule silently loses that command (and the older `/teamlead( [a-z]+)*` rule would
 # instead swallow any gloss that began with a lowercase word).
-cmdset_table(){ awk '/^## Commands/,/^## Help text/' "$1" \
-  | grep -oP '^\| `\K/teamlead[^`]*' | sed -E 's/\s*[<[].*$//' | sort -u; }
-cmdset_fence(){ awk '/^## Help text/,/^## Project setup/' "$1" \
-  | grep -oP '^  \K/teamlead.*' | sed -E 's/(\s{2,}|\s*[<[]).*$//' | sort -u; }
+#
+# F5: both anchors used to be too tight, so a plausible reformat of one copy made
+# a command VANISH from that copy's set — and a vanished command on BOTH sides of
+# a set comparison is invisible. QC demonstrated three misses: a bold table cell
+# (`| **`/teamlead x`** |`, a style used elsewhere in these docs), a table row with
+# no space after the leading pipe (valid markdown), and a fence line indented three
+# spaces instead of two. The anchors below accept any first-cell decoration before
+# the backtick, and any indent depth, and the COUNT assertions underneath make an
+# unmatched row a failure rather than a silent skip.
+#
+# The fence is read only between COMMANDS and PLAN MODE: loosening `^  ` to `^ +`
+# would otherwise sweep up the deeply-indented `/teamlead plan continue` prose line
+# inside the PLAN MODE block, which is narrative, not a command listing.
+cmdset_table_raw(){ awk '/^## Commands/,/^## Help text/' "$1" \
+  | grep -oP '^\|[^|]*`\K/teamlead[^`]*' | sed -E 's/\s*[<[].*$//'; }
+cmdset_table_rows(){ awk '/^## Commands/,/^## Help text/' "$1" \
+  | grep '^|' | grep -vcE '^\|[-| :]+$|^\| *command *\|'; }
+cmdset_fence_src(){ awk '/^## Help text/,/^## Project setup/' "$1" | awk '/^COMMANDS/,/^PLAN MODE/'; }
+cmdset_fence_raw(){ cmdset_fence_src "$1" \
+  | grep -oP '^ +\K/teamlead.*' | sed -E 's/(\s{2,}|\s*[<[]).*$//'; }
+cmdset_fence_rows(){ cmdset_fence_src "$1" | grep -cP '^ +/'; }
+cmdset_table(){ cmdset_table_raw "$1" | sort -u; }
+cmdset_fence(){ cmdset_fence_raw "$1" | sort -u; }
 cmdset_table "$SK" > "$T/cs-table"; cmdset_fence "$SK" > "$T/cs-fence"
 check "both copies are non-empty (the extractors still match the file's shape)" \
   "$([ -s "$T/cs-table" ] && [ -s "$T/cs-fence" ] && echo ok || echo empty)" ok
+# F5: a row the extractor cannot parse must be LOUD, not skipped.
+check "every Commands-table row yields a command (none silently skipped)" \
+  "$(cmdset_table_raw "$SK" | wc -l)" "$(cmdset_table_rows "$SK")"
+check "every help-fence command line yields a command (none silently skipped)" \
+  "$(cmdset_fence_raw "$SK" | wc -l)" "$(cmdset_fence_rows "$SK")"
 only_t=$(comm -23 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
 only_f=$(comm -13 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
 [ -z "$only_t" ] && ok "every Commands-table command is in the help fence" \
@@ -370,6 +411,24 @@ only_f=$(comm -13 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
 check "the shared set is exactly the commands that exist today" \
   "$(tr '\n' ' ' < "$T/cs-table")" \
   "/teamlead /teamlead board /teamlead board clean /teamlead board drop /teamlead brainstorm /teamlead effort /teamlead help /teamlead opus /teamlead plan /teamlead plan continue /teamlead settings /teamlead status /teamlead stop /teamlead superdoc "
+# F5: README.md carries a THIRD hand-written copy of the same list (## Commands plus
+# ## Dials) and had no test at all. It is the project's front door, so a command that
+# exists only there — or only not there — is a user-visible lie. Same extractor, same
+# placeholder rule; the two tables are read as one range because the dials are
+# commands too and SKILL.md lists them in a single table.
+rm_cmds(){ awk '/^## Commands/,/^\*\*Vision/' "$CLAUDE_PLUGIN_ROOT/README.md" \
+  | grep -oP '^\|[^|]*`\K/teamlead[^`]*' | sed -E 's/\s*[<[].*$//'; }
+rm_rows(){ awk '/^## Commands/,/^\*\*Vision/' "$CLAUDE_PLUGIN_ROOT/README.md" \
+  | grep '^|' | grep -vcE '^\|[-| :]+$|^\| *\| *\|$'; }
+rm_cmds | sort -u > "$T/cs-readme"
+check "  every README command row yields a command (none silently skipped)" \
+  "$(rm_cmds | wc -l)" "$(rm_rows)"
+only_r=$(comm -13 "$T/cs-table" "$T/cs-readme" | tr '\n' ' ')
+only_sk=$(comm -23 "$T/cs-table" "$T/cs-readme" | tr '\n' ' ')
+[ -z "$only_r" ] && ok "  README advertises no command SKILL.md lacks" \
+  || bad "  in README but MISSING from SKILL.md's Commands table:$(echo " $only_r" | sed 's/ *$//')"
+[ -z "$only_sk" ] && ok "  README advertises every command SKILL.md defines" \
+  || bad "  in SKILL.md's Commands table but MISSING from README:$(echo " $only_sk" | sed 's/ *$//')"
 # A third source: board.py's own usage line, so `/teamlead board <sub>` cannot name a
 # subcommand the script does not implement.
 python3 "$B" no-such-command --project $T >"$T/bcmds" 2>&1
@@ -2249,12 +2308,45 @@ cat > $clnr/.claude/teamlead/.state/board.json <<'JSON'
 ]}
 JSON
 python3 "$B" render --project $clnr >/dev/null 2>&1
+# The fixture is hand-written on purpose: a merged row blocked by a NON-merged one
+# is exactly what _validate_detailed rejects, so this state is unreachable through
+# the API and `check` must say so. Assert that up front — otherwise the block below
+# could be testing some other board entirely and nobody would notice.
+python3 "$B" check --project $clnr >"$T/crchk" 2>&1
+check "the fixture really is a board check itself rejects" "$?" 1
+grep -q 'task 2 is blocked by 1, which is queued' "$T/crchk" \
+  && ok "  check names the merged-row-blocked-by-an-open-row fault the fixture encodes" \
+  || bad "  check names the merged-row-blocked-by-an-open-row fault the fixture encodes ($(cat "$T/crchk"))"
 check "clean refuses when cutting the merged rows would invalidate the board" \
   "$(python3 "$B" clean --project $clnr >"$T/crout" 2>&1; echo $?)" 1
-grep -q 'refused — cleaning would leave the board invalid' "$T/crout" && ok "  names the reason" || bad "  names the reason"
+grep -q 'refused — cleaning would introduce board problems' "$T/crout" && ok "  names the reason" || bad "  names the reason ($(cat "$T/crout"))"
 grep -q 'two writers on one path' "$T/crout" && ok "  names the overlap it would have created" || bad "  names the overlap it would have created"
 check "  a refused clean mutates nothing" \
   "$(python3 -c "import json; print(len(json.load(open('$clnr/.claude/teamlead/.state/board.json'))['tasks']))")" 3
+
+# F10: the other side of the same coin. A board that is ALREADY invalid for a
+# reason clean has nothing to do with — two live rows on one path — plus an
+# unrelated merged row. clean now diffs validate() before against after and
+# refuses only on problems the cut INTRODUCED, so this must SUCCEED. Before the
+# fix it refused, and blamed the cut for a fault that predated it.
+clnp2=$T/cleanpre; mkdir -p $clnp2/.claude/teamlead/.state
+cat > $clnp2/.claude/teamlead/.state/board.json <<'JSON'
+{"next_id": 4, "tasks": [
+  {"id": 1, "task": "a", "agent": "tl-sonnet-low", "owns": ["ov/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "worker": null, "created": "x", "updated": "x"},
+  {"id": 2, "task": "b", "agent": "tl-sonnet-low", "owns": ["ov/x"], "state": "queued", "branch": null, "plan": null, "blocked_by": [], "notes": null, "worker": null, "created": "x", "updated": "x"},
+  {"id": 3, "task": "c", "agent": "tl-sonnet-low", "owns": ["ov/z"], "state": "merged", "branch": null, "plan": null, "blocked_by": [], "notes": "done", "worker": null, "created": "x", "updated": "x"}
+]}
+JSON
+python3 "$B" render --project $clnp2 >/dev/null 2>&1
+python3 "$B" check --project $clnp2 >"$T/cpchk" 2>&1
+check "the pre-existing overlap is real (check rejects this board too)" "$?" 1
+grep -q 'two writers on one path' "$T/cpchk" && ok "  check names the live/live overlap" || bad "  check names the live/live overlap ($(cat "$T/cpchk"))"
+check "clean SUCCEEDS despite a pre-existing fault the cut did not cause" \
+  "$(python3 "$B" clean --project $clnp2 >"$T/cpout" 2>&1; echo $?)" 0
+grep -q 'cleaned 1 merged task(s): #3' "$T/cpout" && ok "  the merged row was actually cut" || bad "  the merged row was actually cut ($(cat "$T/cpout"))"
+check "  and the two live rows survive untouched" \
+  "$(python3 -c "import json; print(','.join(str(t['id']) for t in json.load(open('$clnp2/.claude/teamlead/.state/board.json'))['tasks']))")" "1,2"
+grep -q 'refused' "$T/cpout" && bad "  no refusal, and no false explanation" || ok "  no refusal, and no false explanation"
 
 echo "== D3/D12: board.py drop reports BEFORE it mutates, then empties the board =="
 drpp=$T/drop; mkdir -p $drpp/.claude/teamlead/plan
@@ -2321,6 +2413,188 @@ check "  the refused drop wrote no backup" \
 check "  the refused drop left the rows alone" \
   "$(python3 -c "import json; print(len(json.load(open('$cln_json'))['tasks']))")" 2
 
+
+echo "== F1: drop --dry-run prints the whole pre-flight report and changes NOTHING =="
+# The report is the only place the facts the lead's D3 confirmation needs exist
+# (how many open rows, which workers stop, whether a plan is active), so there has
+# to be a way to read them WITHOUT the destruction they describe.
+dryp=$T/dropdry; mkdir -p $dryp/.claude/teamlead/plan
+python3 "$B" add --project $dryp --task "dry a" --agent tl-sonnet-low --owns dry/a >/dev/null
+python3 "$B" add --project $dryp --task "dry b" --agent tl-sonnet-low --owns dry/b >/dev/null
+python3 "$B" update --project $dryp --id 2 --state merged --notes 'shipped' >/dev/null
+dry_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '%s  dispatch  agent=tl-sonnet-high\n%s  start     agent=tl-sonnet-high  id=wdry1\n' \
+  "$dry_now" "$dry_now" > $dryp/.claude/teamlead/.state/events.log
+dry_plan=$dryp/.claude/teamlead/plan/dt.md
+printf '# D\n\n> **Stage 5** — building it\n' > $dry_plan
+echo "$dry_plan" > $dryp/.claude/teamlead/.state/active-plan
+dry_json=$dryp/.claude/teamlead/.state/board.json
+dry_log=$dryp/.claude/teamlead/.state/events.log
+cp "$dry_json" "$T/dry-json-before"; cp "$dry_log" "$T/dry-log-before"
+python3 "$B" drop --dry-run --project $dryp >"$T/dryout" 2>&1; dryrc=$?
+check "drop --dry-run exits 0" "$dryrc" 0
+cmp -s "$dry_json" "$T/dry-json-before" && ok "  board.json is byte-identical afterwards" \
+  || bad "  board.json is byte-identical afterwards"
+cmp -s "$dry_log" "$T/dry-log-before" && ok "  events.log is byte-identical afterwards" \
+  || bad "  events.log is byte-identical afterwards"
+check "  no board.json.dropped was created" \
+  "$([ -f $dry_json.dropped ] && echo yes || echo no)" no
+# The report must be the FULL one, not a summary — same facts, same order.
+grep -q '^drop — about to empty the board:$' "$T/dryout" && ok "  prints the report header" || bad "  prints the report header"
+grep -q '^  1 open task(s) and 1 merged task(s) will be removed$' "$T/dryout" && ok "  states both counts" || bad "  states both counts ($(cat "$T/dryout"))"
+grep -q 'wdry1 (tl-sonnet-high)' "$T/dryout" && ok "  names the worker still out" || bad "  names the worker still out"
+grep -qF "plan ACTIVE: $dry_plan" "$T/dryout" && ok "  flags the active plan by path" || bad "  flags the active plan by path"
+check "  closes with the exact dry-run line" "$(tail -1 "$T/dryout")" \
+  "  dry run — nothing was changed; run the same command without --dry-run to do it"
+# F1: both paths print ONE shared print_drop_report(), so the blocks must be
+# byte-identical. Pin it — a copy-paste second report would drift silently.
+python3 "$B" drop --project $dryp >"$T/realout" 2>&1
+sed -n '/^drop — about to empty the board:$/,/^  no active plan$\|^  ! the plan/p' "$T/dryout" > "$T/dry-block"
+sed -n '/^drop — about to empty the board:$/,/^  no active plan$\|^  ! the plan/p' "$T/realout" > "$T/real-block"
+check "  the dry-run block is non-empty (the extractor still matches)" \
+  "$([ -s "$T/dry-block" ] && echo ok || echo empty)" ok
+cmp -s "$T/dry-block" "$T/real-block" \
+  && ok "  dry-run and real drop print a byte-identical report block" \
+  || bad "  dry-run and real drop print a byte-identical report block ($(diff "$T/dry-block" "$T/real-block" | head -4 | tr '\n' ' '))"
+
+echo "== F2: drop backs up a CORRUPT board byte-for-byte, and says the counts are junk =="
+# Before the fix the backup was json.dumps(load()), and load() swallows the parse
+# error — so the one recoverable copy of a damaged board was overwritten with
+# {"next_id": 1, "tasks": []}. The backup must be a byte copy.
+crpp=$T/dropcorrupt; mkdir -p $crpp
+python3 "$B" add --project $crpp --task "ALPHArow" --agent tl-sonnet-low --owns cr/a >/dev/null
+python3 "$B" add --project $crpp --task "BETArow"  --agent tl-sonnet-low --owns cr/b >/dev/null
+crp_json=$crpp/.claude/teamlead/.state/board.json
+# Truncate mid-file: no longer parses, but the rows are still there as readable
+# text. Cutting a fixed number of bytes off the END (rather than to a fixed size)
+# keeps both row titles intact however the schema grows.
+truncate -s $(( $(wc -c < "$crp_json") - 30 )) "$crp_json"
+cp "$crp_json" "$T/corrupt-before"
+check "the truncated fixture still holds both row titles as text" \
+  "$(grep -c 'ALPHArow\|BETArow' "$crp_json")" 2
+python3 -c "import json,sys; json.load(open('$crp_json'))" 2>/dev/null \
+  && bad "the fixture must NOT parse as JSON" || ok "the fixture really is unparseable JSON"
+python3 "$B" drop --project $crpp >"$T/crpout" 2>&1; crprc=$?
+check "drop on a corrupt board exits 0" "$crprc" 0
+cmp -s "$crp_json.dropped" "$T/corrupt-before" \
+  && ok "  the backup is a BYTE COPY of the corrupt original" \
+  || bad "  the backup is a BYTE COPY of the corrupt original"
+grep -q 'ALPHArow' "$crp_json.dropped" && ok "  a row title is still greppable out of the backup" \
+  || bad "  a row title is still greppable out of the backup"
+grep -q 'BETArow' "$crp_json.dropped" && ok "  and so is the second one" \
+  || bad "  and so is the second one"
+grep -q '! .state/board.json could not be parsed' "$T/crpout" \
+  && ok "  the report warns the file did not parse" || bad "  the report warns the file did not parse"
+# Position is deliberate: the caveat must be readable ABOVE the count it disowns,
+# so a lead skimming the report cannot take the count at face value.
+crl(){ grep -n -- "$1" "$T/crpout" | head -1 | cut -d: -f1; }
+l_warn=$(crl '! .state/board.json could not be parsed'); l_ct=$(crl 'will be removed')
+if [ -n "$l_warn" ] && [ -n "$l_ct" ] && [ "$l_warn" -lt "$l_ct" ]; then
+  ok "  the unparseable warning is printed ABOVE the count line"
+else bad "  the unparseable warning is printed ABOVE the count line (warn=$l_warn count=$l_ct)"; fi
+
+echo "== F4: clean strips the removed ids out of every surviving blocked_by =="
+# The existing clean test cannot see this: all four of its rows have an empty
+# blocked_by. A dangling blocker id is unsatisfiable forever — _auto_unblock only
+# requeues when every blocker is in merged_ids, and an id that no longer exists
+# never can be — so the row is stuck for good and board.md points at nothing.
+f4p=$T/cleanbb; mkdir -p $f4p
+python3 "$B" add --project $f4p --task A --agent tl-sonnet-low --owns f4/a >/dev/null              # id 1
+python3 "$B" add --project $f4p --task B --agent tl-sonnet-low --owns f4/b --blocked-by 1 >/dev/null  # id 2
+python3 "$B" update --project $f4p --id 1 --state merged --notes done >/dev/null
+f4_json=$f4p/.claude/teamlead/.state/board.json
+f4_bb(){ python3 -c "import json; d=json.load(open('$f4_json')); print(json.dumps([t['blocked_by'] for t in d['tasks'] if t['id']==2][0]))"; }
+check "before clean: row 2 still records blocked_by [1]" "$(f4_bb)" "[1]"
+check "clean exits 0" "$(python3 "$B" clean --project $f4p >"$T/f4out" 2>&1; echo $?)" 0
+check "  row 2's blocked_by is emptied, not left dangling at the cut row" "$(f4_bb)" "[]"
+grep -q 'blocked-by 1' $f4p/.claude/teamlead/board.md \
+  && bad "  board.md must not render 'blocked-by 1' pointing at a row that is gone" \
+  || ok "  board.md no longer renders a blocker that does not exist"
+# The real damage was a PERMANENTLY stuck row: prove it can still be cleared.
+check "  row 2 can still be set blocked" \
+  "$(python3 "$B" update --project $f4p --id 2 --state blocked >/dev/null 2>&1; echo $?)" 0
+check "  and a plain update --state queued clears it again" \
+  "$(python3 "$B" update --project $f4p --id 2 --state queued >/dev/null 2>&1; echo $?)" 0
+check "  row 2 really is queued now" \
+  "$(python3 -c "import json; print([t['state'] for t in json.load(open('$f4_json'))['tasks'] if t['id']==2][0])")" queued
+check "  check passes after the clean" "$(python3 "$B" check --project $f4p >/dev/null 2>&1; echo $?)" 0
+
+echo "== F11: drop on a project with no board creates NOTHING =="
+nbp=$T/dropnoboard; mkdir -p $nbp
+for flags in "" "--dry-run"; do
+  if [ -z "$flags" ]; then lbl="(real)"; else lbl="$flags"; fi
+  # shellcheck disable=SC2086
+  python3 "$B" drop $flags --project $nbp >"$T/nbout" 2>&1; nbrc=$?
+  check "drop $lbl with no board: exits 0" "$nbrc" 0
+  grep -qF 'drop — nothing to drop: this project has no board (.state/board.json does not exist)' "$T/nbout" \
+    && ok "  says there is nothing to drop, naming the missing file" \
+    || bad "  says there is nothing to drop, naming the missing file ($(cat "$T/nbout"))"
+  grep -q 'no files were created' "$T/nbout" && ok "  and says it created nothing" || bad "  and says it created nothing"
+  check "  no board.json created" "$([ -f "$nbp/.claude/teamlead/.state/board.json" ] && echo yes || echo no)" no
+  check "  no backup created" "$([ -f "$nbp/.claude/teamlead/.state/board.json.dropped" ] && echo yes || echo no)" no
+  check "  the .claude/teamlead tree is not created at all" \
+    "$([ -e "$nbp/.claude/teamlead" ] && echo yes || echo no)" no
+done
+
+echo "== F12: an unwritable .state/ is a one-line error, never a traceback =="
+if [ "$(id -u)" -eq 0 ]; then
+  ok "skipped: running as root, chmod a-w does not bite"
+else
+  f12p=$T/dropro; mkdir -p $f12p
+  python3 "$B" add --project $f12p --task "hold me" --agent tl-sonnet-low --owns f12/a >/dev/null
+  f12_json=$f12p/.claude/teamlead/.state/board.json
+  f12_md5=$(md5sum < "$f12_json")
+  chmod a-w "$f12p/.claude/teamlead/.state"
+  python3 "$B" drop --project $f12p >"$T/f12out" 2>"$T/f12err"; f12rc=$?
+  chmod u+w "$f12p/.claude/teamlead/.state"
+  check "drop into an unwritable .state/ exits 1" "$f12rc" 1
+  grep -q 'Permission denied' "$T/f12err" && ok "  the error names Permission denied" \
+    || bad "  the error names Permission denied ($(cat "$T/f12err"))"
+  grep -q 'the board was not modified' "$T/f12err" && ok "  and states nothing was changed" \
+    || bad "  and states nothing was changed"
+  grep -q 'Traceback (most recent call last)' "$T/f12err" \
+    && bad "  a Python traceback escaped to the lead" || ok "  no Python traceback"
+  check "  the error is one line" "$(wc -l < "$T/f12err")" 1
+  check "  board.json is byte-unchanged" "$(md5sum < "$f12_json")" "$f12_md5"
+  check "  and no half-written backup was left behind" \
+    "$(ls "$f12p/.claude/teamlead/.state/" | grep -c 'dropped')" 0
+fi
+
+echo "== F1: a valueless flag must not swallow the argument after it =="
+# main()'s loop advanced i by 2 unconditionally, so `--dry-run` consumed the NEXT
+# token: `drop --dry-run --project X` lost --project entirely and fell back to
+# CLAUDE_PROJECT_DIR/cwd. The failure mode is operating on the WRONG PROJECT, so
+# both orderings are asserted on which project's facts came back, not on exit code.
+# This is shared parser behaviour, not a drop quirk — every command inherits it.
+pvA=$T/argv-right; pvB=$T/argv-wrong; mkdir -p $pvA $pvB
+for t in A1 A2 A3; do python3 "$B" add --project $pvA --task $t --agent tl-sonnet-low --owns av/$t >/dev/null; done
+python3 "$B" add --project $pvB --task B1 --agent tl-sonnet-low --owns av/b1 >/dev/null
+pvB_json=$pvB/.claude/teamlead/.state/board.json
+pvB_md5=$(md5sum < "$pvB_json")
+pvrows(){ python3 -c "import json; print(len(json.load(open('$1'))['tasks']))"; }
+# cwd AND CLAUDE_PROJECT_DIR both point at the WRONG project, so a lost --project
+# is unmistakable: the report would describe 1 row instead of 3.
+( cd $pvB && CLAUDE_PROJECT_DIR=$pvB python3 "$B" drop --dry-run --project $pvA >"$T/av1" 2>&1 )
+check "drop --dry-run --project X: exits 0" "$?" 0
+grep -q '^  3 open task(s) and 0 merged task(s) will be removed$' "$T/av1" \
+  && ok "  reports the project passed with --project, not cwd/CLAUDE_PROJECT_DIR" \
+  || bad "  reports the project passed with --project, not cwd/CLAUDE_PROJECT_DIR ($(cat "$T/av1"))"
+( cd $pvB && CLAUDE_PROJECT_DIR=$pvB python3 "$B" drop --project $pvA --dry-run >"$T/av2" 2>&1 )
+check "drop --project X --dry-run: exits 0" "$?" 0
+grep -q '^  3 open task(s) and 0 merged task(s) will be removed$' "$T/av2" \
+  && ok "  the reverse ordering resolves the same project" \
+  || bad "  the reverse ordering resolves the same project ($(cat "$T/av2"))"
+cmp -s "$T/av1" "$T/av2" && ok "  both orderings produce identical output" \
+  || bad "  both orderings produce identical output"
+check "  --dry-run still took effect: the right project is untouched" "$(pvrows "$pvA/.claude/teamlead/.state/board.json")" 3
+check "  the wrong project was never read or written (rows)" "$(pvrows "$pvB_json")" 1
+check "  the wrong project was never read or written (bytes)" "$(md5sum < "$pvB_json")" "$pvB_md5"
+check "  the wrong project got no backup" \
+  "$([ -f "$pvB_json.dropped" ] && echo yes || echo no)" no
+# And the real thing: --project must actually steer the mutation, not just the report.
+( cd $pvB && CLAUDE_PROJECT_DIR=$pvB python3 "$B" drop --project $pvA >/dev/null 2>&1 )
+check "  a real drop empties the project named by --project" "$(pvrows "$pvA/.claude/teamlead/.state/board.json")" 0
+check "  and leaves cwd/CLAUDE_PROJECT_DIR's board alone" "$(md5sum < "$pvB_json")" "$pvB_md5"
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
