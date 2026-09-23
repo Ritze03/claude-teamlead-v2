@@ -3,4 +3,5 @@
 # never commit the v1 backup or scratch
 *.bak
 .claude/teamlead/
+.claude/worktrees/
 __pycache__/

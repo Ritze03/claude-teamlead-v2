@@ -10,13 +10,36 @@ if git -C "$proj" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   # A worktree is only "leftover" if it holds work. One with a live worker in it
   # is normal, and calling it leftover invites cleanup of active work.
   root=$(cd "$proj" && pwd)
+  # "safe to remove" has to be a claim the script can back: no uncommitted changes
+  # AND nothing committed that $main does not already have. Same $main and the same
+  # rev-list as gate.sh, so the two hooks cannot disagree about "unmerged".
+  main=$(git -C "$proj" rev-parse --abbrev-ref HEAD 2>/dev/null) || main=""
   while read -r w; do
     [ -n "$w" ] || continue
     [ "$w" = "$root" ] && continue
-    if [ -n "$(git -C "$w" status --porcelain 2>/dev/null)" ]; then
-      echo "  worktree HOLDING UNCOMMITTED WORK: $w"
+    if ! git -C "$w" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo "  worktree CANNOT BE CHECKED (not a git work tree) — do not remove: $w"
+      continue
+    fi
+    if [ -z "$main" ]; then
+      echo "  worktree CANNOT BE CHECKED (main branch unresolved) — do not remove: $w"
+      continue
+    fi
+    note=""
+    if st=$(git -C "$w" status --porcelain 2>/dev/null); then
+      [ -n "$st" ] && note="uncommitted changes"
     else
-      echo "  worktree (clean, safe to remove): $w"
+      note="status check FAILED"
+    fi
+    if n=$(git -C "$w" rev-list --count "$main..HEAD" 2>/dev/null); then
+      [ "${n:-0}" -gt 0 ] && note="${note:+$note, }$n commit(s) not in $main"
+    else
+      note="${note:+$note, }unmerged-commit check FAILED"
+    fi
+    if [ -n "$note" ]; then
+      echo "  worktree HOLDING WORK ($note): $w"
+    else
+      echo "  worktree (clean, merged into $main, safe to remove): $w"
     fi
   done < <(git -C "$proj" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
 else
