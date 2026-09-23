@@ -9,6 +9,9 @@ Two front ends over the same core:
   CLI   board.py <cmd> ...            (hooks, tests, humans)
   MCP   board.py --mcp                (the agent, as tool calls)
 
+Commands: add, update, remove, list, status, check, render, clean, drop,
+          forget, ledger, worker-start, worker-stop.
+
 Validation happens at WRITE time, so a bad board cannot exist rather than being
 detected afterwards.
 """
@@ -663,6 +666,95 @@ def forget(ids, project=None, before=None, not_session=None):
             "requeued": requeued}
 
 
+def clean(project=None) -> dict:
+    """D2/D7: drop every merged row and nothing else.
+
+    No confirmation (D7): the rows it touches are finished, so nothing in
+    flight is at risk, and a prompt on a routine tidy-up is one people learn
+    to click through. next_id is NOT reset — ids stay unique for the life of
+    the board, so a merged id is never handed out twice.
+
+    The "How it was solved" section is rendered FROM the merged rows, so
+    dropping the rows drops the section: render() already emits '## Done'
+    only when there are merged rows and '### How it was solved' only when
+    some of them carry notes, so no stripping logic is needed here.
+
+    The board is still validated after the cut: merged rows can be links in a
+    blocked_by chain that D8 relies on to allow two open rows to own the same
+    path, so removing them can in principle make an already-open pair collide.
+    Refusing (rather than writing a board that `check` would then call broken)
+    keeps the write-time-validation rule of this file.
+    """
+    with _board_lock(project):
+        db = load(project)
+        gone = [t["id"] for t in db["tasks"] if t["state"] == "merged"]
+        db["tasks"] = [t for t in db["tasks"] if t["state"] != "merged"]
+        problems = validate(db)
+        if problems:
+            raise ValueError("refused — cleaning would leave the board invalid "
+                             "(merged rows link a blocked_by chain):\n  "
+                             + "\n  ".join(problems))
+        save(db, project)
+        return {"cleaned": gone, "removed": len(gone), "open": summary(db)["open"],
+                "next_id": db["next_id"]}
+
+
+def drop_report(project=None) -> dict:
+    """D3/D10/D12: what `drop` is about to destroy, gathered BEFORE it acts.
+
+    Open rows, the worker ids `status` calls working/stuck (outstanding +
+    abandoned — D10: workers still being out is never a reason to refuse; a
+    stuck worker is exactly when you reach for a reset), and whether a plan is
+    active. The active-plan pointer is read the same way check_plan reads it.
+    """
+    db, lg = load(project), ledger(project)
+    ap = root(project) / ".state" / "active-plan"
+    plan = ap.read_text().strip() if ap.exists() else ""
+    return {"open": len([t for t in db["tasks"] if t["state"] != "merged"]),
+            "merged": len([t for t in db["tasks"] if t["state"] == "merged"]),
+            "workers": sorted(set(lg["outstanding"]) | set(lg["abandoned"])),
+            "agents": lg["agents"], "active_plan": plan or None}
+
+
+def drop(project=None) -> dict:
+    """D3: the troubleshooting reset — empty the board, open rows included.
+
+    Order matters. The backup is written first (D3.1) so the safety net exists
+    before anything is mutated; it is plain JSON, readable and parseable, and
+    goes through _atomic_write like every other write here. Then the workers
+    are stopped the way `forget` stops them (D11: cancel events appended, never
+    history rewritten) — and their WORKTREES are left completely alone; removing
+    a worktree is a separate confirmation the lead handles in chat, never this
+    script. Then tasks, next_id and the event ledger are reset and board.md is
+    re-rendered.
+
+    forget() takes the board lock itself (through mutate), so it has to run
+    outside our lock — flock is per open-file-description, so re-locking in the
+    same process would deadlock.
+
+    D12: .state/active-plan is left alone. Silently clearing the pointer would
+    strand the plan; the caller warns instead (see the CLI branch).
+    """
+    j, _m = _paths(project)
+    before = load(project)
+    # 1. back up first — this is the safety net, so it lands before any mutation
+    bak = j.with_name(j.name + ".dropped")
+    _atomic_write(bak, json.dumps(before, indent=2) + "\n")
+    # 2. stop the workers that are still out (D11), worktrees untouched
+    stopped = forget(["all"], project)["forgotten"] if j.exists() else []
+    with _board_lock(project):
+        db = load(project)
+        db["tasks"] = []                      # 3. empty the board
+        db["next_id"] = 1                     # 4. a fresh board starts at 1
+        save(db, project)                     # 6. board.md re-rendered by save()
+    # 5. clear the event ledger (the cancel events from step 2 go with it)
+    ev = root(project) / ".state" / "events.log"
+    if ev.exists():
+        _atomic_write(ev, "")
+    return {"dropped": len(before["tasks"]), "stopped": stopped,
+            "backup": str(bak), "next_id": 1}
+
+
 def summary(db):
     live = [t for t in db["tasks"] if t["state"] != "merged"]
     by = {}
@@ -896,6 +988,42 @@ def main(argv):
         if rid is None:
             print("usage: board.py remove <id>", file=sys.stderr); return 1
         print(json.dumps(mutate(op_remove, project=proj, id=rid), indent=2))
+    elif cmd == "clean":
+        _refuse_if_worker()
+        proj = _write_project(proj)
+        res = clean(proj)
+        ids = ", ".join(f"#{i}" for i in res["cleaned"]) or "none"
+        print(f"cleaned {res['removed']} merged task(s): {ids}")
+        print(f"  {res['open']} open task(s) left, next_id still {res['next_id']}")
+    elif cmd == "drop":
+        # D5: the yes/no belongs to the lead (AskUserQuestion in chat), not to
+        # the script — no stdin prompt and no --yes flag, matching remove/forget,
+        # neither of which prompts either. What the script owes the lead is an
+        # honest report BEFORE it acts, which is what this prints.
+        _refuse_if_worker()
+        proj = _write_project(proj)
+        rep = drop_report(proj)
+        print("drop — about to empty the board:")
+        print(f"  {rep['open']} open task(s) and {rep['merged']} merged task(s) will be removed")
+        if rep["workers"]:
+            print("  workers still out (they will be stopped; their worktrees are NOT "
+                  "touched): " +
+                  ", ".join(f"{a} ({rep['agents'].get(a, '?')})" for a in rep["workers"]))
+        else:
+            print("  no workers out")
+        if rep["active_plan"]:
+            print(f"  plan ACTIVE: {rep['active_plan']}")
+            print("  ! the plan's board rows go with the board; .state/active-plan is left "
+                  "alone, so `check` will report its steps missing until the plan is "
+                  "re-boarded or archived")
+        else:
+            print("  no active plan")
+        res = drop(proj)
+        print(f"dropped {res['dropped']} task(s); next_id reset to {res['next_id']}; "
+              f"ledger cleared")
+        if res["stopped"]:
+            print("  stopped worker(s): " + ", ".join(res["stopped"]))
+        print(f"  backup: {res['backup']}")
     elif cmd == "worker-start":
         # D12: hook-driven (SubagentStart/PostToolUse carry the worker's id in
         # the payload, not CLAUDE_AGENT_ID) — no _refuse_if_worker() here. Safe
@@ -963,7 +1091,10 @@ def main(argv):
         if probs:
             print("\n".join("  - " + p for p in probs)); return 1
     else:
-        print(f"unknown command {cmd}"); return 1
+        print(f"unknown command {cmd}")
+        print("commands: add, update, remove, list, status, check, render, clean, "
+              "drop, forget, ledger, worker-start, worker-stop")
+        return 1
     return 0
 
 
