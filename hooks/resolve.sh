@@ -9,8 +9,14 @@ D="${1:-$PWD}/.claude/teamlead"
 S="$D/settings.md"
 
 get() { grep -m1 "^$1:" "$S" 2>/dev/null | sed "s/^$1: *//" | tr -d '[:space:]'; }
-effort=$(get effort); opus=$(get opus); prompting=$(get prompting)
-effort=${effort:-medium}; opus=${opus:-on-demand}; prompting=${prompting:-sequential}
+effort=$(get effort); opus=$(get opus)
+effort=${effort:-medium}; opus=${opus:-on-demand}
+# A bad value can arrive by typo, hand edit or a stale settings file, so both
+# dials are validated where they are READ, not only where they are written.
+# Keep the raw strings: the fallback overwrites them, and the warning must quote
+# what the user actually typed. Missing is not invalid — the defaults above
+# already applied, so these only fire on a non-empty unknown value.
+effort_bad=""; opus_bad=""
 
 case "$effort" in
   low)     work=tl-sonnet-medium; scout=tl-sonnet-low;    esc=tl-opus-low;    ceil=tl-opus-high;   ban="" ;;
@@ -18,8 +24,14 @@ case "$effort" in
   xmedium) work=tl-sonnet-medium; scout=tl-sonnet-medium; esc=tl-opus-medium; ceil=tl-opus-medium; ban="*-high" ;;
   high)    work=tl-opus-medium;   scout=tl-sonnet-high;   esc=tl-opus-high;   ceil=tl-opus-high;   ban="" ;;
   xhigh)   work=tl-opus-medium;   scout=tl-sonnet-high;   esc=tl-opus-high;   ceil=tl-opus-high;   ban="*-low" ;;
-  *)       effort=medium
+  medium)  work=tl-sonnet-high;   scout=tl-sonnet-medium; esc=tl-opus-medium; ceil=tl-opus-high;   ban="" ;;
+  *)       effort_bad=$effort; effort=medium
            work=tl-sonnet-high;   scout=tl-sonnet-medium; esc=tl-opus-medium; ceil=tl-opus-high;   ban="" ;;
+esac
+
+case "$opus" in
+  on-demand|role-dependant|always|never) ;;
+  *) opus_bad=$opus; opus=on-demand ;;
 esac
 
 # Vision is exempt from both dials. Opus reads images best, so an image task goes
@@ -45,7 +57,7 @@ if [ "$opus" = "always" ]; then
   ban="${ban:+$ban, }tl-sonnet-*"
 fi
 
-echo "effort: $effort · opus: $opus · prompting: $prompting"
+echo "effort: $effort · opus: $opus"
 if [ -n "$esc" ]; then
   echo "Workhorse: $work · Scout: $scout · Escalate to: $esc (ceiling $ceil)"
 else
@@ -63,4 +75,6 @@ case "$opus" in
   always)
     echo "Every task goes to an Opus worker first-choice; Sonnet is not dispatched at all. The effort dial now only picks WHICH Opus tier." ;;
 esac
+[ -n "$effort_bad" ] && echo "INVALID SETTING: effort: $effort_bad does not exist. Routing above has degraded to effort: medium. Tell the user that option does not exist, name the valid levels — low, xlow, medium, xmedium, high, xhigh — and offer to re-open the effort picker."
+[ -n "$opus_bad" ] && echo "INVALID SETTING: opus: $opus_bad does not exist. Routing above has degraded to opus: on-demand. Tell the user that option does not exist, name the valid modes — on-demand, role-dependant, always, never — and offer to re-open the Opus Usage picker."
 exit 0
