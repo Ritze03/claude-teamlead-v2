@@ -16,7 +16,7 @@ Validation happens at WRITE time, so a bad board cannot exist rather than being
 detected afterwards.
 """
 from __future__ import annotations
-import json, os, re, sys, datetime, pathlib, subprocess, fcntl, contextlib
+import json, os, re, sys, datetime, pathlib, shutil, subprocess, fcntl, contextlib
 
 STATES = ("queued", "running", "returned", "merged", "blocked")
 
@@ -75,13 +75,19 @@ def _paths(project=None):
     return r / ".state" / "board.json", r / "board.md"
 
 
-def load(project=None) -> dict:
+def load(project=None, strict=False) -> dict:
+    """F2: the lenient default keeps every read path working on a damaged
+    board — but a caller about to DESTROY the file has to be able to tell
+    'the board is empty' from 'the board did not parse', because those two
+    want opposite answers. strict=True re-raises the JSONDecodeError instead
+    of quietly handing back an empty board."""
     j, _ = _paths(project)
     if j.exists():
         try:
             return json.loads(j.read_text())
         except json.JSONDecodeError:
-            pass
+            if strict:
+                raise
     return {"next_id": 1, "tasks": []}
 
 
@@ -472,6 +478,33 @@ def op_update(db, id, **kw):
     raise KeyError(f"no task with id {id}")
 
 
+def _strip_blocked_by(db, gone: set[int]) -> list[int]:
+    """F4: every path that deletes rows must also delete the references to
+    them. A blocked_by naming a row that no longer exists is not inert: it can
+    never be satisfied, because _auto_unblock requeues only when every blocker
+    id is in merged_ids and a deleted id can never re-enter that set. The row
+    is then stuck in 'blocked' for the life of the board with no way out but
+    hand-editing board.json, and board.md renders a 'blocked-by' pointing at
+    nothing. Dropping the reference is not a change to the row's meaning —
+    leaving it is. Shared by op_remove (one id) and clean (the merged set).
+
+    Returns every OTHER row this changed, so mutate()'s refusal check covers
+    the cascade: an unblocked row can newly overlap in owns with something it
+    was only separated from by that blocked_by chain (D8)."""
+    touched = []
+    for other in db["tasks"]:                    # drop the ghost from blocked_by
+        by = other.get("blocked_by") or []
+        if any(b in gone for b in by):
+            other["blocked_by"] = [b for b in by if b not in gone]
+            touched.append(other["id"])
+            # removing the sole blocker requeues the dependant explicitly —
+            # _auto_unblock no longer treats an empty blocked_by as satisfied
+            if not other["blocked_by"] and other["state"] == "blocked":
+                other["state"] = "queued"
+    _auto_unblock(db)
+    return touched
+
+
 def op_remove(db, id, **_):
     """F17/D4: a repair op, not a workflow op — the only way today to drop a
     stray task (e.g. one a worker's CLI write left behind) is hand-editing
@@ -493,16 +526,7 @@ def op_remove(db, id, **_):
         raise ValueError(f"refused — task {id} is {t['state']}, not removable "
                          f"(only queued/blocked/merged tasks can be removed)")
     del db["tasks"][idx]
-    touched = []
-    for other in db["tasks"]:                    # drop the ghost from blocked_by
-        if other.get("blocked_by") and id in other["blocked_by"]:
-            other["blocked_by"] = [b for b in other["blocked_by"] if b != id]
-            touched.append(other["id"])
-            # removing the sole blocker requeues the dependant explicitly —
-            # _auto_unblock no longer treats an empty blocked_by as satisfied
-            if not other["blocked_by"] and other["state"] == "blocked":
-                other["state"] = "queued"
-    _auto_unblock(db)
+    touched = _strip_blocked_by(db, {id})
     return {"id": id, "removed": True, "state": t["state"], "touched": touched}
 
 
@@ -679,24 +703,33 @@ def clean(project=None) -> dict:
     only when there are merged rows and '### How it was solved' only when
     some of them carry notes, so no stripping logic is needed here.
 
-    The board is still validated after the cut: merged rows can be links in a
-    blocked_by chain that D8 relies on to allow two open rows to own the same
-    path, so removing them can in principle make an already-open pair collide.
-    Refusing (rather than writing a board that `check` would then call broken)
-    keeps the write-time-validation rule of this file.
+    F4: the removed ids are also stripped from every surviving row's
+    blocked_by, exactly as op_remove does it — a reference to a row that no
+    longer exists can never be satisfied and strands the dependant for good.
+
+    F10: the board is still validated after the cut, but only problems the cut
+    INTRODUCED are reported. Validating the whole board would make clean refuse
+    over a pre-existing fault it did not cause, and misattribute it in the
+    bargain. The guarded case is a merged row acting as the blocked_by link
+    that D8 relies on to let two open rows own the same path; note that
+    _validate_detailed already rejects a merged row blocked by a non-merged
+    one, so on any board `check` accepts such a chain cannot exist and this
+    branch is unreachable. It is kept for the board this file defends against
+    anyway: a hand-edited board.json.
     """
     with _board_lock(project):
         db = load(project)
+        was = set(validate(db))
         gone = [t["id"] for t in db["tasks"] if t["state"] == "merged"]
         db["tasks"] = [t for t in db["tasks"] if t["state"] != "merged"]
-        problems = validate(db)
-        if problems:
-            raise ValueError("refused — cleaning would leave the board invalid "
-                             "(merged rows link a blocked_by chain):\n  "
-                             + "\n  ".join(problems))
+        unblocked = _strip_blocked_by(db, set(gone))
+        introduced = [p for p in validate(db) if p not in was]
+        if introduced:
+            raise ValueError("refused — cleaning would introduce board problems:\n  "
+                             + "\n  ".join(introduced))
         save(db, project)
         return {"cleaned": gone, "removed": len(gone), "open": summary(db)["open"],
-                "next_id": db["next_id"]}
+                "next_id": db["next_id"], "unblocked": unblocked}
 
 
 def drop_report(project=None) -> dict:
@@ -706,53 +739,104 @@ def drop_report(project=None) -> dict:
     abandoned — D10: workers still being out is never a reason to refuse; a
     stuck worker is exactly when you reach for a reset), and whether a plan is
     active. The active-plan pointer is read the same way check_plan reads it.
+
+    F2: 'unreadable' says the board file exists but did not parse, so the row
+    counts below are load()'s empty-board fallback and mean nothing. The lead
+    turns this report into a yes/no question for a user; it must never answer
+    'nothing is at stake' when the truth is 'we cannot tell'.
+    F11: 'exists' is False when there is no board at all — drop then has
+    nothing to do and must create nothing.
     """
-    db, lg = load(project), ledger(project)
+    j, _ = _paths(project)
+    exists, unreadable = j.exists(), False
+    try:
+        db = load(project, strict=True)
+    except json.JSONDecodeError:
+        db, unreadable = {"next_id": 1, "tasks": []}, True
+    lg = ledger(project)
     ap = root(project) / ".state" / "active-plan"
     plan = ap.read_text().strip() if ap.exists() else ""
     return {"open": len([t for t in db["tasks"] if t["state"] != "merged"]),
             "merged": len([t for t in db["tasks"] if t["state"] == "merged"]),
+            "exists": exists, "unreadable": unreadable,
             "workers": sorted(set(lg["outstanding"]) | set(lg["abandoned"])),
             "agents": lg["agents"], "active_plan": plan or None}
+
+
+def print_drop_report(rep) -> None:
+    """F1: the one place the pre-flight block is written. `drop` and
+    `drop --dry-run` both print THIS and nothing else, so the two are
+    byte-identical by construction rather than by two copies staying in sync."""
+    print("drop — about to empty the board:")
+    if rep["unreadable"]:
+        print("  ! .state/board.json could not be parsed — the counts below are "
+              "NOT trustworthy; the file may still hold rows as readable text")
+    print(f"  {rep['open']} open task(s) and {rep['merged']} merged task(s) will be removed")
+    if rep["workers"]:
+        print("  workers still out (they will be stopped; their worktrees are NOT "
+              "touched): " +
+              ", ".join(f"{a} ({rep['agents'].get(a, '?')})" for a in rep["workers"]))
+    else:
+        print("  no workers out")
+    if rep["active_plan"]:
+        print(f"  plan ACTIVE: {rep['active_plan']}")
+        print("  ! the plan's board rows go with the board; .state/active-plan is left "
+              "alone, so `check` will report its steps missing until the plan is "
+              "re-boarded or archived")
+    else:
+        print("  no active plan")
 
 
 def drop(project=None) -> dict:
     """D3: the troubleshooting reset — empty the board, open rows included.
 
     Order matters. The backup is written first (D3.1) so the safety net exists
-    before anything is mutated; it is plain JSON, readable and parseable, and
-    goes through _atomic_write like every other write here. Then the workers
-    are stopped the way `forget` stops them (D11: cancel events appended, never
-    history rewritten) — and their WORKTREES are left completely alone; removing
-    a worktree is a separate confirmation the lead handles in chat, never this
-    script. Then tasks, next_id and the event ledger are reset and board.md is
-    re-rendered.
+    before anything is mutated, and a backup that fails aborts before anything
+    is touched. F2: it is a BYTE COPY of board.json, not a re-serialisation of
+    what load() made of it — load() swallows a JSONDecodeError and hands back
+    an empty board, so re-serialising would write `{"next_id": 1, "tasks": []}`
+    over the top of the one remaining copy of a damaged but salvageable file.
+    The copy still lands through a tmp + os.replace so a reader never sees a
+    half-written backup. Then tasks, next_id and the event ledger are reset and
+    board.md is re-rendered, and the WORKTREES of the stopped workers are left
+    completely alone; removing a worktree is a separate confirmation the lead
+    handles in chat, never this script.
 
-    forget() takes the board lock itself (through mutate), so it has to run
-    outside our lock — flock is per open-file-description, so re-locking in the
-    same process would deadlock.
+    The workers are reported, not cancel-evented: forget(["all"]) used to run
+    here, but every effect of it was undone two steps later — its cancel lines
+    were truncated with the ledger, its requeues were erased with the rows —
+    except the id list, which drop_report already computes. Cutting it removes
+    a lock re-entrancy dance (forget -> mutate -> _board_lock, which is why it
+    had to run outside our lock) and a failure path where op_requeue_lost could
+    raise AFTER the backup and the cancel events, leaving the drop half-done.
+
+    F11: no board.json means there is nothing to drop and nothing is created —
+    not the backup, not board.json, not board.md.
 
     D12: .state/active-plan is left alone. Silently clearing the pointer would
     strand the plan; the caller warns instead (see the CLI branch).
     """
     j, _m = _paths(project)
+    if not j.exists():
+        return {"dropped": 0, "stopped": [], "backup": None, "next_id": 1,
+                "skipped": True}
     before = load(project)
+    stopped = drop_report(project)["workers"]
     # 1. back up first — this is the safety net, so it lands before any mutation
     bak = j.with_name(j.name + ".dropped")
-    _atomic_write(bak, json.dumps(before, indent=2) + "\n")
-    # 2. stop the workers that are still out (D11), worktrees untouched
-    stopped = forget(["all"], project)["forgotten"] if j.exists() else []
+    tmp = bak.with_name(f"{bak.name}.tmp{os.getpid()}")
+    shutil.copy2(j, tmp)
+    os.replace(tmp, bak)
     with _board_lock(project):
         db = load(project)
-        db["tasks"] = []                      # 3. empty the board
-        db["next_id"] = 1                     # 4. a fresh board starts at 1
-        save(db, project)                     # 6. board.md re-rendered by save()
-    # 5. clear the event ledger (the cancel events from step 2 go with it)
-    ev = root(project) / ".state" / "events.log"
-    if ev.exists():
-        _atomic_write(ev, "")
+        db["tasks"] = []                      # 2. empty the board
+        db["next_id"] = 1                     # 3. a fresh board starts at 1
+        save(db, project)                     # 5. board.md re-rendered by save()
+    # 4. clear the event ledger. Written unconditionally: forget() used to
+    # create events.log as a side effect and the truncate relied on that.
+    _atomic_write(root(project) / ".state" / "events.log", "")
     return {"dropped": len(before["tasks"]), "stopped": stopped,
-            "backup": str(bak), "next_id": 1}
+            "backup": str(bak), "next_id": 1, "skipped": False}
 
 
 def summary(db):
@@ -948,7 +1032,12 @@ def main(argv):
         a = rest[i]
         if a.startswith("--"):
             k = a[2:].replace("-", "_")
-            v = rest[i + 1] if i + 1 < len(rest) and not rest[i + 1].startswith("--") else "true"
+            # F1: a valueless flag (--dry-run) must NOT eat the token after it.
+            # The old unconditional i += 2 swallowed whatever followed, so
+            # `drop --dry-run --project X` silently lost --project and fell
+            # back to cwd resolution.
+            took = i + 1 < len(rest) and not rest[i + 1].startswith("--")
+            v = rest[i + 1] if took else "true"
             if k == "project":
                 proj = v
             elif k == "owns":
@@ -963,7 +1052,7 @@ def main(argv):
                 kw[k] = [int(x) for x in v.split(",") if x.strip()]
             else:
                 kw[k] = v
-            i += 2
+            i += 2 if took else 1
         else:
             pos.append(a)
             i += 1
@@ -1000,24 +1089,25 @@ def main(argv):
         # the script — no stdin prompt and no --yes flag, matching remove/forget,
         # neither of which prompts either. What the script owes the lead is an
         # honest report BEFORE it acts, which is what this prints.
+        # F1: --dry-run prints that report and stops. The lead's D3
+        # confirmation names how many open rows go, which workers stop and
+        # whether a plan is active — facts only this report holds, so there
+        # has to be a way to get them without the destruction they describe.
         _refuse_if_worker()
         proj = _write_project(proj)
+        dry = "dry_run" in kw
         rep = drop_report(proj)
-        print("drop — about to empty the board:")
-        print(f"  {rep['open']} open task(s) and {rep['merged']} merged task(s) will be removed")
-        if rep["workers"]:
-            print("  workers still out (they will be stopped; their worktrees are NOT "
-                  "touched): " +
-                  ", ".join(f"{a} ({rep['agents'].get(a, '?')})" for a in rep["workers"]))
-        else:
-            print("  no workers out")
-        if rep["active_plan"]:
-            print(f"  plan ACTIVE: {rep['active_plan']}")
-            print("  ! the plan's board rows go with the board; .state/active-plan is left "
-                  "alone, so `check` will report its steps missing until the plan is "
-                  "re-boarded or archived")
-        else:
-            print("  no active plan")
+        if not rep["exists"]:
+            # F11: no board to drop — and drop must not CREATE one saying so.
+            print("drop — nothing to drop: this project has no board "
+                  "(.state/board.json does not exist)")
+            print("  no files were created")
+            return 0
+        print_drop_report(rep)
+        if dry:
+            print("  dry run — nothing was changed; run the same command without "
+                  "--dry-run to do it")
+            return 0
         res = drop(proj)
         print(f"dropped {res['dropped']} task(s); next_id reset to {res['next_id']}; "
               f"ledger cleared")
@@ -1103,4 +1193,13 @@ if __name__ == "__main__":
         sys.exit(main(sys.argv[1:]) or 0)
     except (ValueError, KeyError, TypeError) as e:
         print(str(e).strip('"'), file=sys.stderr)
+        sys.exit(1)
+    except OSError as e:
+        # F12: an unwritable .state/ used to escape as a traceback, printed
+        # right under drop's confirmation-shaped report — the lead could not
+        # tell whether anything had happened. Every write here is atomic
+        # (tmp + os.replace) and the backup lands before any mutation, so a
+        # failed write leaves the board as it was; say so.
+        print(f"{e} — aborted before any change; the board was not modified",
+              file=sys.stderr)
         sys.exit(1)
