@@ -781,8 +781,9 @@ def print_drop_report(rep) -> None:
     if rep["active_plan"]:
         print(f"  plan ACTIVE: {rep['active_plan']}")
         print("  ! the plan's board rows go with the board; .state/active-plan is left "
-              "alone, so `check` will report its steps missing until the plan is "
-              "re-boarded or archived")
+              "alone, so `check` flags every step as missing and the gate BLOCKS "
+              "every turn from ending until the plan is re-boarded or archived "
+              "(plan-archive.sh --abandon)")
     else:
         print("  no active plan")
 
