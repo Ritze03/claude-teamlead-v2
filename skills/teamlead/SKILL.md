@@ -16,7 +16,8 @@ exceptions are settings files, plan files, and the board: those are yours.
 
 A hook put this project's state in front of you before you read this: git regime,
 leftover worktrees, resolved routing, and any open board rows. **Do not re-check
-any of it.**
+any of it** — with one exception, spelled out under `board drop`: before deleting
+worktrees, re-run the worktree check, because by then this block is stale.
 
 - **`settings: MISSING`** → run **Project setup** *now*, before greeting or acting.
 - **`git: yes`** → every worker that writes gets `isolation: worktree`. Read-only
@@ -375,9 +376,41 @@ Neither script prompts on stdin. The confirmation is **yours**, through
   worktrees.
 - **Removing those worktrees is a second, separate confirmation** — asked only after
   the first yes, never folded into it, and it must name which of the worktrees hold
-  commits that are not in `HEAD`. Stopping an agent costs a re-dispatch; deleting a
-  worktree with unmerged commits destroys the only copy of that work. Two very
-  different prices must not ride on one click.
+  commits that are not in the project's checked-out branch. Stopping an agent costs a
+  re-dispatch; deleting a worktree with unmerged commits destroys the only copy of
+  that work. Two very different prices must not ride on one click.
+
+  Get that list by re-running the same hook the state block came from — it is
+  read-only and takes the project dir as its only argument:
+
+  ```
+  bash "$(cat .claude/teamlead/.state/plugin-root)/hooks/state.sh" "$PWD" | grep '^  worktree'
+  ```
+
+  It prints one line per worktree, in one of three shapes:
+
+  ```
+    worktree (clean, merged into <branch>, safe to remove): <path>
+    worktree HOLDING WORK (<why>): <path>
+    worktree CANNOT BE CHECKED (not a git work tree) — do not remove: <path>
+  ```
+
+  `<branch>` is whatever the project has checked out (`master`, typically) — that is
+  the "not in `HEAD`" above, spelled out. `<why>` is whichever reasons apply, joined
+  by commas: `uncommitted changes`, `N commit(s) not in <branch>`, and — when a check
+  could not be run at all — `status check FAILED` or `unmerged-commit check FAILED`.
+  A worktree needs only one of them to be off limits. Only **`safe to remove`**
+  clears a worktree for deletion: it is printed only when the worktree is both
+  clean and fully merged.
+  **`HOLDING WORK`** and **`CANNOT BE CHECKED`** both mean do not delete — the latter
+  because a check that could not run is not a pass. Name the `HOLDING WORK` and
+  `CANNOT BE CHECKED` paths in the confirmation, verbatim.
+
+  This is the one place where the "Do not re-check any of it" rule above does **not**
+  apply. That rule saves context at the start of a session; here the injected block
+  is simply out of date — it was written at activation or restore, before this
+  session's workers made their worktrees — and deleting on a stale list is how the
+  only copy of someone's work is lost. Re-check here, and only here.
 - `drop` deliberately leaves `.claude/teamlead/.state/active-plan` alone, so an active
   plan is not stranded. The consequence is not cosmetic: `gate.sh` runs `board.py
   check` at Stop and blocks on any output, so **every turn will end blocked** — "plan
