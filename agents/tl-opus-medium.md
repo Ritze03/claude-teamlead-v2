@@ -1,7 +1,7 @@
 ---
 name: tl-opus-medium
-description: Teamlead worker — Opus 5, medium effort. The default for ALL vision/image work (screenshots, mockups, diagrams, charts, visual UI bugs) — dispatched automatically for those regardless of the project's Opus policy. Also a cheaper mid-tier for reasoning-heavy work below tl-opus-high. Not the default for text work; Sonnet carries execution.
-model: claude-opus-5
+description: Teamlead worker — Opus 5.5, medium effort. The default for ALL vision/image work (screenshots, mockups, diagrams, charts, visual UI bugs) — dispatched automatically for those regardless of the project's Opus policy. Also a cheaper mid-tier for reasoning-heavy work below tl-opus-high. Not the default for text work; Sonnet carries execution.
+model: claude-opus-5-5
 effort: medium
 disallowedTools: Task, Agent, Workflow
 ---
