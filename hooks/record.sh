@@ -3,7 +3,8 @@
 #
 # PreToolUse(Agent) records the dispatch (it is the only event carrying the task
 # description; SubagentStart has agent_id but no prompt).
-# SubagentStop records the return, with the worker's own summary.
+# SubagentStop records the return, with the worker's own summary — or a pause
+# when the worker is only idling on its own background job (T65).
 set -uo pipefail
 source "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/lib.sh"
 # tl_init's active-flag exit needs the event name first (F16), which needs $IN —
@@ -31,6 +32,35 @@ tl_board_call() {
     echo "[teamlead] board: $err" >&2
     tl_event "warn      board-refused  id=$aid  board=$bid  msg=$(printf '%s' "$err" | tr '\n' ' ' | cut -c1-100)"
   fi
+}
+
+# T65: is this SubagentStop a pause rather than the worker's final return?
+# Final = its last tool call is SubagentHandback, the harness tool a worker
+# delivers its report with. Only judged when the harness offers that tool (its
+# reminder or tool definition is in the transcript); no transcript, unreadable,
+# or an older harness without SubagentHandback → final (exit 1), as before.
+# $1 is agent_transcript_path — the worker's own; transcript_path is the lead's.
+tl_worker_paused() {
+  [ -n "$1" ] && [ -r "$1" ] || return 1
+  python3 - "$1" <<'PY'
+import json, re, sys
+offered, last = False, None
+try:
+    for line in open(sys.argv[1], errors="replace"):
+        if "delivered through SubagentHandback" in line or re.search(r'"name":\s*"SubagentHandback"', line):
+            offered = True
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("type") == "assistant":
+            for b in (o.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    last = b.get("name")
+except Exception:
+    sys.exit(1)     # anything unparseable reads as final — the old behaviour
+sys.exit(0 if offered and last != "SubagentHandback" else 1)
+PY
 }
 
 ev=$(tl_json .hook_event_name)
@@ -135,6 +165,14 @@ case "$ev" in
   SubagentStop)
     at=$(tl_json .agent_type)
     case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    # T65: a worker idling on its own run_in_background job fires SubagentStop
+    # too — that is a pause, not a return. The transcript is written async (hooks
+    # docs), so a pause verdict is re-read once before it sticks.
+    tp=$(tl_json .agent_transcript_path)
+    if tl_worker_paused "$tp" && { sleep 1; tl_worker_paused "$tp"; }; then
+      tl_event "pause     agent=$at  id=$(tl_json .agent_id)"
+      exit 0
+    fi
     msg=$(tl_json .last_assistant_message | tr '\n' ' ' | cut -c1-200)
     tl_event "return    agent=$at  id=$(tl_json .agent_id)  msg=$msg"
     tl_board_call "$(tl_json .agent_id)" "" worker-stop --id "$(tl_json .agent_id)"
