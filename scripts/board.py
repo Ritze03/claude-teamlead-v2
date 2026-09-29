@@ -636,10 +636,12 @@ def worker_start(agent_id, project=None, board=None, branch=None):
 
 
 def worker_stop(agent_id, project=None):
-    """D12: SubagentStop. The row this agent was running moves to returned —
-    a crashed or killed worker lands here too, which is right: nobody is on
-    it and the lead has to look. No board.json, or no row of this agent in
-    'running', is a no-op."""
+    """D12: SubagentStop. The row this agent was running moves to returned.
+    T65: only a FINAL stop gets here — record.sh logs a stop whose last tool
+    call was not SubagentHandback (a worker idling on its own background job)
+    as `pause` and skips this, so a worker that dies without handing back
+    stays 'running' until the ledger's stale age-out. No board.json, or no
+    row of this agent in 'running', is a no-op."""
     j, _ = _paths(project)
     if not j.exists():
         return None
@@ -905,6 +907,8 @@ def ledger(project=None) -> dict:
             seen[aid] = tok.get("agent", seen.get(aid, "?"))
             started[aid] = ts                     # I7: latest start/resume, for forget --before
             session[aid] = tok.get("session")      # I7: its session=, for forget --not-session
+        elif rest.startswith("pause") and aid in live:
+            live[aid] = ts                        # T65: still out, and alive as of now
         elif rest.startswith(("return", "cancel")):
             live.pop(aid, None)
             seen[aid] = tok.get("agent", seen.get(aid, "?"))

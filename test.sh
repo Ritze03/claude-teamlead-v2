@@ -2675,6 +2675,49 @@ check "  the wrong project got no backup" \
 ( cd $pvB && CLAUDE_PROJECT_DIR=$pvB python3 "$B" drop --project $pvA >/dev/null 2>&1 )
 check "  a real drop empties the project named by --project" "$(pvrows "$pvA/.claude/teamlead/.state/board.json")" 0
 check "  and leaves cwd/CLAUDE_PROJECT_DIR's board alone" "$(md5sum < "$pvB_json")" "$pvB_md5"
+echo "== T65: SubagentStop is final only when the worker's last tool call is SubagentHandback =="
+tp=$T/t65; mkdir -p "$tp/.claude/teamlead/.state"; : > "$tp/.claude/teamlead/.state/active"
+git -C "$tp" init -q; git -C "$tp" config user.email t@t.t; git -C "$tp" config user.name t
+echo a > "$tp/a"; git -C "$tp" add a; git -C "$tp" commit -qm init
+python3 "$B" add --project $tp --task "bg job" --agent tl-sonnet-low --owns t65/a >/dev/null   # id 1
+python3 "$B" add --project $tp --task "old" --agent tl-sonnet-low --owns t65/b >/dev/null      # id 2
+LT=$tp/.claude/teamlead/.state/events.log
+TGATE='{"hook_event_name":"Stop","cwd":"'$tp'","stop_hook_active":false}'
+rowt(){ python3 -c "import json;d=json.load(open('$tp/.claude/teamlead/.state/board.json'));t=[x for x in d['tasks'] if x['id']==$1][0];print(t['state'])"; }
+outt(){ python3 "$B" ledger --project $tp | python3 -c "import json,sys;print(' '.join(json.load(sys.stdin)['outstanding']))"; }
+REM='{"type":"user","message":{"role":"user","content":"<system-reminder>\nYour final report is delivered through SubagentHandback: call it when done.\n</system-reminder>\nboard: 1"}}'
+BASH_TU='{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"make","run_in_background":true}}]}}'
+HB_TU='{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"SubagentHandback","input":{"message":"done"}}]}}'
+TXT='{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Handed back."}]}}'
+printf '%s\n' "$REM" "$BASH_TU" > $T/t65-pause.jsonl
+printf '%s\n' "$REM" "$BASH_TU" "$HB_TU" "$TXT" > $T/t65-final.jsonl
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"board: 2"}}' "$BASH_TU" > $T/t65-old.jsonl
+TSTOP(){ echo '{"hook_event_name":"SubagentStop","cwd":"'$tp'","agent_type":"teamlead:tl-sonnet-low","agent_id":"'$1'","agent_transcript_path":"'$2'","transcript_path":"'$T/t65-final.jsonl'","last_assistant_message":"'$3'"}'; }
+ev '{"hook_event_name":"PostToolUse","cwd":"'$tp'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-low","description":"bg","prompt":"x\nboard: 1","isolation":"worktree"},"tool_response":{"agentId":"tw1"}}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStart","cwd":"'$tp'","agent_type":"teamlead:tl-sonnet-low","agent_id":"tw1"}' "$H/record.sh" >/dev/null
+git -C "$tp" worktree add -q "$tp/.claude/worktrees/agent-tw1" -b worktree-agent-tw1 2>/dev/null
+echo wip > "$tp/.claude/worktrees/agent-tw1/wip.txt"
+check "pause stop (last tool Bash, Handback offered): exit 0" "$(ev "$(TSTOP tw1 $T/t65-pause.jsonl 'waiting on make')" "$H/record.sh")" 0
+check "  row 1 stays running" "$(rowt 1)" running
+check "  tw1 still outstanding" "$(outt)" tw1
+grep -qE '  pause     agent=teamlead:tl-sonnet-low  id=tw1$' $LT && ok "  pause line in the ledger" || bad "  pause line in the ledger"
+grep -q '  return .*id=tw1' $LT && bad "  no return line" || ok "  no return line"
+check "  gate passes while tw1 is paused" "$(ev "$TGATE" "$H/gate.sh")" 0; grep -q 'left work behind' $T/out && bad "  gate check 3 skips the paused worker's dirty worktree" || ok "  gate check 3 skips the paused worker's dirty worktree"
+grep -q "'running' but only" $T/out && bad "  gate check 1 quiet" || ok "  gate check 1 quiet"
+check "final stop (last tool SubagentHandback): exit 0" "$(ev "$(TSTOP tw1 $T/t65-final.jsonl 'Handed back.')" "$H/record.sh")" 0
+check "  row 1 -> returned" "$(rowt 1)" returned
+check "  tw1 no longer outstanding" "$(outt)" ""
+grep -qE '  return    agent=teamlead:tl-sonnet-low  id=tw1  msg=Handed back\.' $LT && ok "  return line written" || bad "  return line written"
+ev "$TGATE" "$H/gate.sh" >/dev/null
+grep -q 'agent-tw1 — uncommitted changes' $T/out && ok "  gate check 3 now reports its dirty worktree" || bad "  gate check 3 now reports its dirty worktree"
+ev "$(TSTOP tw1 $T/t65-pause.jsonl 'late')" "$H/record.sh" >/dev/null
+check "a stray pause after the return does not reopen tw1" "$(outt)" ""
+ev '{"hook_event_name":"PostToolUse","cwd":"'$tp'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-low","description":"old","prompt":"x\nboard: 2"},"tool_response":{"agentId":"tw2"}}' "$H/record.sh" >/dev/null
+ev "$(TSTOP tw2 $T/t65-old.jsonl done)" "$H/record.sh" >/dev/null
+check "harness without SubagentHandback (never named): final, row 2 -> returned" "$(rowt 2)" returned
+ev "$(TSTOP tw3 $T/nope.jsonl done)" "$H/record.sh" >/dev/null
+grep -q '  return    agent=teamlead:tl-sonnet-low  id=tw3' $LT && ok "unreadable transcript: final, return line written" || bad "unreadable transcript: final, return line written"
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
