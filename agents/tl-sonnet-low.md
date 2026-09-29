@@ -1,7 +1,7 @@
 ---
 name: tl-sonnet-low
-description: Teamlead worker — Sonnet 5, low effort. Cheapest tier — trivial/mechanical work: one-line edits, running a command and reporting output, simple lookups, formatting. Use when the task is so bounded that even medium effort is overkill.
-model: claude-sonnet-5
+description: Teamlead worker — Sonnet, low effort. Cheapest tier — trivial/mechanical work: one-line edits, running a command and reporting output, simple lookups, formatting. Use when the task is so bounded that even medium effort is overkill.
+model: sonnet
 effort: low
 disallowedTools: Task, Agent, Workflow
 ---
