@@ -1,7 +1,7 @@
 ---
 name: tl-opus-low
-description: Teamlead worker — Opus 5.5, low effort. The cheapest Opus tier — a lightweight Opus-level judgment call on a small/well-bounded problem, or the first (lightest) rung of Opus escalation. Still not the default; Sonnet carries execution.
-model: claude-opus-5-5
+description: Teamlead worker — Opus, low effort. The cheapest Opus tier — a lightweight Opus-level judgment call on a small/well-bounded problem, or the first (lightest) rung of Opus escalation. Still not the default; Sonnet carries execution.
+model: opus
 effort: low
 disallowedTools: Task, Agent, Workflow
 ---

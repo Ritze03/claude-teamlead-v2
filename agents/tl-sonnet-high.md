@@ -1,7 +1,7 @@
 ---
 name: tl-sonnet-high
-description: Teamlead worker — Sonnet 5, high effort. Default execution workhorse — non-trivial code from a plan, bug fixes, UI logic, unclear-but-bounded edits, and default QC.
-model: claude-sonnet-5
+description: Teamlead worker — Sonnet, high effort. Default execution workhorse — non-trivial code from a plan, bug fixes, UI logic, unclear-but-bounded edits, and default QC.
+model: sonnet
 effort: high
 disallowedTools: Task, Agent, Workflow
 ---

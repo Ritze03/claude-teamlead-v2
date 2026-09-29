@@ -54,8 +54,8 @@ Planning mode watches the plan file with `inotify`, so you edit it in your own e
 lead reacts to your changes without you retyping them into chat. Rather than carry a
 portability layer for a personal tool, v2 requires it outright.
 
-**Requires:** `inotify-tools`, `git`, `jq`, and access to both Opus 5.5 and Sonnet 5 — the
-workers pin exact model IDs and reasoning-effort levels.
+**Requires:** `inotify-tools`, `git`, `jq`, and access to both Opus and Sonnet — the
+workers pick a model family (always its latest version) and a reasoning-effort level.
 
 ## Install
 
