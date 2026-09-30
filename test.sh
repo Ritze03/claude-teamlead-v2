@@ -1444,6 +1444,29 @@ printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\n' > $pff
 out=$(pfedit 'not present anywhere' 'whatever')
 check "old_string not in the file: allow silently (parse failure = allow)" "$out" ""
 
+# T66: a same-stage write must not re-stamp plan-stage — that made a Go typed
+# before it look older than "the last stage change" and refused the 3->4 bump.
+pfst=$pfp/.claude/teamlead/.state
+printf '# T\n\n> **Stage 3** — x\n\nbody one\n\n## Notes from me\n' > $pff
+printf '3 2020-01-01T00:00:00Z\n' > $pfst/plan-stage
+printf '3 2020-01-02T00:00:00Z\n' > $pfst/plan-go
+out=$(pfedit 'body one' 'body two')
+check "T66: same-stage Edit after a Go: allowed" "$(pfdecide "$out")" allow
+printf '# T\n\n> **Stage 3** — x\n\nbody two\n\n## Notes from me\n' > $pff
+out=$(echo '{"hook_event_name":"PreToolUse","cwd":"'$pfp'","tool_name":"Write","tool_input":{"file_path":"'$pff'","content":"# T\n\n> **Stage 3** — x\n\nbody three\n\n## Notes from me\n"}}' | "$H/plan-fence.sh")
+check "T66: same-stage Write after a Go: allowed" "$(pfdecide "$out")" allow
+check "T66: plan-stage untouched by same-stage writes" "$(cat $pfst/plan-stage)" "3 2020-01-01T00:00:00Z"
+out=$(pfedit '**Stage 3**' '**Stage 4**')
+check "T66: 3->4 after same-stage writes, Go still live: allowed" "$(pfdecide "$out")" allow
+check "T66: the real bump does re-stamp plan-stage" "$(cut -d' ' -f1 $pfst/plan-stage)" 4
+printf '3 2020-01-03T00:00:00Z\n' > $pfst/plan-stage
+out=$(pfedit '**Stage 3**' '**Stage 4**')
+check "T66: Go older than the real stage change: 3->4 still denied" "$(pfdecide "$out")" deny
+printf '3 2020-01-02T00:00:00Z\n' > $pfst/plan-stage
+out=$(pfedit '**Stage 3**' '**Stage 4**')
+check "T66: Go in the same second as the stamp: denied (strict >)" "$(pfdecide "$out")" deny
+rm -f $pfst/plan-stage $pfst/plan-go
+
 m=$(jq -r '.hooks.PreToolUse[] | select(.matcher=="Edit|Write|MultiEdit|NotebookEdit") | .hooks[].command' "$CLAUDE_PLUGIN_ROOT/hooks/hooks.json")
 grep -q 'plan-fence.sh' <<<"$m" && ok "  hooks.json wires plan-fence.sh under Edit|Write|MultiEdit|NotebookEdit" || bad "  hooks.json wires plan-fence.sh"
 
@@ -1893,6 +1916,18 @@ grep -q '^4 ' $d2p/.claude/teamlead/.state/plan-stage && ok "  re-seeded at the 
 sed -i 's/Stage 4/Stage 2/' "$d2f"
 check "backward move Stage 4->2: accepted" "$(d2ev "$D2STOP")" 0
 check "  plan-stage now starts with '2'" "$(cut -d' ' -f1 $d2p/.claude/teamlead/.state/plan-stage)" 2
+
+# T66: a Stop with the header unchanged must not re-stamp plan-stage — otherwise
+# any Go typed before that Stop is voided for the next turn's 3->4 bump.
+d2write 3
+printf '3 2020-01-01T00:00:00Z\n' > $d2p/.claude/teamlead/.state/plan-stage
+printf '3 2020-01-02T00:00:00Z\n' > $d2p/.claude/teamlead/.state/plan-go
+d2ev "$D2STOP" >/dev/null
+check "T66: same-stage Stop leaves plan-stage untouched" "$(cat $d2p/.claude/teamlead/.state/plan-stage)" "3 2020-01-01T00:00:00Z"
+sed -i 's/Stage 3/Stage 4/' "$d2f"
+d2ev "$D2STOP" >/dev/null
+grep -qF 'no "Go" is recorded' "$T/d2out" && bad "T66: 3->4 on the next Stop, Go still live: accepted" || ok "T66: 3->4 on the next Stop, Go still live: accepted"
+check "T66:   plan-stage now starts with '4'" "$(cut -d' ' -f1 $d2p/.claude/teamlead/.state/plan-stage)" 4
 
 echo "== F5: a hook fired from inside a worktree resolves to the main checkout (I2) =="
 f5p=$T/f5proj; mkdir -p $f5p
