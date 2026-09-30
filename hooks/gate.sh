@@ -146,8 +146,10 @@ if [ -n "$plan_stage" ]; then
       problems+=$'\n'"- plan header moved Stage $rec → $cur but no \"Go\" is recorded since the last stage change — get a Go from the user, or set the header back to $rec"
     else
       # Accepted (delta 0 or 1 with Go rules satisfied) — record so the next
-      # Stop compares against this, not a jump already handled.
-      printf '%s %s\n' "$cur" "$(tl_now)" > "$TL_STATE/plan-stage"
+      # Stop compares against this, not a jump already handled. T66: only when
+      # the stage actually moved; re-stamping an unchanged stage would make any
+      # Go typed before this Stop look older than "the last stage change".
+      [ "$cur" != "$rec" ] && printf '%s %s\n' "$cur" "$(tl_now)" > "$TL_STATE/plan-stage"
     fi
   fi
 fi

@@ -14,11 +14,13 @@
 # (Write to a path that doesn't exist yet) is never blocked — there is no
 # "before" to compare against — it just seeds $TL_STATE/plan-stage.
 #
-# $TL_STATE/plan-stage is rewritten on every write this hook ACCEPTS, even one
-# that leaves the stage unchanged — it is "the stage last confirmed", not just
-# "the stage last changed". gate.sh's Stop-time check (D2) relies on that: it is
-# the net for writers this hook's Edit|Write|MultiEdit matcher never sees at all
-# (a Bash/python write to the plan file, F1).
+# $TL_STATE/plan-stage ("<stage> <ts>") is "the stage last changed": it is
+# written on an accepted write only when the header's stage differs from the
+# recorded one (or nothing is recorded yet). T66: a same-stage write must leave
+# the timestamp alone — it is what a Go has to be newer than, so re-stamping it
+# silently voided a Go the user had already typed. gate.sh's Stop-time check (D2)
+# follows the same rule and is the net for writers this hook's matcher never
+# sees (a Bash/python write to the plan file, F1).
 #
 # ponytail: "after this edit, what would the file say" is computed in python3
 # (already a dependency via scripts/board.py) rather than hand-rolled in bash.
@@ -103,7 +105,13 @@ notes_of() {
   awk '/^## Notes from me/{o=1;next} /^## /{o=0} o' <<<"$1"
 }
 
-record_stage() { printf '%s %s\n' "$1" "$(tl_now)" > "$TL_STATE/plan-stage"; }
+# T66: only a real stage change moves the timestamp; same stage = no-op.
+record_stage() {
+  local rec=""
+  [ -f "$TL_STATE/plan-stage" ] && read -r rec _ < "$TL_STATE/plan-stage" 2>/dev/null
+  [ "$rec" = "$1" ] && return 0
+  printf '%s %s\n' "$1" "$(tl_now)" > "$TL_STATE/plan-stage"
+}
 
 if [ ! -f "$target_real" ]; then
   new_content=$(after_content "$tool" "$target_real") || exit 0
@@ -150,9 +158,8 @@ if [ -n "$old_stage" ] && [ -n "$new_stage" ] && [ "$new_stage" -gt "$old_stage"
   esac
 fi
 
-# Record on every accepted write, not only ones that change the stage: gate.sh's
-# Stop-time check (D2) compares the header against this file, and the header can
-# also be moved by a Bash/python write this hook never sees (F1) — so an accepted
-# same-stage edit still needs to refresh the pointer to "confirmed current".
+# Record on every accepted write; record_stage itself skips an unchanged stage
+# (T66), so this only stamps a real move (or re-syncs a record gate.sh left
+# behind after a Bash/python header change, F1).
 [ -n "$new_stage" ] && record_stage "$new_stage"
 exit 0
