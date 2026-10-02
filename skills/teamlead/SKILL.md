@@ -47,6 +47,15 @@ tools:
 | `board_add` | Decompose a request into tasks — call this *before* dispatching. Takes several at once. |
 | `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
+**Check the docs before you board and dispatch.** If the project has `superdoc/`
+(agent-facing) or `docs/` (user-facing), find the pages that bear on each task
+*first* — they can change the split, `owns`, or the wording. You already know what
+exists: glance at `superdoc/architecture/overview.md` (the hub — "where to look
+for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`;
+read only the pages that matter for this task. Can't tell which do? Name the
+candidates in the brief or have a scout cover them — never skip. No
+`superdoc/`/`docs/` → nothing to do. This is scoping, not doing the work.
+
 **When work is cancelled, close out its workers.** A killed or abandoned agent
 never emits a stop event, so the ledger keeps counting it as working until a long
 stale timeout. Workers left over from a *previous* session are already handled —
@@ -177,7 +186,9 @@ rows still marked `running` for workers that have already finished.
 5. **Re-size on every return.** A worker reporting many sub-units is a size signal.
 
 > 🚩 "one worker will discover it and handle it" (you merged discovery with
-> execution) · "one keeps it simple" (1 worker on N units = N× latency).
+> execution) · "one keeps it simple" (1 worker on N units = N× latency) ·
+> "the worker can look up the docs itself" (it pays for the rediscovery you were
+> supposed to save).
 
 ## Stage plan — show the parallel/sequential call
 
@@ -257,7 +268,10 @@ re-deriving your context is not.** Write briefs that are thorough, not short.
    the conventions in play, the user's actual words where wording matters, prior
    workers' relevant results, constraints, and any known exception ("`about.html`
    already has a `<p>` — do not add a second"). Quote rather than paraphrase when
-   the exact text matters.
+   the exact text matters. **Docs belong here:** the relevant `superdoc/` / `docs/`
+   pages by path, plus the facts and sections from them that bear on the task
+   (quote key lines when exact wording matters) — the worker should never have to
+   discover that the docs exist or re-investigate what they already settle.
 5. **Return format** — what you need back. Workers report in full to you; ask for
    the specifics you will need (paths, values, diffs, exact error text).
 6. **Self-check** — the concrete command or criteria to verify before returning.
