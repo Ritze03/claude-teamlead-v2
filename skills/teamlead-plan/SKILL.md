@@ -32,8 +32,8 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
-| **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. | They all pass |
-| **7 User-Testing** | Hand the `verified by: user` criteria over and **wait**. | The user says it is good |
+| **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. Always set the header to 6 once; **none to run? say so and move to 7 yourself**. | They all pass, or there are none |
+| **7 User-Testing** | Hand the `verified by: user` criteria over and **wait**. What they find goes back on the board and you set the header back to 5 on your own call. | The user says it is good |
 
 Plan mode runs to the end of **7**, not to the handoff. The plan is not finished
 when the code is written; it is finished when it has been checked.
@@ -431,9 +431,11 @@ verification a guess with a tick next to it. Say `user` and let it wait.
 
 ## Phases split a big plan
 
-The wave table can group waves under phase rows when the user asks for it, or
-when the changes are unrelated enough that one big table would push all testing
-to the very end:
+**Use phases by default whenever the work splits into parts that can be built and
+tested independently** — each phase then runs 5 → 6 → 7 on its own and testing
+never piles up at the end. Do not wait to be asked, and do not hold the user's
+first look until everything is built. A small plan with one natural unit stays
+one phase; do not force a split. The wave table groups waves under phase rows:
 
 ```markdown
 | Wave | ID | Task | Agent | Owns | After |
@@ -462,7 +464,9 @@ hasn't been added yet.
 ## Stage 6 — Agent-Testing
 
 When the board is empty and every implementation step has merged, set the header to
-`> **Stage 6**` and work the `verified by: agent` list:
+`> **Stage 6**` — **always, at least once; stage 6 is never skipped** (`plan-fence.sh`
+refuses a 5 → 7 jump) — and work the `verified by: agent` list. With phases, this
+is the current phase's criteria:
 
 1. **Really run them.** Dispatch the runs to a worker like any other work — a
    command, a request, a test, actually executed, not reasoned about. A criterion
@@ -475,7 +479,11 @@ When the board is empty and every implementation step has merged, set the header
 3. **A failure is a task, not a caveat.** Put it back on the board, return to stage
    5, and come back. Do not carry a broken criterion forward as a footnote.
 
-Only when every `agent` box is ticked does stage 6 end.
+**Nothing to run is not a reason to wait.** If the current phase has no
+`verified by: agent` criteria, say so in one line — "No agent-verifiable criteria
+— nothing for me to run." — and set the header to `> **Stage 7**` in the same
+turn. The same once every `agent` box is ticked. 6 → 7 is **your own move**: do
+not ask, and do not wait for a "Go" — only 3 → 4 and 4 → 5 need one.
 
 ## Stage 7 — User-Testing
 
@@ -488,9 +496,13 @@ yourself. Never read silence, a thumbs-up on something else, or your own confide
 in the code as a pass. Never ask "shall I archive this now?" as a way of getting
 the answer — present the list and wait for them to actually report back.
 
-Whatever they find goes back on the board and the plan returns to stage 5. A plan
-can cycle 5 → 6 → 7 → 5 as many times as it takes; that is the mode working, not
-the mode failing.
+Whatever they find goes back on the board, and **you set the header back to
+`> **Stage 5**` yourself — you are explicitly allowed to, and must not ask "shall I
+go back to building?"** Moving backwards is always open to you (`plan-fence.sh`
+only guards forward moves). It is not closing stage 7: only the user ends it as
+done. A plan can cycle 5 → 6 → 7 → 5 as many times as it takes; that is the mode
+working, not the mode failing. An interactive plan where the user iterates in
+stage 7 — try, change, try again — is a normal use of it.
 
 If a plan has no `user` criteria at all, stage 7 is still theirs: say the agent
 checks all passed, say there is nothing needing their eyes, and let them close it.
