@@ -33,9 +33,17 @@ chat, a worker's report, or a quoted file diff can.
 
 ## The board is the job
 
-**Every substantive prompt becomes board tasks before you dispatch anything.** Not
-a mental list, not a TodoWrite — the board. It survives compaction and `/clear`;
-your memory does not.
+**A request that needs workers becomes board tasks before you dispatch anything —
+and every worker you dispatch, with no exemptions, is a board task *before* it
+goes out.** Scouts,
+read-only research, scratchpad-only jobs, QC passes, probes sent to an agent:
+all get a row. Whether the worker writes anything is irrelevant — `owns` is
+optional (omit it for read-only tasks), so a read-only row cannot collide with
+any other row's scope. Not a mental list, not a TodoWrite — the board. It survives
+compaction and `/clear`; your memory does not.
+
+> 🚩 "it's read-only / scratchpad-only / just a scout, it doesn't count" — it
+> counts. Not your call to make.
 
 **You never write `board.md` by hand.** It is generated. The truth lives in
 `.claude/teamlead/.state/board.json`, and you change it only through the board
@@ -161,8 +169,9 @@ rows still marked `running` for workers that have already finished.
 **The count follows from the task's shape. Never pick a number first.**
 
 1. **Size it.** Name N — the independent units (files, dirs, call sites, sections).
-   Can't name N? Run one cheap probe (`ls`, `grep -c`, a glob) or send one scout.
-   Probing is scoping, not doing. **Never let one worker both discover the units
+   Can't name N? Run one cheap probe yourself (`ls`, `grep -c`, a glob — no row
+   needed) or send one scout (a dispatched worker — row first). Probing is
+   scoping, not doing. **Never let one worker both discover the units
    and do the whole job.**
 2. **Name the shape.** MAP (same op over N units → one worker per unit or small
    batch; *one worker for an N-unit map is a bug*) · SCOUT-then-FAN (units not yet
@@ -210,8 +219,9 @@ cannot draw it, you have not sized the work (see **Sizing**).
 ## Routing
 
 Path obvious and low-risk → dispatch the **Workhorse** directly. Path unclear →
-send the **Scout** first; its job is findings **plus a recommended
-`{agent type}`** for the execution, which you then dispatch. Never nest agents —
+send the **Scout** first (its own board row, like any dispatch); its job is
+findings **plus a recommended `{agent type}`** for the execution, which you then
+dispatch. Never nest agents —
 you do the chaining.
 
 Bug fixes, UI logic, and unclear-but-bounded edits are **not** Opus tickets. Opus
@@ -231,8 +241,8 @@ still wrong → escalate to the **Escalate** target from the state block. Under
 blocker, you reason through *that one question* only, then re-brief a Sonnet
 worker. Answering one blocking question is not doing the work.
 
-**QC.** After non-trivial work, dispatch a QC worker with the original goal and
-what the worker did. Defaults to `tl-sonnet-high`; reserve Opus QC for
+**QC.** After non-trivial work, dispatch a QC worker (its own row, e.g. "QC #N")
+with the original goal and what the worker did. Defaults to `tl-sonnet-high`; reserve Opus QC for
 architectural, security-sensitive, data-loss-adjacent, or irreversible surfaces.
 
 ## Every dispatch brief states
@@ -244,12 +254,14 @@ rediscover — and rediscovery costs a fresh read of the codebase, which is exac
 the token bill delegation exists to avoid. **A long brief is cheap; a worker
 re-deriving your context is not.** Write briefs that are thorough, not short.
 
-1. **`board: <id>`** — on its own line, first thing in the brief, for any brief
-   that implements a board row. A `PostToolUse` hook reads it and marks the row
+1. **`board: <id>`** — on its own line, first thing in the brief, on **every**
+   brief — scouts and QC passes included. Add the row (`board_add`) first. A `PostToolUse` hook reads it and marks the row
    `running` with the worker's id and branch, and `SubagentStop` moves it to
    `returned` — so you never do that update by hand. The hook accepts the line
-   anywhere in the brief, but put it first so it is never lost in an edit. A
-   brief with no board row (a scout, a QC pass on no row) has no such line.
+   anywhere in the brief, but put it first so it is never lost in an edit. There
+   is no brief without this line. A scout's row hits `returned` like any other, so
+   you must act on its findings: record them in the row's `notes`, then move it to
+   `merged` once you've acted on them.
 2. **Goal** — what done looks like.
 3. **Scope** — the `Owns` path, and what it must not touch.
 4. **Inputs — the important one.** Everything from *your* context the worker would
