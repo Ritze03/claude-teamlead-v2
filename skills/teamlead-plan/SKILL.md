@@ -30,7 +30,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
 | **2 Create and show** | Create the near-empty plan — the five sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
-| **4 Done when + implementation plan** | You alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
+| **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
 | **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. | They all pass |
 | **7 User-Testing** | Hand the `verified by: user` criteria over and **wait**. | The user says it is good |
@@ -371,6 +371,40 @@ open-question format: each a `- ` item with `*Suggest:*` / `*Or:*` and one empty
 
 This is lighter than the `/teamlead brainstorm` skill — one round, read-only,
 scoped to this plan file, not the multi-round general-purpose mode.
+
+## The first Go: audit your context against the file
+
+The first "Go" is not yet a green light to write. **Before `## Done when` and
+`## Implementation plan`, re-read the whole plan file and compare it with everything
+you still hold that the file does not** — chat answers the user gave, scout findings,
+constraints you inferred, things you noticed in the code, decisions made in passing.
+The file is the source of truth for the implementation plan; anything only in your
+head is about to be silently dropped.
+
+- **Nothing missing** — proceed to Stage 4. At most one line saying you checked.
+- **Something missing** — **tell the user plainly**, one line per item, as an
+  admission and not a hedge: *"This was in my context but not in the plan: <X> —
+  added as D<n>."* Then **fold it in yourself**: write it into `## Decisions` (or
+  `## Goal` / `## Context` where it belongs), resolving it on your own judgement
+  wherever the answer follows from what is settled, the code, or a sensible default.
+  Numbering follows *Everything ends up in Decisions* — continue the sequence.
+- **Ask only when you must** — only if a forgotten item raises a question that is
+  truly theirs (taste, priorities, a fork the code and existing decisions cannot
+  settle). Follow *Never ask a bare question*, give it a new number in
+  `## Open questions`, and **stay at Stage 3**: do not bump the header, end the turn
+  with the Stage 1–3 footer `Type "Go" if you want me to plan the implementation.`
+  byte-exact. They answer and say Go again. If every item could be settled without
+  a question, go straight into Stage 4 in the same turn.
+- Run plan-lint after the edits (*Lint before offering Go*).
+
+Banned:
+
+- Folding a forgotten item in **silently** — the user must learn the file was not
+  the source of truth, or they cannot trust the rest of it.
+- Asking a question whose answer you could derive. A question is for what only
+  they know, not for what you would rather not decide.
+- Skipping the audit because "the plan looks complete" — that is exactly the
+  moment a forgotten item survives.
 
 ## Decide "done" once the decisions are made
 
