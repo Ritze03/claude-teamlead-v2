@@ -503,7 +503,8 @@ what you already verified, then give them their list and **stop**.
 the same rule as the two "Go" gates, for the same reason. Never tick a `user` box
 yourself. Never read silence, a thumbs-up on something else, or your own confidence
 in the code as a pass. Never ask "shall I archive this now?" as a way of getting
-the answer — present the list and wait for them to actually report back.
+the answer — present the list and wait for them to actually report back. Offering
+archiving comes only after they have confirmed (see below).
 
 Whatever they find goes back on the board, and **you set the header back to
 `> **Stage 5**` yourself — you are explicitly allowed to, and must not ask "shall I
@@ -518,7 +519,10 @@ checks all passed, say there is nothing needing their eyes, and let them close i
 
 ## Retiring a finished plan
 
-Once the user closes out stage 7, archive it — never delete it. A plan is the record of *why* the code looks the
+Once the user closes out stage 7, tell them everything is done and that the plan can be
+archived — say "archive it" and I will, or they can run the command below. **Never archive
+on your own**: their confirming the stage-7 checks is not a request to archive. Run
+`plan-archive.sh` only when they explicitly ask. Archive, never delete: a plan is the record of *why* the code looks the
 way it does, and that outlives the work:
 
 ```
@@ -611,8 +615,8 @@ header is back at stage 5 — stage 6/7 testing between phases is the point.
 **Leave `.claude/teamlead/.state/active-plan` set.** It used to be cleared here, and
 that is what made the session dangle: implementation would start, plan mode would
 quietly vanish, and a plan that was not actually finished looked like no plan at
-all. The pointer now survives stages 5–7 and is cleared by `plan-archive.sh` at the
-very end. Update the header to `> **Stage 5**` so the status line tracks it.
+all. The pointer now survives stages 5–7 and is cleared by `plan-archive.sh`, which
+runs only when the user asks for it. Update the header to `> **Stage 5**` so the status line tracks it.
 
 **Plan is frozen intent; board is live state.** When execution diverges, record it
 on the board — never silently patch the plan. Losing the fact that reality

@@ -459,7 +459,7 @@ Neither script prompts on stdin. The confirmation is **yours**, through
     watcher, and — because `--abandon` was passed — runs `board.py forget` to close out
     any worker still outstanding. With `active-plan` gone, `check` has nothing to
     complain about and the gate lets the turn end. Archiving is a user-facing decision
-    — ask before you run it.
+    — run it only on an explicit user request.
 
     Without `--abandon` the script **refuses** a plan whose `Done when` boxes are not
     all ticked, and refuses a plan with no `Done when` criteria at all. After a drop
@@ -532,7 +532,7 @@ PLAN MODE
   Stage 5  "Go" -> I put the plan on the board and build it (tip: /clear first, then
            /teamlead plan continue — a fresh context builds cheaper)
   Stage 6  I run every 'verified by: agent' criterion for real and tick it
-  Stage 7  You check the 'verified by: user' criteria; when you're happy I archive the plan
+  Stage 7  You check the 'verified by: user' criteria; when you're happy I say it's done (I archive only when you ask)
   "Go" always advances exactly one stage — it is recorded, and the header cannot
   move without it. I never decide the plan is finished.
 

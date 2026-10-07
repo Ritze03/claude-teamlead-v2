@@ -113,7 +113,7 @@ if [ -f "$d/.state/active-plan" ]; then
         4) next='wait for "Go"; end every turn with: Type "Go" if you want me to start implementing.' ;;
         5) next="translate the current phase's wave table onto the board (board_add with plan: I<n>) and dispatch; when every task is merged, set the header to Stage 6" ;;
         6) next="run every 'verified by: agent' criterion for real, tick it with the command and its result, then set the header to Stage 7" ;;
-        7) next="hand the 'verified by: user' criteria to the user and wait; when they confirm, archive with plan-archive.sh" ;;
+        7) next="hand the 'verified by: user' criteria to the user and wait; when they confirm, tell them it is done and that it can be archived; run plan-archive.sh only if they ask" ;;
         *) next="" ;;
       esac
       if [ "$go_recorded" = 1 ]; then

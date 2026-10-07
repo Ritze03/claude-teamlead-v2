@@ -2,6 +2,10 @@
 
 Newest first. One line per change, commit id at the end.
 
+## Unreleased
+
+- Plans are never archived automatically; the agent says it is done and runs `plan-archive.sh` only on request.
+
 ## 2026-09-22
 
 - Hardened board.py against races: render outside the lock, stop `remove`'s cascade from escaping a refusal, fix find-then-mutate in worker-stop/worker-start/forget. #10337fd
