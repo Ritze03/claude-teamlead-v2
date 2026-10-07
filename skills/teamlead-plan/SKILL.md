@@ -262,6 +262,8 @@ Constraints, what exists, what must not break. Scout findings land here.
 ## Decisions
 - **D1** The call — *why, in one line.*
 
+- **D2** The next call — *why, in one line.*
+
 ## Done when
 - [ ] A concrete, checkable condition — *verified by: agent* (`pytest -q` passes)
 - [ ] Something only a person can judge — *verified by: user*
@@ -279,6 +281,10 @@ Constraints, what exists, what must not break. Scout findings land here.
    *Suggest:* what you'd do — *why, in one line.* *Or:* the real alternative and its cost.
    > me: 
 
+2. The next question?
+   *Suggest:* … — *why.* *Or:* …
+   > me: 
+
 ### Answered
 - ~~Old question~~ → answer → **D1**
 
@@ -288,6 +294,9 @@ Initial brainstorm [y/n]:
 ## Notes from me
 Theirs to write. You only ever remove a line once it is folded into a Decision.
 ```
+
+One blank line between entries in `## Decisions` and `## Open questions` — never
+two (`plan-lint` flags 2+ consecutive blank lines). `### Answered` stays tight.
 
 **`## Done when` and `## Implementation plan` do not exist until stage 4.** Create
 the file with the other five sections only, and insert both *above* `## Open

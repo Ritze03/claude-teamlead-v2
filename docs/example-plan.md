@@ -21,18 +21,26 @@ the two would block both.
 ## Decisions
 - **D1** Token bucket, not fixed window — *fixed windows let a client burst 2× the budget
   across a boundary, and we have a customer who does exactly this.*
+
 - **D2** Limits live in Redis, not in-process — *we run 4 app instances; in-process counters
   would give each client 4× their budget.*
+
 - **D3** Fail **open** if Redis is unreachable — *an outage in the limiter must not take the
   API down with it. Logged as an error, alerted on.*
+
 - **D4** Limits are per API key, not per IP — *most traffic is server-side and shares IPs.*
+
 - **D5** `/health` and `/metrics` are exempt by path allowlist, not by a limit tier —
   *simpler, and an exemption should be obvious when reading the config.*
+
 - **D6** Default budget is 1000/hour — *matches what the pricing page already claims.*
+
 - **D7** No per-endpoint overrides in v1 — *one budget per key ships; overrides are a
   second release once we see real usage.*
+
 - **D8** Exceeding the limit throttles, never hard-blocks — *a hard block turns a
   burst into an outage for a paying customer.*
+
 - **D9** Cache is keyed per-user — *the data is already keyed by user id.* *(illustration —
   see the answer loop under ### Answered.)*
 
