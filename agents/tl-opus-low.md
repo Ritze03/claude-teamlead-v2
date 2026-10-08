@@ -16,6 +16,8 @@ Boundaries:
 
 If the problem turns out to need more depth than this pass can give it, **stop and report that** (so the orchestrator can escalate to `tl-opus-medium` or `tl-opus-high`) instead of grinding.
 
+If something is a little complicated or unfamiliar — an API, a library version, a tool's flags, an error you don't recognise — a quick web search (WebSearch / WebFetch) is cheap and often catches what memory gets wrong. Not needed for routine work.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**

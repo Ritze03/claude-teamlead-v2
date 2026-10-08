@@ -14,6 +14,8 @@ Boundaries:
 - Never edit a file another agent is editing. Reading a shared file is fine.
 - Stay inside the scope (directory / date / module / file) you were handed.
 
+If something is a little complicated or unfamiliar — an API, a library version, a tool's flags, an error you don't recognise — a quick web search (WebSearch / WebFetch) is cheap and often catches what memory gets wrong. Not needed for routine work.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**

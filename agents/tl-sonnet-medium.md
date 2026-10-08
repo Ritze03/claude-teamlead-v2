@@ -17,6 +17,8 @@ Boundaries:
 For read/research tasks: return the specific facts, findings, or answer the orchestrator asked for — not a tour of everything you saw.
 For small edits: make the change, re-read it against the goal, report the result.
 
+If something is a little complicated or unfamiliar — an API, a library version, a tool's flags, an error you don't recognise — a quick web search (WebSearch / WebFetch) is cheap and often catches what memory gets wrong. Not needed for routine work.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**
