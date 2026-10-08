@@ -288,6 +288,10 @@ re-deriving your context is not.** Write briefs that are thorough, not short.
    the specifics you will need (paths, values, diffs, exact error text).
 6. **Self-check** — the concrete command or criteria to verify before returning.
 
+When a task touches something external or tricky, a brief may suggest a quick web
+search (WebSearch / WebFetch), and you can run one yourself before writing a brief
+if you're unsure of a fact. Optional, not a brief field.
+
 The cost asymmetry is the whole point: your context is expensive and already paid
 for. Spending it into a brief is how the cheap tier does the work correctly the
 first time.

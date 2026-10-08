@@ -151,6 +151,11 @@ The scout reports facts — file:line, what exists, what is already enforced and
 where — never improvement proposals or a change list. Those come only from a
 brainstorm the user actually asked for (see *Brainstorm request*, below).
 
+Where the plan turns on something external — a library choice, current API or
+versions, known pitfalls, how others solved it — the scout (and you, while working
+out the plan) may search the web too. Findings go in `## Context` with the source
+link; they are facts like any other, not proposals.
+
 The scout runs **after** the path is on screen, never before it (see *Order inside
 the first turn*). An empty repo is not a reason to skip scouting — scout the
 machine instead: language runtimes, build tools, what is actually installed. That

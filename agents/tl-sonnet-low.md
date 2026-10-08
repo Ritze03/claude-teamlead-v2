@@ -16,6 +16,8 @@ Boundaries:
 
 If the task turns out to be less trivial than it looked — genuinely ambiguous, or needs more than a mechanical change — **stop and report that** instead of improvising.
 
+If you hit something unfamiliar, a quick web search (WebSearch / WebFetch) can help; routine edits don't need one.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**

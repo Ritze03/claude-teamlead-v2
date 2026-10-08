@@ -16,6 +16,8 @@ Boundaries:
 
 Self-check before returning: re-read your change against the stated goal, and run the build/test/lint the orchestrator named (or the obvious one) if any. Report the result.
 
+If something is a little complicated or unfamiliar — an API, a library version, a tool's flags, an error you don't recognise — a quick web search (WebSearch / WebFetch) is cheap and often catches what memory gets wrong. Not needed for routine work.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**
