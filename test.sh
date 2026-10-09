@@ -2753,6 +2753,39 @@ check "harness without SubagentHandback (never named): final, row 2 -> returned"
 ev "$(TSTOP tw3 $T/nope.jsonl done)" "$H/record.sh" >/dev/null
 grep -q '  return    agent=teamlead:tl-sonnet-low  id=tw3' $LT && ok "unreadable transcript: final, return line written" || bad "unreadable transcript: final, return line written"
 
+echo "== worker-cleanup.sh: leftover processes, worktree, branch =="
+WC="$CLAUDE_PLUGIN_ROOT/scripts/worker-cleanup.sh"
+wm="$T/wc"; mkdir -p "$wm"
+git -C "$wm" init -q; git -C "$wm" config user.email t@t.t; git -C "$wm" config user.name t
+echo a > "$wm/a"; git -C "$wm" add -A >/dev/null; git -C "$wm" commit -qm init
+for n in merged dirty unmerged; do git -C "$wm" worktree add -q -b "agent-$n" "$T/wc-$n"; done
+echo w > "$T/wc-merged/w"; git -C "$T/wc-merged" add -A >/dev/null; git -C "$T/wc-merged" commit -qm work
+git -C "$wm" merge -q --no-edit agent-merged >/dev/null 2>&1
+echo w > "$T/wc-unmerged/u"; git -C "$T/wc-unmerged" add -A >/dev/null; git -C "$T/wc-unmerged" commit -qm work
+echo x > "$T/wc-dirty/untracked"
+mkdir -p "$T/wc-merged/sub"
+(cd "$T/wc-merged/sub" && exec sleep 300) >/dev/null 2>&1 & inpid=$!
+(cd "$T" && exec sleep 300) >/dev/null 2>&1 & outpid=$!
+sleep 0.3
+check "  /proc cwd sees the sleep inside the worktree" "$(readlink /proc/$inpid/cwd)" "$T/wc-merged/sub"
+bash "$WC" "$T/wc-merged" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  clean merged worktree: exit 0" "$rc" 0
+kill -0 "$inpid" 2>/dev/null && bad "  process inside the worktree was killed" || ok "  process inside the worktree was killed"
+kill -0 "$outpid" 2>/dev/null && ok "  process outside the worktree left alone" || bad "  process outside the worktree left alone"
+grep -q "pid $inpid" "$T/wcout" && ok "  output names the killed pid" || bad "  output names the killed pid"
+[ -d "$T/wc-merged" ] && bad "  worktree directory removed" || ok "  worktree directory removed"
+git -C "$wm" rev-parse --verify -q agent-merged >/dev/null && bad "  merged branch deleted" || ok "  merged branch deleted"
+kill "$outpid" 2>/dev/null; wait 2>/dev/null
+bash "$WC" "$T/wc-dirty" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  dirty worktree: refused (exit 1)" "$rc" 1
+[ -f "$T/wc-dirty/untracked" ] && ok "  dirty worktree left intact" || bad "  dirty worktree left intact"
+git -C "$wm" rev-parse --verify -q agent-dirty >/dev/null && ok "  dirty worktree's branch kept" || bad "  dirty worktree's branch kept"
+bash "$WC" "$T/wc-unmerged" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  unmerged branch: refused (exit 1)" "$rc" 1
+git -C "$wm" rev-parse --verify -q agent-unmerged >/dev/null && ok "  unmerged branch kept" || bad "  unmerged branch kept"
+bash "$WC" "$wm" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  main checkout: refused (exit 1)" "$rc" 1
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -18,6 +18,8 @@ If the task turns out to be less trivial than it looked — genuinely ambiguous,
 
 If you hit something unfamiliar, a quick web search (WebSearch / WebFetch) can help; routine edits don't need one.
 
+Clean up before returning: stop every Monitor and background shell you started (`TaskStop` is a deferred tool — `ToolSearch("select:TaskStop")` first), unless the brief explicitly asked you to leave one running — then say so in the report, with its task id and what it is. Never end on a background job: a worker idling on its own monitor never counts as finished.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**

@@ -93,6 +93,28 @@ where work goes missing, so move tasks out of it promptly. The Stop gate now
 refuses to end your turn while any task sits in `returned` — it will not let you
 walk away from a report you have not acted on.
 
+**Close out every worker you accept.** When a report lands and you accept the work,
+nothing of that worker may be left behind:
+
+1. Merge its branch — or note on the row why not (rejected, redo, nothing to merge).
+2. Run `bash "$(cat .claude/teamlead/.state/plugin-root)/scripts/worker-cleanup.sh" <worktree-path> --project "$PWD"`.
+   It stops every process still running with its cwd in that worktree (a leftover
+   Monitor or background shell), then `git worktree remove` and `git branch -d`.
+   It refuses — exit 1, reason printed — on uncommitted changes or an unmerged
+   branch; fix that, do not force it. A worker's report that names a monitor it was
+   asked to leave running is the one exception: leave that one, remove nothing yet.
+3. Then `board_update` the row (`merged`, with notes on how it was solved).
+
+**A row stuck at `running` because the worker paused on its own background job**
+(`events.log` shows `pause`, `board.py status` still lists the worker as working,
+no report ever came) is not a reason to wait: if the branch shows the work is done,
+run step 2 — that kills what it was idling on, which you cannot do with `TaskStop`
+since the task id is the worker's, not yours — then `board_update` the row to
+`returned` and close the ledger with `board.py forget <agent-id>`; accept and merge
+it as above. Order matters: `forget` on a still-`running` row *requeues* it ("lost
+on restart"), which is right for a worker that died mid-work and wrong here. If the
+work is not done, leave it alone or `forget` it to requeue.
+
 `owns` is the worker's write scope and goes verbatim into its brief. **Two
 unfinished tasks may never own overlapping paths** — parent counts as overlapping
 its child, so `src/` collides with `src/router/`. The tools refuse such a write
