@@ -28,7 +28,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | Stage | What happens | Ends when |
 |---|---|---|
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
-| **2 Create and show** | Create the near-empty plan — the five sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
+| **2 Create and show** | Create the near-empty plan — the template's sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
@@ -308,7 +308,7 @@ One blank line between entries in `## Decisions` and `## Open questions` — nev
 two (`plan-lint` flags 2+ consecutive blank lines). `### Answered` stays tight.
 
 **`## Done when` and `## Implementation plan` do not exist until stage 4.** Create
-the file with the other five sections only, and insert both *above* `## Open
+the file with all the other sections only, and insert both *above* `## Open
 questions` when you write them.
 
 **Why there.** The last four sections — `Open questions`, `Research request`,
