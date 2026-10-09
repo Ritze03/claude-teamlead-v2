@@ -1719,6 +1719,24 @@ check "non-empty Brainstorm request at stage 3: ok (still available while planni
 check "Brainstorm request placed after 'Notes from me': out of order" "$(mkbrn 5 '' after)" 1
 grep -q 'out of order' "$T/brnout" && ok "  says so" || bad "  says so"
 
+echo "== plan-lint: 'Research request' must be run or cleared by stage 5 =="
+# Same shape as mkbrn above: $2 = the section's content, $3 = 'after' puts it below
+# 'Notes from me'.
+mkrsn(){ if [ "${3:-}" = after ]; then
+    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Research request\n%b' "$1" "$2" > "$T/rsn.md"
+  else
+    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Research request\n%b## Brainstorm request\n\n## Notes from me\n' "$1" "$2" > "$T/rsn.md"
+  fi
+  rh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/rsn.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
+  sed -i "s/decisions:XX/decisions:$rh/" "$T/rsn.md"
+  "$PL" "$T/rsn.md" >"$T/rsnout" 2>&1; echo $?; }
+check "cleared (empty) Research request at stage 5: ok" "$(mkrsn 5 '')" 0
+check "non-empty Research request at stage 5: fails" "$(mkrsn 5 'y — run it\n\n')" 1
+grep -q "non-empty 'Research request'" "$T/rsnout" && ok "  names it" || bad "  names it"
+check "non-empty Research request at stage 3: ok (still available while planning)" "$(mkrsn 3 'y — run it\n\n')" 0
+check "Research request placed after 'Notes from me': out of order" "$(mkrsn 5 '' after)" 1
+grep -q 'out of order' "$T/rsnout" && ok "  says so" || bad "  says so"
+
 echo "== plan-lint (I9): a phase row is display-only, not a real step =="
 mkphase(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$T/ph.md"
   ph=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/ph.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
@@ -1814,6 +1832,8 @@ check "without --abandon, the ledger is untouched" "$after2" "$before2"
 echo "== skill text documents phase-B mechanisms (I13) =="
 grep -qF 'Initial brainstorm [y/n]: ' "$PS2" && ok "documents the brainstorm prompt line" || bad "documents the brainstorm prompt line"
 grep -q '^## Brainstorm request' "$PS2" && ok "  and the '## Brainstorm request' heading" || bad "  the Brainstorm request heading"
+grep -qF 'Initial research [y/n]: ' "$PS2" && ok "documents the research prompt line" || bad "documents the research prompt line"
+grep -q '^## Research request' "$PS2" && ok "  and the '## Research request' heading" || bad "  the Research request heading"
 grep -q 'inotifywait' "$PS2" && ok "  and 'inotifywait'" || bad "  'inotifywait'"
 grep -qF 'ran `' "$PS2" && ok "  and the D10 tick-evidence format" || bad "  the D10 tick-evidence format"
 grep -qiE '^## .*phase' "$PS2" && ok "  and a heading about phases" || bad "  a heading about phases"

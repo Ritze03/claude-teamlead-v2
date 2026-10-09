@@ -19,8 +19,10 @@ add() { fail+="  - $1"$'\n'; }
 # stay at the bottom, quick to reach and with nothing large growing underneath them.
 # 'Brainstorm request' is likewise optional — it holds a topic the user opts into —
 # and sits between the two inboxes: it is written like a question, cleared like one.
+# 'Research request' is the same kind of thing and sits directly above it (research
+# feeds the brainstorm).
 order=$(grep '^## ' "$f" | sed 's/^## //')
-canon=$'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nBrainstorm request\nNotes from me'
+canon=$'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nResearch request\nBrainstorm request\nNotes from me'
 always=$'Goal\nContext\nDecisions\nOpen questions\nNotes from me'
 bad=$(grep -vFx "$canon" <<<"$order" || true)
 gone=$(grep -vFx "$order" <<<"$always" || true)
@@ -28,7 +30,7 @@ gone=$(grep -vFx "$order" <<<"$always" || true)
 [ -n "$gone" ] && add "missing section(s): $(tr '\n' ' ' <<<"$gone")"
 # Only meaningful once the headings themselves are right, or it reports twice.
 if [ -z "$bad" ] && [ -z "$gone" ] && [ "$order" != "$(grep -Fx "$order" <<<"$canon")" ]; then
-  add "sections out of order. Want: Goal, Context, Decisions, [Done when, Implementation plan,] Open questions, Brainstorm request, Notes from me"
+  add "sections out of order. Want: Goal, Context, Decisions, [Done when, Implementation plan,] Open questions, Research request, Brainstorm request, Notes from me"
 fi
 
 # table rows: | wave | id | task | agent | owns | after |
@@ -97,7 +99,7 @@ if [ -n "$rows" ]; then
 fi
 
 # 6. inline user answer never promoted
-awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Brainstorm request/{o=0} /^## Notes from me/{o=0}
+awk '/^## Open questions/{o=1} /^### Answered/{o=0} /^## Research request/{o=0} /^## Brainstorm request/{o=0} /^## Notes from me/{o=0}
      o && /^ *> me:[[:space:]]*[^[:space:]]/{print NR}' "$f" \
   | grep -q . && add "an inline '> me:' answer is still under an open question — promote it to a Decision and strike the question"
 
@@ -126,11 +128,14 @@ if [ -n "$st" ] && [ "$st" -ge 4 ]; then
   [ "$q" -gt 0 ] && add "stage $st reached with $q open question(s) still unanswered — fold each answer into a Decision and strike the question into ### Answered"
   n=$(awk '/^## Notes from me/{o=1;next} /^## /{o=0} o' "$f" | grep -cE '\S') || n=0
   [ "$n" -gt 0 ] && add "stage $st reached with $n line(s) left in 'Notes from me' — fold each into a Decision (or the Goal) and remove it"
-  # Brainstorm request (D12) is a standing invitation the user opts into; by stage 5
-  # it must have been run (and its result merged) or cleared — never left pending.
+  # Brainstorm request (D12) and Research request are standing invitations the user
+  # opts into; by stage 5 each must have been run (and its result merged) or cleared
+  # — never left pending.
   if [ "$st" -ge 5 ]; then
     bsn=$(awk '/^## Brainstorm request/{o=1;next} /^## /{o=0} o' "$f" | grep -cE '\S') || bsn=0
     [ "$bsn" -gt 0 ] && add "stage $st reached with a non-empty 'Brainstorm request' — run or clear it"
+    rsn=$(awk '/^## Research request/{o=1;next} /^## /{o=0} o' "$f" | grep -cE '\S') || rsn=0
+    [ "$rsn" -gt 0 ] && add "stage $st reached with a non-empty 'Research request' — run or clear it"
   fi
   # Acceptance criteria must exist and say who checks each one, decided while
   # planning — settling it at the end is how everything becomes 'agent checks it'.

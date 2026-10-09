@@ -5,6 +5,7 @@ Newest first. One line per change, commit id at the end.
 ## Unreleased
 
 - Finished workers leave nothing behind: workers stop their own monitors/background shells before returning, and the lead closes each one out with `worker-cleanup.sh` (kills leftovers in its worktree, removes worktree and branch), including rows stuck `running` on a paused worker.
+- Planning: a `## Research request` section (`Initial research [y/n]: `) above the brainstorm one — an opt-in pass where one worker searches the web for libraries, API gotchas, pitfalls and prior art; findings land in `## Context` with sources.
 - Plans are never archived automatically; the agent says it is done and runs `plan-archive.sh` only on request.
 - Gentle nudge for agents, planning scouts and the lead to use quick web searches when something is complicated or unfamiliar; never required.
 
