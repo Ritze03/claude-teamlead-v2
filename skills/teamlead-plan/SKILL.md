@@ -154,7 +154,8 @@ brainstorm the user actually asked for (see *Brainstorm request*, below).
 Where the plan turns on something external — a library choice, current API or
 versions, known pitfalls, how others solved it — the scout (and you, while working
 out the plan) may search the web too. Findings go in `## Context` with the source
-link; they are facts like any other, not proposals.
+link; they are facts like any other, not proposals. A dedicated pass is the user's
+to ask for (see *Research request*, below).
 
 The scout runs **after** the path is on screen, never before it (see *Order inside
 the first turn*). An empty repo is not a reason to skip scouting — scout the
@@ -293,6 +294,9 @@ Constraints, what exists, what must not break. Scout findings land here.
 ### Answered
 - ~~Old question~~ → answer → **D1**
 
+## Research request
+Initial research [y/n]: 
+
 ## Brainstorm request
 Initial brainstorm [y/n]: 
 
@@ -307,8 +311,8 @@ two (`plan-lint` flags 2+ consecutive blank lines). `### Answered` stays tight.
 the file with the other five sections only, and insert both *above* `## Open
 questions` when you write them.
 
-**Why there.** The last three sections — `Open questions`, `Brainstorm request`,
-`Notes from me` — are the user's half of the file, the only ones they type into.
+**Why there.** The last four sections — `Open questions`, `Research request`,
+`Brainstorm request`, `Notes from me` — are the user's half of the file, the only ones they type into.
 They stay at the bottom, where they are quick to scroll to and easy to append to,
 with nothing large growing underneath them. A wave table parked below the boxes
 they are typing in pushes their half of the file out of reach, and an empty
@@ -325,6 +329,16 @@ and this table as shown.
 worker. Without it "parallel" is an assertion, not a proof — two steps both
 writing `api/routes/` is the one-writer-per-file violation everything rests on
 avoiding. Read-only steps own nothing and are always safe to fan out.
+
+**`## Research request` starts with one line**, written at stage 2 next to the
+brainstorm one and working exactly like it: `Initial research [y/n]: ` — lowercase
+`n`, no default; `y` runs the research and the line goes, `n` means you remove the
+line and leave the section empty. Left unanswered it stays through all of stage 3
+untouched, and lapses at the 3→4 bump (the line goes, the section stays). It stays
+available for the rest of planning: writing `initial research` under it runs a
+research pass over the plan as it stands then; anything else written there is a
+focused pass on that topic. `plan-lint` treats the section as optional but requires
+it empty by stage 5 (see *Research request*, below, for what running one does).
 
 **`## Brainstorm request` starts with one line**, written at stage 2 alongside the
 other sections: `Initial brainstorm [y/n]: ` — lowercase `n`, no default; the user
@@ -385,6 +399,36 @@ open-question format: each a `- ` item with `*Suggest:*` / `*Or:*` and one empty
 
 This is lighter than the `/teamlead brainstorm` skill — one round, read-only,
 scoped to this plan file, not the multi-round general-purpose mode.
+
+## Research request
+
+An opt-in web research pass, asked for like a brainstorm: in chat ("research how
+others do rate limiting") or by writing under `## Research request` in the file —
+`initial research` for a pass over the plan as it stands, anything else for a
+focused one on that topic. It is the user's explicit request for a dedicated pass;
+the gentle web search the scout (or you) may do on the way (see *Stage 3 opens with
+a scout*) stays as it is. Like a brainstorm it is a stage-3/4 feature.
+
+Ask one or two clarifying questions in chat first if the topic is ambiguous, then
+dispatch **one** research worker (`tl-sonnet-medium`, no worktree — read-only, it
+writes nothing in the repo and never edits the plan). Brief it with the Goal,
+Context, Decisions and the user's topic, and have it use WebSearch / WebFetch to
+find: existing libraries or tools that already solve it, current APIs and versions
+and their gotchas, known pitfalls and common failure modes, how others implemented
+the same thing, and the relevant docs. It returns **facts with source URLs** — not a
+plan, not a change list.
+
+Merge the findings into `## Context`: concise, each with its source link. They are
+facts, same rule as the scout's. Anything that forces a choice becomes a properly
+formatted open question (`*Suggest:*` / `*Or:*`, one empty `> me: ` line — see
+*Never ask a bare question*), never a Decision on its own. Then clear
+`## Research request`.
+
+If research and brainstorm are both requested at once, run the research first and
+let its findings land in `## Context` before the brainstorm runs — it feeds it.
+
+This is deliberately light: one worker, one pass, not a research project. It is an
+offer, not a step the plan needs.
 
 ## The first Go: audit your context against the file
 
