@@ -90,10 +90,10 @@ if [ -f "$d/.state/active-plan" ]; then
         echo "  go: none recorded since the last stage change"
       fi
 
-      # watcher: deliberately off during 5-7 (execution/testing), so only
-      # 2-4 (topic settled through implementation-plan) get the restart line.
+      # watcher: deliberately off during 5-6 (execution/agent testing), so only
+      # 2-4 (planning) and 7 (the user ticks their boxes in the file) get the restart line.
       case "$stage" in
-        2|3|4)
+        2|3|4|7)
           pidf="$d/.state/plan-watch.pid"
           if [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
             echo "  watcher: running (pid $(cat "$pidf"))"
@@ -103,7 +103,7 @@ if [ -f "$d/.state/active-plan" ]; then
             echo "  watcher: NOT running — restart it: $root/hooks/watch-plan.sh \"$proj\" \"$pf\"  (Monitor tool, timeout 1800000, then write the task id to .state/plan-watch)"
           fi
           ;;
-        *) echo "  watcher: off (stages 5-7)" ;;
+        *) echo "  watcher: off (stages 5-6)" ;;
       esac
 
       case "$stage" in
@@ -113,7 +113,7 @@ if [ -f "$d/.state/active-plan" ]; then
         4) next='wait for "Go"; end every turn with: Type "Go" if you want me to start implementing.' ;;
         5) next="translate the current phase's wave table onto the board (board_add with plan: I<n>) and dispatch; when every task is merged, set the header to Stage 6" ;;
         6) next="run every 'verified by: agent' criterion for real, tick it with the command and its result, then set the header to Stage 7" ;;
-        7) next="hand the 'verified by: user' criteria to the user and wait; when they confirm, tell them it is done and that it can be archived; run plan-archive.sh only if they ask" ;;
+        7) next="start the watcher, hand the 'verified by: user' criteria to the user and wait (their ticks are their report); when they confirm, tell them it is done and that it can be archived; run plan-archive.sh only if they ask" ;;
         *) next="" ;;
       esac
       if [ "$go_recorded" = 1 ]; then
