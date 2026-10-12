@@ -110,6 +110,14 @@ blankrun=$(awk '
   END { if (first) print first }' "$f")
 [ -n "$blankrun" ] && add "two or more consecutive blank lines (first at line $blankrun) — collapse them"
 
+# 3c. the file ends with one empty line, so the user can type straight under the
+# last section. Bytes, not $(...): command substitution strips trailing newlines.
+# (Two or more blank lines at EOF are 3b's.)
+case "$(tail -c 2 "$f" | od -An -tx1 | tr -d ' \n')" in
+  0a0a) ;;
+  *) add "file must end with exactly one empty line after the last line of 'Notes from me' (so the user can type below it) — add a trailing newline" ;;
+esac
+
 # 7. at stage 4 the inboxes must be empty — Open questions and Notes from me are
 # inboxes, not storage; a plan that still holds either is not finished planning.
 # Stage 4 onwards: the plan is finished being planned, and stays finished while it

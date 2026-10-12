@@ -301,11 +301,17 @@ Initial research [y/n]:
 Initial brainstorm [y/n]: 
 
 ## Notes from me
-Theirs to write. You only ever remove a line once it is folded into a Decision.
+
 ```
 
 One blank line between entries in `## Decisions` and `## Open questions` — never
 two (`plan-lint` flags 2+ consecutive blank lines). `### Answered` stays tight.
+
+**`## Notes from me` is created empty** (theirs to write; you only ever remove a
+line once it is folded into a Decision), and **the file always ends with exactly
+one empty line after its last line** — as drawn above. Keep it there on every
+write, so the user can type straight below the last section; `plan-lint` fails
+a file without it.
 
 **`## Done when` and `## Implementation plan` do not exist until stage 4.** Create
 the file with all the other sections only, and insert both *above* `## Open
