@@ -735,7 +735,7 @@ run --combined >/dev/null; grep -q '^# mine' $ic/statusline.sh && ok "refuses to
 echo "== done-when criteria and archiving =="
 # $2 is the whole '## Done when' section, or '' for a plan that has not reached
 # stage 4 yet — it and the wave table are written together, from settled decisions.
-mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n%b\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" | cat -s > "$T/dw.md"
+mkdw(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n%b\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" "$2" | cat -s > "$T/dw.md"
   dh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/dw.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$dh/" "$T/dw.md"; "$PL" "$T/dw.md" >"$T/dwout" 2>&1; echo $?; }
 check "criteria with verifiers pass" "$(mkdw 4 '## Done when\n- [x] tests pass — *verified by: agent*\n')" 0
@@ -776,7 +776,7 @@ check "--abandon files a dropped plan anyway" "$(arch '# T\n\n## Done when\n- [ 
 [ -f "$ap/.claude/teamlead/plan/done/$d-abandoned-topic.md" ] && ok "  and marks it abandoned" || bad "  and marks it abandoned"
 
 echo "== a finished plan has empty inboxes =="
-mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Done when\n- [x] it works — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n' "$1" "$2" "$3" > "$T/fin.md"
+mkfin(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *why.*\n\n## Done when\n- [x] it works — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%s\n\n### Answered\n- ~~old~~ → yes → **D1**\n\n## Notes from me\n%s\n\n' "$1" "$2" "$3" | cat -s > "$T/fin.md"
   fh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/fin.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$fh/" "$T/fin.md"
   "$PL" "$T/fin.md" >"$T/finout" 2>&1; echo $?; }
@@ -918,7 +918,7 @@ check "  render recreates it" "$(python3 "$B" render --project $d5p2 >/dev/null 
 check "  check passes now" "$(python3 "$B" check --project $d5p2 >/dev/null 2>&1; echo $?)" 0
 
 echo "== D6 (I6): plan-lint's stable open-question numbers reject reuse of an answered one =="
-mknum(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" | cat -s > "$T/num.md"
+mknum(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n\n' "$1" "${2:-}" | cat -s > "$T/num.md"
   "$PL" "$T/num.md" >"$T/numout" 2>&1; echo $?; }
 check "open '1.' while Answered already struck '1.': fails" \
   "$(mknum '1. Q?\n   *Suggest:* x — *y.*' '- ~~1. Old one?~~ → yes → **D1**')" 1
@@ -1152,6 +1152,7 @@ $2
 ### Answered
 
 ## Notes from me
+
 PEOF
 cat -s "$T/pl.md" > "$T/pl.md.sq" && mv "$T/pl.md.sq" "$T/pl.md"
 "$PL" "$T/pl.md" >"$T/plout" 2>&1; echo $?; }
@@ -1287,7 +1288,7 @@ r=$("$H/resolve.sh" "$proj")
 grep -q 'Workhorse: tl-opus-high' <<<"$r" && ok "always still discriminates on effort (high != medium)" || bad "always still discriminates on effort (high != medium)"
 
 echo "== a question carries the lead's recommendation =="
-mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n' "$1" "${2:-}" | cat -s > "$T/q.md"
+mkq(){ printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n%b\n\n### Answered\n%b\n\n## Notes from me\n\n' "$1" "${2:-}" | cat -s > "$T/q.md"
   "$PL" "$T/q.md" >"$T/qout" 2>&1; echo $?; }
 check "a bare question fails" "$(mkq '1. Per key or per IP?\n   > me: ')" 1
 grep -q 'Your call' "$T/qout" && ok "  offers the honest opt-out" || bad "  offers the opt-out"
@@ -1305,7 +1306,7 @@ grep -q 'Suggest:' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-brainstorm/SKILL.md" && 
 
 echo "== the two stage-4 sections are absent until stage 4 =="
 # $1 = stage, $2 = the section block that sits between Decisions and Open questions.
-mkord(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n%b## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/o.md"
+mkord(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n%b## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" "$2" > "$T/o.md"
   "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?; }
 FULL='## Done when\n- [x] ok — *verified by: agent*\n\n## Implementation plan\n*Built from D1 · decisions:QQ*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n'
 check "a stage-3 plan with five sections is complete" "$(mkord 3 '')" 0
@@ -1317,7 +1318,7 @@ grep -q "no criteria under 'Done when'" "$T/oout" && ok "  asks for the criteria
 check "the wave table below the inboxes is out of order" \
   "$(printf '# T\n\n> **Stage 4** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Implementation plan\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n' > "$T/o.md"; "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?)" 1
 grep -q 'out of order' "$T/oout" && ok "  and says so" || bad "  and says so"
-check "a misspelled heading is caught" "$(printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open Questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' > "$T/o.md"; "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?)" 1
+check "a misspelled heading is caught" "$(printf '# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open Questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' > "$T/o.md"; "$PL" "$T/o.md" >"$T/oout" 2>&1; echo $?)" 1
 grep -q 'unexpected section' "$T/oout" && ok "  named as unexpected" || bad "  named as unexpected"
 grep -q 'missing section' "$T/oout" && ok "  and as missing" || bad "  and as missing"
 grep -q 'do not exist until stage 4' "$PS2" && ok "  the skill says when they appear" || bad "  skill says when"
@@ -1325,7 +1326,7 @@ grep -q 'do not exist until stage 4' "$PS2" && ok "  the skill says when they ap
 echo "== the plan stays finished through stages 5-7 =="
 # Keying the finished-plan checks on "== 4" would let every one of them slide the
 # moment the header ticked over to building.
-mkst(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:SS*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%b\n\n### Answered\n\n## Notes from me\n%b\n' "$1" "$2" "$3" | cat -s > "$T/st.md"
+mkst(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:SS*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n%b\n\n### Answered\n\n## Notes from me\n%b\n\n' "$1" "$2" "$3" | cat -s > "$T/st.md"
   sh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/st.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:SS/decisions:$sh/" "$T/st.md"; "$PL" "$T/st.md" >"$T/stout" 2>&1; echo $?; }
 for n in 4 5 6 7; do
@@ -1344,6 +1345,12 @@ grep -q 'Never tick a `user` box' "$PS2" && ok "  stage 7 belongs to the user" |
 echo "== shipped docs satisfy their own linter =="
 "$PL" "$CLAUDE_PLUGIN_ROOT/docs/example-plan.md" >/dev/null 2>&1 \
   && ok "example-plan.md passes plan-lint" || bad "example-plan.md passes plan-lint"
+# The file ends with exactly one empty line, so the user can type below the last section.
+TRAIL='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n'
+check "plan ending with one empty line: ok" "$(printf "$TRAIL\n" > "$T/tr.md"; "$PL" "$T/tr.md" >/dev/null 2>&1; echo $?)" 0
+check "plan with no trailing empty line: fails" "$(printf "$TRAIL" > "$T/tr.md"; "$PL" "$T/tr.md" >"$T/trout" 2>&1; echo $?)" 1
+grep -q 'exactly one empty line' "$T/trout" && ok "  says how to fix it" || bad "  says how to fix it"
+check "plan with two trailing empty lines: fails" "$(printf "$TRAIL\n\n" > "$T/tr.md"; "$PL" "$T/tr.md" >/dev/null 2>&1; echo $?)" 1
 # The skill's template is what every new plan starts as, so its section order must
 # match the linter's. Extract it and compare headings directly — derived from
 # plan-lint.sh's own canon= line so the two cannot silently drift apart again.
@@ -1427,6 +1434,10 @@ grep -q "the user's section" <<<"$out" && ok "  names it as the user's section" 
 printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\nold line\nsecond line\n' > $pff
 out=$(pfedit 'old line\nsecond line' 'old line')
 check "removing a line under '## Notes from me': allowed" "$(pfdecide "$out")" allow
+
+printf '# T\n\n> **Stage 3** — x\n\n## Notes from me\nold line\n' > $pff
+out=$(pfedit 'old line\n' 'old line\n\n')
+check "adding the trailing empty line under '## Notes from me': allowed" "$(pfdecide "$out")" allow
 
 pfother=$pfp/other.md; printf 'x\n' > $pfother
 out=$(echo '{"hook_event_name":"PreToolUse","cwd":"'$pfp'","tool_name":"Edit","tool_input":{"file_path":"'$pfother'","old_string":"x","new_string":"y"}}' | "$H/plan-fence.sh")
@@ -1514,7 +1525,7 @@ check "stage 3, last line is the stage-4 footer instead: exit 2" \
   "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false,"transcript_path":"'$gttx2'"}')" 2
 grep -q 'Type "Go" if you want me to plan the implementation.' "$T/gtout" && ok "  names the stage-3 footer it wanted" || bad "  names the wanted footer"
 
-printf '# T\n\n> **Stage 4** — x\n\n## Goal\nTBD\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' > $gtf
+printf '# T\n\n> **Stage 4** — x\n\n## Goal\nTBD\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' > $gtf
 check "stage 4, a plan that fails plan-lint: exit 2" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 2
 grep -q 'TBD' "$T/gtout" && ok "  surfaces the TBD finding" || bad "  surfaces the TBD finding"
 grep -q "no criteria under 'Done when'" "$T/gtout" && ok "  and the missing Done-when" || bad "  and the missing Done-when"
@@ -1659,7 +1670,7 @@ grep -qF 'To build this on a fresh context: `/clear`, then `/teamlead plan conti
 echo "== plan-lint (I9): Owns prefix overlap in the same wave (D21) =="
 # $1 = the two (or more) table rows, real newlines via %b. Wraps them in a full,
 # otherwise-valid stage-4 plan so only the overlap check is under test.
-mkrows(){ printf '# T\n\n> **Stage 4** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$T/rows.md"
+mkrows(){ printf '# T\n\n> **Stage 4** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" > "$T/rows.md"
   rh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/rows.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$rh/" "$T/rows.md"; "$PL" "$T/rows.md" >"$T/rowsout" 2>&1; echo $?; }
 check "a directory prefix overlapping a file under it, same wave: fails" \
@@ -1674,7 +1685,7 @@ check "an exact duplicate Owns path in the same wave still fails" \
   "$(mkrows '| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a.py | — |\n| 1 | I2 | do2 — **D1** | `tl-sonnet-low` | src/a.py | — |')" 1
 
 echo "== plan-lint (I9): placeholder marker (TBD) is scoped to '## Goal' =="
-mktbd(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\n%s\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%s\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/tbd.md"
+mktbd(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\n%s\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%s\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" "$2" > "$T/tbd.md"
   th=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/tbd.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$th/" "$T/tbd.md"; "$PL" "$T/tbd.md" >"$T/tbdout" 2>&1; echo $?; }
 check "TBD inside '## Goal' at stage 5 fails" \
@@ -1685,14 +1696,14 @@ check "TBD only in a wave-table row does not trip it" \
 
 echo "== plan-lint (I9): two-or-more blank lines (D17) =="
 mkblank(){ printf '%b' "$1" > "$T/bl.md"; "$PL" "$T/bl.md" >"$T/blout" 2>&1; echo $?; }
-BLANKBAD='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n'
-BLANKGOOD='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n'
+BLANKBAD='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n'
+BLANKGOOD='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n'
 check "two consecutive blank lines fail" "$(mkblank "$BLANKBAD")" 1
 grep -qE 'two or more consecutive blank lines \(first at line [0-9]+\)' "$T/blout" && ok "  names the line" || bad "  names the line"
 check "a single blank line is fine" "$(mkblank "$BLANKGOOD")" 0
 
 echo "== plan-lint (I9): D10 tick evidence at stage >= 6 =="
-mkevid(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n%b\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" "$2" > "$T/ev.md"
+mkevid(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n%b\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" "$2" > "$T/ev.md"
   eh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/ev.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$eh/" "$T/ev.md"; "$PL" "$T/ev.md" >"$T/evout" 2>&1; echo $?; }
 check "stage 6, ticked agent item with no 'ran \`...\`': fails" "$(mkevid 6 '- [x] ok — *verified by: agent*')" 1
@@ -1707,7 +1718,7 @@ echo "== plan-lint (I9): 'Brainstorm request' must be run or cleared by stage 5 
 mkbrn(){ if [ "${3:-}" = after ]; then
     printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Brainstorm request\n%b' "$1" "$2" > "$T/brn.md"
   else
-    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Brainstorm request\n%b## Notes from me\n' "$1" "$2" > "$T/brn.md"
+    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Brainstorm request\n%b## Notes from me\n\n' "$1" "$2" > "$T/brn.md"
   fi
   bh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/brn.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$bh/" "$T/brn.md"
@@ -1725,7 +1736,7 @@ echo "== plan-lint: 'Research request' must be run or cleared by stage 5 =="
 mkrsn(){ if [ "${3:-}" = after ]; then
     printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n## Research request\n%b' "$1" "$2" > "$T/rsn.md"
   else
-    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Research request\n%b## Brainstorm request\n\n## Notes from me\n' "$1" "$2" > "$T/rsn.md"
+    printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Research request\n%b## Brainstorm request\n\n## Notes from me\n\n' "$1" "$2" > "$T/rsn.md"
   fi
   rh=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/rsn.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$rh/" "$T/rsn.md"
@@ -1738,7 +1749,7 @@ check "Research request placed after 'Notes from me': out of order" "$(mkrsn 5 '
 grep -q 'out of order' "$T/rsnout" && ok "  says so" || bad "  says so"
 
 echo "== plan-lint (I9): a phase row is display-only, not a real step =="
-mkphase(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$T/ph.md"
+mkphase(){ printf '# T\n\n> **Stage 5** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n%b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" > "$T/ph.md"
   ph=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$T/ph.md" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$ph/" "$T/ph.md"; "$PL" "$T/ph.md" >"$T/phout" 2>&1; echo $?; }
 check "a phase row alongside real rows: lints clean" \
@@ -1907,7 +1918,7 @@ d2p=$T/d2gate; mkdir -p $d2p/.claude/teamlead/plan $d2p/.claude/teamlead/.state
 : > $d2p/.claude/teamlead/.state/active
 d2f=$d2p/.claude/teamlead/plan/topic.md
 echo "$d2f" > $d2p/.claude/teamlead/.state/active-plan
-d2write(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n' "$1" > "$d2f"
+d2write(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Done when\n- [x] ok — *verified by: agent* — ran `x` → ok\n\n## Implementation plan\n*Built from D1 · decisions:XX*\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" > "$d2f"
   h=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$d2f" | grep '^- \*\*D' | md5sum | cut -c1-4)
   sed -i "s/decisions:XX/decisions:$h/" "$d2f"
 }
