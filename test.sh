@@ -1620,7 +1620,12 @@ grep -q 'already said Go' <<<"$stout" && ok "  and folded into the next: line" |
 
 printf '# T\n\n> **Stage 5** — x\n' > $stf
 stout=$("$H/state.sh" "$stp")
-grep -q 'watcher: off (stages 5-7)' <<<"$stout" && ok "stage 5: watcher reported off" || bad "watcher off"
+grep -q 'watcher: off (stages 5-6)' <<<"$stout" && ok "stage 5: watcher reported off" || bad "watcher off"
+printf '# T\n\n> **Stage 6** — x\n' > $stf
+grep -q 'watcher: off (stages 5-6)' <<<"$("$H/state.sh" "$stp")" && ok "stage 6: watcher reported off" || bad "stage 6 watcher off"
+printf '# T\n\n> **Stage 7** — x\n' > $stf
+stout=$("$H/state.sh" "$stp")
+grep -q 'watcher: NOT running — restart it:' <<<"$stout" && ok "stage 7: missing watcher is flagged (user ticks need it)" || bad "stage 7 watcher flagged"
 grep -q '^  next:' <<<"$stout" && ok "  and still has a next: line" || bad "  next: line"
 
 echo "== restore.sh: flags a plan left mid-flight after /clear =="

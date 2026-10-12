@@ -33,7 +33,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
 | **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. Always set the header to 6 once; **none to run? say so and move to 7 yourself**. | They all pass, or there are none |
-| **7 User-Testing** | Hand the `verified by: user` criteria over and **wait**. What they find goes back on the board and you set the header back to 5 on your own call. | The user says it is good |
+| **7 User-Testing** | Hand the `verified by: user` criteria over and **wait** — with the watcher on, so their ticks reach you. What they find goes back on the board and you set the header back to 5 on your own call. | The user says it is good |
 
 Plan mode runs to the end of **7**, not to the handoff. The plan is not finished
 when the code is written; it is finished when it has been checked.
@@ -236,7 +236,12 @@ So hand the watcher back and forth with control:
 | User sends **"Go"** (→ stage 4) | **TaskStop** it, delete `.state/plan-watch` — you are writing now |
 | Stage 4 written, footer shown | **start** it again, record the new id — the user may want to change the plan |
 | User sends **"Go"** (→ stage 5) | **TaskStop** it, delete `.state/plan-watch` — planning is over |
-| Stages 5–7 | stays off — the plan is frozen intent now; findings go on the board |
+| Stages 5–6 | stays off — the plan is frozen intent now; findings go on the board |
+| Header set to **7**, user list handed over | **start** it, record the id — the user ticks their `verified by: user` boxes in the file, and this is how you see it |
+| Findings, header back to **5** | **TaskStop** it, delete `.state/plan-watch` — you are building again |
+
+At stage 7 your own writes are small (the header bump back to 5), so the usual
+refresh-the-snapshot-after-every-write rule keeps it quiet. Archiving stops it.
 
 Stop it on leaving plan mode by any other route too; a monitor otherwise outlives
 the mode.
@@ -551,7 +556,8 @@ not ask, and do not wait for a "Go" — only 3 → 4 and 4 → 5 need one.
 
 ## Stage 7 — User-Testing
 
-Set the header to `> **Stage 7**` and hand over the `verified by: user` list. Say
+Set the header to `> **Stage 7**`, start the watcher (see *The watcher follows who
+has control*) and hand over the `verified by: user` list. Say
 what you already verified, then give them their list and **stop**.
 
 **This is the third place in plan mode where the user is the only way forward** —
@@ -560,6 +566,14 @@ yourself. Never read silence, a thumbs-up on something else, or your own confide
 in the code as a pass. Never ask "shall I archive this now?" as a way of getting
 the answer — present the list and wait for them to actually report back. Offering
 archiving comes only after they have confirmed (see below).
+
+**With the watcher on, what you hear from the file is their report.** A
+`verified by: user` box they ticked is a pass for that criterion — acknowledge it
+briefly, tick nothing yourself. An unticked box they left with a note, a new
+criterion, or a `## Notes from me` line describing a problem is a finding: board it
+and set the header back to 5. Once every `user` box is ticked, that is them
+confirming stage 7 — tell them everything is done and offer archiving (below);
+still never archive on your own.
 
 Whatever they find goes back on the board, and **you set the header back to
 `> **Stage 5**` yourself — you are explicitly allowed to, and must not ask "shall I
@@ -713,5 +727,5 @@ memory; the plan file and the board are the whole handoff (D14):
 | 6 | Run the `verified by: agent` criteria for real. |
 | 7 | Hand the `verified by: user` criteria back to the user. |
 
-If the state block shows the watcher **NOT running** and the stage is 2–4,
+If the state block shows the watcher **NOT running** and the stage is 2–4 or 7,
 restart it first — see *The watcher follows who has control*.
