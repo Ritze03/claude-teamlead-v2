@@ -10,6 +10,10 @@ PL="$H/plan-lint.sh"
 PS2="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 SD="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/SKILL.md"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+# statusline.sh normally prints a cache and refreshes in the background; the
+# assertions on its content want the computed segment, so compute inline. The
+# cache behaviour itself is tested separately, with this unset.
+export TEAMLEAD_STATUSLINE_SYNC=1
 pass=0; fail=0
 ok()   { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
 bad()  { fail=$((fail+1)); printf '  FAIL %s\n' "$1"; }
@@ -1800,6 +1804,39 @@ EOF
 else
   echo "skip: inotifywait not installed — cannot test the live watcher"
 fi
+
+echo "== statusline.sh: cache + single-flight background refresh =="
+cp_=$T/slc; fk=$T/slfake; mkdir -p $cp_/.claude/teamlead/.state $fk/scripts
+st=$cp_/.claude/teamlead/.state; cf=$st/statusline.cache
+slx() { printf '{"cwd":"%s"}' "$cp_" | env -u TEAMLEAD_STATUSLINE_SYNC bash "$H/statusline.sh"; }
+check "inactive: empty output" "$(slx)" ""
+sleep 0.3; [ -z "$(ls -A $st)" ] && ok "  and nothing spawned or written" || bad "  inactive project wrote state"
+: > $st/active; echo "$fk" > $st/plugin-root
+# A fake board.py: counts how many refreshes ran, and is slow enough to overlap.
+cat > $fk/scripts/board.py <<'PY'
+import sys, time
+if sys.argv[1] == "list":
+    open(__file__ + ".calls", "a").write("x\n")
+    time.sleep(1)
+    print('{"open": 3, "by_state": {"returned": ["a"]}}')
+else:
+    print("{}")
+PY
+out=$(slx)
+[ "$out" = "$(printf '\033[38;5;44m%s\033[0m' '⚑ teamlead')" ] && ok "first run: plain teal flag" || bad "first run: plain flag ($out)"
+for i in 1 2 3 4 5 6 7 8; do slx >/dev/null & done; wait
+for i in $(seq 1 40); do [ -f $cf ] && break; sleep 0.2; done
+[ -f $cf ] && ok "  cache appears shortly after" || bad "  cache never appeared"
+check "  concurrent runs started exactly one refresh" "$(wc -l < $fk/scripts/board.py.calls)" 1
+[ ! -e $st/statusline.lock ] && ok "  lock released after the refresh" || bad "  lock left behind"
+out=$(slx)
+grep -q '3 open' <<<"$out" && grep -q '1 returned' <<<"$out" && ok "second run: full cached segment" || bad "second run: cached segment ($out)"
+sleep 2.2; rm -f $fk/scripts/board.py.calls
+# a stale lock whose holder is dead must not wedge refreshing
+echo 999999 > $st/statusline.lock
+slx >/dev/null; for i in $(seq 1 40); do [ -s $fk/scripts/board.py.calls ] && break; sleep 0.2; done
+[ -s $fk/scripts/board.py.calls ] && ok "  a dead holder's lock is taken over" || bad "  dead holder's lock blocked the refresh"
+sleep 1.5
 
 echo "== statusline.sh (I11): stage header parsing is case-insensitive =="
 slip=$T/sli; mkdir -p $slip/.claude/teamlead/{plan,.state}
