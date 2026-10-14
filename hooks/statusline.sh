@@ -8,18 +8,36 @@
 # Design rule: a status line earns its space by CHANGING. Everything here is
 # either always-relevant (mode) or normally absent (returned, blocked, ⚠), so the
 # line stays short and grows exactly when something needs you.
+#
+# SPEED. Claude Code cancels an in-flight status line run whenever a newer update
+# fires (debounced ~300 ms). On a network share this script took 1-1.5 s (git plus
+# three board.py runs, each re-reading board.json), so with agents streaming every
+# run was cancelled before it printed and the segment never showed. So the
+# foreground run only PRINTS A CACHE (.state/statusline.cache: a couple of tiny
+# reads, no git, no python) and, if that is stale, starts a detached refresh of
+# this same script that does the real work. TEAMLEAD_STATUSLINE_SYNC=1 computes
+# inline instead (tests, debugging).
 set -uo pipefail
-in=$(cat 2>/dev/null)
-proj=$(printf '%s' "$in" | jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
-[ -n "$proj" ] || proj=$PWD
+REFRESH=${TEAMLEAD_STATUSLINE_REFRESH:-}   # set only on the detached child: the root to refresh
 
-# Resolve a worktree back to the main checkout so a worker's pane reads the same.
-# Best-effort: teamlead supports non-git projects, so a git failure must fall
-# through to the plain cwd rather than silence the segment.
-root="$proj"
-if common=$(git -C "$proj" rev-parse --git-common-dir 2>/dev/null); then
-  case "$common" in /*) ;; *) common="$proj/$common" ;; esac
-  r=$(cd "$(dirname "$common")" 2>/dev/null && pwd) && root="$r"
+if [ -n "$REFRESH" ]; then
+  root="$REFRESH"            # the child has no stdin; the parent already resolved this
+else
+  in=$(cat 2>/dev/null)
+  proj=$(printf '%s' "$in" | jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
+  [ -n "$proj" ] || proj=$PWD
+
+  # Resolve a worktree back to the main checkout so a worker's pane reads the same.
+  # Best-effort: teamlead supports non-git projects, so a git failure must fall
+  # through to the plain cwd rather than silence the segment. Skipped when the cwd
+  # is itself an active project: git over a network share is slow, and the common
+  # case needs none of it.
+  root="$proj"
+  if [ ! -f "$proj/.claude/teamlead/.state/active" ] \
+     && common=$(git -C "$proj" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in /*) ;; *) common="$proj/$common" ;; esac
+    r=$(cd "$(dirname "$common")" 2>/dev/null && pwd) && root="$r"
+  fi
 fi
 
 d="$root/.claude/teamlead"
@@ -27,6 +45,49 @@ d="$root/.claude/teamlead"
 
 c() { printf '\033[38;5;%sm%s\033[0m' "$1" "$2"; }   # 256-colour, reset after
 TEAL=44; DIM=244; AMBER=214; RED=203; PLUM=176
+
+cache="$d/.state/statusline.cache"
+lock="$d/.state/statusline.lock"
+# mtime in epoch seconds, 0 if absent. GNU stat, else BSD: the -e guard matters
+# because GNU `stat -f` is a different (filesystem) mode that prints junk.
+mt()  { stat -c %Y "$1" 2>/dev/null || { [ -e "$1" ] && stat -f %m "$1" 2>/dev/null; } || echo 0; }
+now() { printf -v "$1" '%(%s)T' -1 2>/dev/null || printf -v "$1" '%s' "$(date +%s)"; }
+
+# --- foreground: print the cache, refresh behind it ---------------------------
+if [ -z "$REFRESH" ] && [ -z "${TEAMLEAD_STATUSLINE_SYNC:-}" ]; then
+  { seg=$(<"$cache"); } 2>/dev/null
+  [ -n "${seg:-}" ] || seg=$(c $TEAL '⚑ teamlead')   # first run: plain flag until the cache lands
+  printf '%s' "$seg"
+  now t
+  if [ $((t - $(mt "$cache"))) -ge 2 ]; then
+    # Fully detached — own session, no inherited fds — so Claude Code neither
+    # waits on it (an open stdout pipe would hold the status line open) nor kills
+    # it when it cancels this run. Single-flight is the child's job.
+    if command -v setsid >/dev/null 2>&1; then
+      TEAMLEAD_STATUSLINE_REFRESH="$root" setsid -f bash "${BASH_SOURCE[0]}" </dev/null >/dev/null 2>&1
+    else
+      TEAMLEAD_STATUSLINE_REFRESH="$root" nohup bash "${BASH_SOURCE[0]}" </dev/null >/dev/null 2>&1 &
+    fi
+  fi
+  exit 0
+fi
+
+# --- refresh: one at a time per project ---------------------------------------
+# A PID file, not flock: flock is unreliable on CIFS/NFS. The O_EXCL create is the
+# atomic step; a holder that is dead, or older than 30 s (a hung board.py), is
+# taken over. An empty file is a holder mid-write, not a stale one.
+if [ -n "$REFRESH" ]; then
+  acquire() { ( set -C; echo $$ > "$lock" ) 2>/dev/null; }
+  if ! acquire; then
+    lp=$(cat "$lock" 2>/dev/null); now t
+    if { [ -z "$lp" ] || kill -0 "$lp" 2>/dev/null; } && [ $((t - $(mt "$lock"))) -lt 30 ]; then
+      exit 0
+    fi
+    rm -f "$lock"; acquire || exit 0
+  fi
+  tmp="$cache.$$"
+  trap 'rm -f "$lock" "$tmp"' EXIT
+fi
 
 seg=$(c $TEAL '⚑ teamlead')
 
@@ -114,4 +175,8 @@ PY
   python3 "$pr/scripts/board.py" check --project "$root" >/dev/null 2>&1 || seg+=" $(c $RED '⚠')"
 fi
 
-printf '%s' "$seg"
+if [ -n "$REFRESH" ]; then
+  printf '%s' "$seg" > "$tmp" && mv -f "$tmp" "$cache"   # atomic: a reader never sees half
+else
+  printf '%s' "$seg"
+fi
