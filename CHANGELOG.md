@@ -4,6 +4,7 @@ Newest first. One line per change, commit id at the end.
 
 ## Unreleased
 
+- `worker-cleanup.sh` lifts a stale Claude Code agent lock (`claude agent agent-<id> (pid P start S)`: pid dead or reused, or the ledger no longer lists the agent as working) before removing the worktree; a live agent's lock or any foreign lock still refuses.
 - Finished workers leave nothing behind: workers stop their own monitors/background shells before returning, and the lead closes each one out with `worker-cleanup.sh` (kills leftovers in its worktree, removes worktree and branch), including rows stuck `running` on a paused worker.
 - Planning: a `## Research request` section (`Initial research [y/n]: `) above the brainstorm one — an opt-in pass where one worker searches the web for libraries, API gotchas, pitfalls and prior art; findings land in `## Context` with sources.
 - Plans are never archived automatically; the agent says it is done and runs `plan-archive.sh` only on request.

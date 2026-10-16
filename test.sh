@@ -2806,6 +2806,33 @@ git -C "$wm" rev-parse --verify -q agent-unmerged >/dev/null && ok "  unmerged b
 bash "$WC" "$wm" --project "$wm" >"$T/wcout" 2>&1; rc=$?
 check "  main checkout: refused (exit 1)" "$rc" 1
 
+# git locks: only a stale "claude agent" lock is lifted; a live one or a foreign one refuses.
+mypid=$$; mystart=$(sed 's/^.*) //' /proc/$mypid/stat | awk '{print $20}')
+true & deadpid=$!; wait $deadpid 2>/dev/null
+mkdir -p "$wm/.claude/teamlead/.state"
+printf '%s  start     agent=teamlead:tl-sonnet-high  id=lkrun\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$wm/.claude/teamlead/.state/events.log"
+for n in dead idle run foreign; do git -C "$wm" worktree add -q -b "agent-lk$n" "$T/wc-lk$n"; done
+git -C "$wm" worktree lock --reason "claude agent agent-lkdead (pid $deadpid start 1)" "$T/wc-lkdead"
+git -C "$wm" worktree lock --reason "claude agent agent-lkidle (pid $mypid start $mystart)" "$T/wc-lkidle"
+git -C "$wm" worktree lock --reason "claude agent agent-lkrun (pid $mypid start $mystart)" "$T/wc-lkrun"
+git -C "$wm" worktree lock --reason "my own lock, hands off" "$T/wc-lkforeign"
+bash "$WC" "$T/wc-lkdead" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  stale agent lock, dead pid: removed (exit 0)" "$rc" 0
+grep -q "unlocked stale agent lock (claude agent agent-lkdead" "$T/wcout" && ok "  ... says it unlocked the stale lock" || bad "  ... says it unlocked the stale lock"
+[ -d "$T/wc-lkdead" ] && bad "  ... worktree gone" || ok "  ... worktree gone"
+bash "$WC" "$T/wc-lkidle" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  agent lock, pid alive but agent not working in the ledger: removed" "$rc" 0
+[ -d "$T/wc-lkidle" ] && bad "  ... worktree gone" || ok "  ... worktree gone"
+bash "$WC" "$T/wc-lkrun" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  agent lock, pid alive, agent working in the ledger: refused" "$rc" 1
+grep -q "still running" "$T/wcout" && ok "  ... says the worker is still running" || bad "  ... says the worker is still running"
+[ -d "$T/wc-lkrun" ] && ok "  ... worktree kept" || bad "  ... worktree kept"
+git -C "$wm" worktree list --porcelain | grep -q "^locked claude agent agent-lkrun" && ok "  ... lock kept" || bad "  ... lock kept"
+bash "$WC" "$T/wc-lkforeign" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  foreign lock reason: refused" "$rc" 1
+grep -q "my own lock, hands off" "$T/wcout" && ok "  ... prints the lock reason" || bad "  ... prints the lock reason"
+[ -d "$T/wc-lkforeign" ] && git -C "$wm" worktree list --porcelain | grep -q "^locked my own lock" && ok "  ... worktree and lock kept" || bad "  ... worktree and lock kept"
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
