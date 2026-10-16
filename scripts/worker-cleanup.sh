@@ -10,6 +10,12 @@
 # nothing outside the worktree is. TERM, a short wait, then KILL.
 # Then `git worktree remove` (never --force: uncommitted or untracked work refuses)
 # and `git branch -d` (refuses an unmerged branch). Any refusal exits 1 with the reason.
+# A git lock on the worktree is lifted only when it is Claude Code's own agent lock
+# ("claude agent agent-<id> (pid P start S)") and stale: P is dead (or its start time,
+# field 22 of /proc/P/stat, differs from S) or the ledger no longer lists <id> as working, or its latest
+# ledger event is a pause (idling on background work, not mid-edit).
+# Claude records the lead's pid, so a worker that stopped with background work pending
+# leaves a lock that looks live for the whole session. Any other lock is never touched.
 set -uo pipefail
 wt="${1:-}"; shift || true
 proj="$PWD"
@@ -95,6 +101,61 @@ if left:
           + ", ".join(f"{p} ({cmd(p)})" for p in left), file=sys.stderr)
     sys.exit(1)
 PY
+
+# 1b. a git lock. Claude Code locks an agent's worktree as "claude agent agent-<id>
+# (pid P start S)" (P = the session process, S = its /proc/P/stat starttime) and
+# normally unlocks it when the agent ends; a worker that stopped with background work
+# registered can leave it behind. Lift only that lock, and only when it is stale.
+lock=$(git -C "$main" worktree list --porcelain | awk -v w="worktree $wt" '
+  $0==w {f=1; next} /^worktree /{f=0} f && /^locked/ {print; exit}')
+if [ -n "$lock" ]; then
+  lock=${lock#locked}; lock=${lock# }
+  verdict=$(python3 - "$lock" "$main" "$(dirname "${BASH_SOURCE[0]}")/board.py" <<'PY'
+import json, re, subprocess, sys
+reason, main, board = sys.argv[1:4]
+m = re.fullmatch(r"claude agent (?:agent-)?(\S+) \(pid (\d+) start (\d+)\)", reason.strip())
+if not m:
+    print("foreign")
+    sys.exit()
+aid, pid, start = m.groups()
+try:
+    f = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()
+    alive = f[0] != "Z" and f[19] == start      # field 22 overall = starttime
+except (OSError, IndexError):
+    alive = False
+if not alive:
+    print("stale")                              # session process gone (or pid reused)
+    sys.exit()
+try:
+    out = subprocess.run([sys.executable, board, "ledger", "--project", main],
+                         capture_output=True, text=True, check=True).stdout
+    working = {a.removeprefix("agent-") for a in json.loads(out)["outstanding"]}
+except Exception:
+    print("unknown")                            # cannot ask the ledger: assume running
+    sys.exit()
+if aid not in working:
+    print("stale")
+    sys.exit()
+# Outstanding, but a worker whose latest event is a pause is idling on its background
+# job (step 1 just killed it), not mid-edit: the lead is closing it out, so it is stale.
+last = None
+try:
+    for line in open(f"{main}/.claude/teamlead/.state/events.log", errors="replace"):
+        parts = line.split(None, 1)
+        if len(parts) == 2 and re.search(rf"(?:^|\s)id=(?:agent-)?{re.escape(aid)}(?:\s|$)", parts[1]):
+            last = parts[1].split()[0]
+except OSError:
+    pass
+print("stale" if last == "pause" else "running")
+PY
+)
+  case "$verdict" in
+    stale) git -C "$main" worktree unlock "$wt" || die "could not unlock $wt"
+           echo "worker-cleanup: unlocked stale agent lock ($lock)" ;;
+    running|unknown) die "worker still running — $wt is locked ($lock) and its agent is still working per the ledger. Not removed." ;;
+    *) die "$wt is locked by something other than a Claude agent ($lock) — refusing to unlock it." ;;
+  esac
+fi
 
 # 2. the worktree. No --force: git itself refuses uncommitted or untracked files.
 if ! out=$(git -C "$main" worktree remove "$wt" 2>&1); then
