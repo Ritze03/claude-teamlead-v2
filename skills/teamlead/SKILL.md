@@ -101,7 +101,10 @@ nothing of that worker may be left behind:
    It stops every process still running with its cwd in that worktree (a leftover
    Monitor or background shell), then `git worktree remove` and `git branch -d`.
    It refuses — exit 1, reason printed — on uncommitted changes or an unmerged
-   branch; fix that, do not force it. A worker's report that names a monitor it was
+   branch; fix that, do not force it. Background shells a worker left open are
+   already stopped by the `record.sh` hook when it returns (a `reap` line in
+   `events.log`), except any it names, with its id, in its report; detached
+   processes in the worktree are still this script's job. A worker's report that names a monitor it was
    asked to leave running is the one exception: leave that one, remove nothing yet.
 3. Then `board_update` the row (`merged`, with notes on how it was solved).
 
