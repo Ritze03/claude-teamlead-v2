@@ -2773,6 +2773,74 @@ check "harness without SubagentHandback (never named): final, row 2 -> returned"
 ev "$(TSTOP tw3 $T/nope.jsonl done)" "$H/record.sh" >/dev/null
 grep -q '  return    agent=teamlead:tl-sonnet-low  id=tw3' $LT && ok "unreadable transcript: final, return line written" || bad "unreadable transcript: final, return line written"
 
+echo "== T76: a real return reaps the background tasks the worker left open =="
+t76d=$T/t76; mkdir -p "$t76d/tasks"
+# Fake transcript: $1 file, $2 launched ids. Launches are "Command running in
+# background" tool_results as the harness writes them; the NOTIFY / STOPPED /
+# HANDBACK / PAUSE env vars select how (or whether) the worker closed them.
+t76tr(){ python3 - "$t76d" "$@" <<'PY'
+import json, os, sys
+d, out, launch = sys.argv[1], sys.argv[2], sys.argv[3].split()
+w = json.dumps
+L = [w({"type": "user", "message": {"role": "user", "content": "<system-reminder>\nYour final report is delivered through SubagentHandback: call it when done.\n</system-reminder>\nboard: 1"}})]
+for i in launch:
+    L.append(w({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "u" + i, "name": "Bash", "input": {"command": "sleep 300", "run_in_background": True}}]}}))
+    L.append(w({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "u" + i, "content": f"Command running in background with ID: {i}. Output is being written to: {d}/tasks/{i}.output. You will be notified when it completes."}]}, "toolUseResult": {"backgroundTaskId": i}}))
+for i in filter(None, os.environ.get("NOTIFY", "").split()):
+    L.append(w({"type": "attachment", "attachment": {"type": "queued_command", "prompt": f"<task-notification><task-id>{i}</task-id><summary>x</summary><status>completed</status></task-notification>"}}))
+for i in filter(None, os.environ.get("STOPPED", "").split()):
+    L.append(w({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "s" + i, "content": f"Successfully stopped task: {i} (sleep 300)"}]}}))
+if os.environ.get("HANDBACK"):
+    L.append(w({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "h", "name": "SubagentHandback", "input": {"message": os.environ["HANDBACK"]}}]}}))
+elif not os.environ.get("PAUSE"):
+    L.append(w({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "h", "name": "SubagentHandback", "input": {"message": "done"}}]}}))
+open(out, "w").write("\n".join(L) + "\n")
+PY
+}
+T76PIDS=""
+# t76p ID [sh]: a long sleep whose stdout/stderr is tasks/ID.output; "sh" adds a child.
+t76p(){ if [ "${2:-}" = sh ]; then ( exec sh -c 'sleep 300 & wait' ) >"$t76d/tasks/$1.output" 2>&1 & else ( exec sleep 300 ) >"$t76d/tasks/$1.output" 2>&1 & fi
+  T76PIDS="$T76PIDS $!"; eval "p_$1=$!"; }
+t76up(){ kill -0 "$1" 2>/dev/null && ! grep -q '^State:.Z' /proc/$1/status 2>/dev/null && echo up || echo down; }
+T76STOP(){ echo '{"hook_event_name":"SubagentStop","cwd":"'$tp'","agent_type":"teamlead:tl-sonnet-low","agent_id":"'$1'","agent_transcript_path":"'$2'","transcript_path":"'$T/t65-final.jsonl'","last_assistant_message":"'$3'"}'; }
+t76p tka sh; t76p tkb; t76p tkc; t76p tkd; t76p tke; t76p tkf
+sleep 0.4
+kid=$(pgrep -P "$p_tka" | head -1)
+T76PIDS="$T76PIDS $kid"
+check "  setup: the sh task has a child holding its output" "$([ -n "$kid" ] && echo y || echo n)" y
+# tkb: terminal notification; tkc: named in last_assistant_message; tkd: named only
+# in the Handback input; tke: TaskStop'd by the worker; tka, tkf: genuinely open.
+HANDBACK="leaving tkd running as asked" NOTIFY="tkb" STOPPED="tke" t76tr $T/t76-ret.jsonl "tka tkb tkc tkd tke tkf"
+check "return with open tasks: exit 0" "$(ev "$(T76STOP tw76 $T/t76-ret.jsonl 'kept tkc running on request')" "$H/record.sh")" 0
+check "  open task tka killed" "$(t76up $p_tka)" down
+check "  and its child" "$(t76up $kid)" down
+check "  open task tkf killed" "$(t76up $p_tkf)" down
+check "  task with a terminal notification (tkb) left alone" "$(t76up $p_tkb)" up
+check "  task named in last_assistant_message (tkc) left alone" "$(t76up $p_tkc)" up
+check "  task named in the Handback input (tkd) left alone" "$(t76up $p_tkd)" up
+check "  task the worker TaskStop'd (tke) left alone" "$(t76up $p_tke)" up
+grep -qE '  reap      agent=teamlead:tl-sonnet-low  id=tw76  tasks=tka,tkf  pids=3$' $LT \
+  && ok "  reap line: tasks=tka,tkf pids=3" || bad "  reap line: tasks=tka,tkf pids=3 ($(grep '  reap ' $LT))"
+grep -q '  return .*id=tw76' $LT && ok "  return line still written" || bad "  return line still written"
+# pause: nothing killed, the open ids are listed
+t76p tkg; sleep 0.2
+PAUSE=1 t76tr $T/t76-pause.jsonl "tkg"
+check "pause stop with an open task: exit 0" "$(ev "$(T76STOP tw77 $T/t76-pause.jsonl 'waiting')" "$H/record.sh")" 0
+check "  paused worker's task not killed" "$(t76up $p_tkg)" up
+grep -qE '  pause     agent=teamlead:tl-sonnet-low  id=tw77  open=tkg$' $LT && ok "  pause line carries open=tkg" || bad "  pause line carries open=tkg ($(grep 'id=tw77' $LT))"
+grep -q '  reap .*id=tw77' $LT && bad "  no reap line on a pause" || ok "  no reap line on a pause"
+# unparseable transcript: fail safe
+printf 'Command running in background with ID: tkg. Output is being written to: %s/tasks/tkg.output.\n{{{ not json\n\377\376\n' "$t76d" > $T/t76-bad.jsonl
+check "unparseable transcript: exit 0" "$(ev "$(T76STOP tw78 $T/t76-bad.jsonl 'done')" "$H/record.sh")" 0
+check "  nothing killed" "$(t76up $p_tkg)" up
+grep -q '  reap .*id=tw78' $LT && bad "  no reap line" || ok "  no reap line"
+grep -q '  return .*id=tw78' $LT && ok "  return still recorded" || bad "  return still recorded"
+# the same task, once the worker really returns, is reaped
+t76tr $T/t76-ret2.jsonl "tkg"
+ev "$(T76STOP tw79 $T/t76-ret2.jsonl 'done')" "$H/record.sh" >/dev/null
+check "  a real return does reap it" "$(t76up $p_tkg)" down
+kill $T76PIDS 2>/dev/null; kill -9 $T76PIDS 2>/dev/null; wait 2>/dev/null
+
 echo "== worker-cleanup.sh: leftover processes, worktree, branch =="
 WC="$CLAUDE_PLUGIN_ROOT/scripts/worker-cleanup.sh"
 wm="$T/wc"; mkdir -p "$wm"
