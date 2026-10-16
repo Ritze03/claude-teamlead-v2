@@ -12,7 +12,8 @@
 # and `git branch -d` (refuses an unmerged branch). Any refusal exits 1 with the reason.
 # A git lock on the worktree is lifted only when it is Claude Code's own agent lock
 # ("claude agent agent-<id> (pid P start S)") and stale: P is dead (or its start time,
-# field 22 of /proc/P/stat, differs from S) or the ledger no longer lists <id> as working.
+# field 22 of /proc/P/stat, differs from S) or the ledger no longer lists <id> as working, or its latest
+# ledger event is a pause (idling on background work, not mid-edit).
 # Claude records the lead's pid, so a worker that stopped with background work pending
 # leaves a lock that looks live for the whole session. Any other lock is never touched.
 set -uo pipefail
@@ -132,7 +133,20 @@ try:
 except Exception:
     print("unknown")                            # cannot ask the ledger: assume running
     sys.exit()
-print("running" if aid in working else "stale")
+if aid not in working:
+    print("stale")
+    sys.exit()
+# Outstanding, but a worker whose latest event is a pause is idling on its background
+# job (step 1 just killed it), not mid-edit: the lead is closing it out, so it is stale.
+last = None
+try:
+    for line in open(f"{main}/.claude/teamlead/.state/events.log", errors="replace"):
+        parts = line.split(None, 1)
+        if len(parts) == 2 and re.search(rf"(?:^|\s)id=(?:agent-)?{re.escape(aid)}(?:\s|$)", parts[1]):
+            last = parts[1].split()[0]
+except OSError:
+    pass
+print("stale" if last == "pause" else "running")
 PY
 )
   case "$verdict" in

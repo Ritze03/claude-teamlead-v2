@@ -2811,6 +2811,12 @@ mypid=$$; mystart=$(sed 's/^.*) //' /proc/$mypid/stat | awk '{print $20}')
 true & deadpid=$!; wait $deadpid 2>/dev/null
 mkdir -p "$wm/.claude/teamlead/.state"
 printf '%s  start     agent=teamlead:tl-sonnet-high  id=lkrun\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$wm/.claude/teamlead/.state/events.log"
+printf '%s  start     agent=teamlead:tl-sonnet-high  id=lkpause\n%s  pause     agent=teamlead:tl-sonnet-high  id=lkpause\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$wm/.claude/teamlead/.state/events.log"
+git -C "$wm" worktree add -q -b agent-lkpause "$T/wc-lkpause"
+git -C "$wm" worktree lock --reason "claude agent agent-lkpause (pid $mypid start $mystart)" "$T/wc-lkpause"
+bash "$WC" "$T/wc-lkpause" --project "$wm" >"$T/wcout" 2>&1; rc=$?
+check "  agent lock, pid alive, agent outstanding but last event is pause: removed" "$rc" 0
+[ -d "$T/wc-lkpause" ] && bad "  ... worktree gone" || ok "  ... worktree gone"
 for n in dead idle run foreign; do git -C "$wm" worktree add -q -b "agent-lk$n" "$T/wc-lk$n"; done
 git -C "$wm" worktree lock --reason "claude agent agent-lkdead (pid $deadpid start 1)" "$T/wc-lkdead"
 git -C "$wm" worktree lock --reason "claude agent agent-lkidle (pid $mypid start $mystart)" "$T/wc-lkidle"
