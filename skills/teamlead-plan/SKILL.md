@@ -31,7 +31,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **2 Create and show** | Create the near-empty plan — the template's sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
-| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` until this header is set. | Every task merged, board empty |
+| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` of plan work (rows with `plan:`/`owns:`) until this header is set; read-only rows (scouts) are allowed earlier. | Every task merged, board empty |
 | **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. Always set the header to 6 once; **none to run? say so and move to 7 yourself**. | They all pass, or there are none |
 | **7 User-Testing** | Hand the `verified by: user` criteria over and **wait** — with the watcher on, so their ticks reach you. What they find goes back on the board and you set the header back to 5 on your own call. | The user says it is good |
 
@@ -671,8 +671,8 @@ earlier `board_add`, use that existing id). This is safe because overlapping
 `Owns` between two unfinished rows is allowed exactly when one is in the
 other's `blocked_by` chain, and a row cannot go `running` or `merged` while
 any blocker is unmerged — so the wave order is enforced by the board itself,
-not by the lead remembering it. `board-fence.sh` refuses `board_add` while the
-plan is below stage 5, so nothing can land early. And once you're here,
+not by the lead remembering it. `board-fence.sh` refuses `board_add` of plan work (`plan:`/`owns:` rows) while the
+plan is below stage 5, so nothing can land early (read-only rows such as scouts are allowed). And once you're here,
 `board.py check` (run every turn by the gate) reports any current-phase
 wave-table step with no matching board row, so a half-copied table does not
 go unnoticed.

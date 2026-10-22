@@ -1493,8 +1493,17 @@ RB=mcp__plugin_teamlead_teamlead-board
 bfdecide(){ out=$(echo "$1" | "$H/board-fence.sh"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
 
 printf '# T\n\n> **Stage 3** — x\n' > $bff
-check "board_add while the plan is at stage 3: denied" \
-  "$(bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_add","tool_input":{}}')" deny
+bfadd(){ bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_add","tool_input":{"tasks":'"$1"'}}'; }
+check "board_add of a plan: row while the plan is at stage 3: denied" \
+  "$(bfadd '[{"task":"build","plan":"I1"}]')" deny
+check "board_add of an owns: row at stage 3: denied" \
+  "$(bfadd '[{"task":"build","owns":["src/x"]}]')" deny
+check "board_add of a read-only row (no plan, no owns) at stage 3: allowed" \
+  "$(bfadd '[{"task":"scout the repo","agent":"tl-sonnet-low"}]')" allow
+check "board_add of a read-only row with owns: [] at stage 3: allowed" \
+  "$(bfadd '[{"task":"scout","owns":[]}]')" allow
+check "board_add of a mixed batch (read-only + owns:) at stage 3: denied" \
+  "$(bfadd '[{"task":"scout"},{"task":"build","owns":["src/x"]}]')" deny
 
 printf '# T\n\n> **Stage 5** — x\n' > $bff
 check "board_add once the plan reaches stage 5: allowed" \
