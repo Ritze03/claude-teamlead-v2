@@ -8,11 +8,14 @@
 #    itself without the lead ever looking at it. Workers report to the lead;
 #    the lead updates the board.
 #
-# 2. board_add specifically, while a plan is active and its header stage is
-#    below 5: tasks don't belong on the board until the plan has cleared its
-#    second "Go" (stage 5). Before that the plan itself is the record of what
-#    is being built — board_update stays open throughout (closing out a task
-#    that WAS already on the board, e.g. from before this plan, is fine).
+# 2. board_add of plan work, while a plan is active and its header stage is
+#    below 5: implementation tasks (a row with plan: or owns:) don't belong on
+#    the board until the plan has cleared its second "Go" (stage 5). Before
+#    that the plan itself is the record of what is being built. Read-only rows
+#    (no plan:, no owns: — scouts, research, QC) are allowed at any stage: the
+#    board is the record of every dispatch, and stage 2->3 requires a scout.
+#    board_update stays open throughout (closing out a task that WAS already
+#    on the board, e.g. from before this plan, is fine).
 #
 # Reading is allowed — only writes are refused.
 set -uo pipefail
@@ -44,8 +47,9 @@ case "$tool" in
       plan=$(cat "$ap" 2>/dev/null)
       if [ -n "$plan" ] && [ -f "$plan" ]; then
         st=$(grep -m1 -oiE '^> \*\*stage [0-9]+\*\*' "$plan" | grep -oE '[0-9]+')
-        if [ -n "$st" ] && [ "$st" -lt 5 ]; then
-          deny "board-fence: the active plan is at stage $st — tasks go on the board at stage 5, after the user's second \"Go\""
+        if [ -n "$st" ] && [ "$st" -lt 5 ] &&
+           jq -e '[.tool_input.tasks[]? | select((.plan // "") != "" or ((.owns // []) | length) > 0)] | length > 0' <<<"$in" >/dev/null 2>&1; then
+          deny "board-fence: the active plan is at stage $st — implementation tasks (rows with plan: or owns:) go on the board at stage 5, after the user's second \"Go\". Read-only rows (no plan:, no owns: — scouts, research, QC) are allowed now; add those without plan:/owns:."
         fi
       fi
     fi
