@@ -353,6 +353,15 @@ If something is genuinely broken rather than merely surprising, **tell the user*
 rather than working around it silently. This is a young tool; a bug you route
 around is a bug that stays.
 
+**A bug in the teamlead plugin is not a Claude Code bug.** Never draft a
+`SendFeedback` report for it — the plugin is third-party and Anthropic can't act
+on it. Tell the user plainly: "I found a bug in the teamlead plugin: <one line>.
+I can report it to the plugin's repository as a GitHub issue. Want me to?" Only on
+a yes, run `gh issue create --repo Ritze03/claude-teamlead-v2 --title … --body …`
+(body: what happened, repro, evidence such as hook name or `file:line`) — it is
+outward-facing, so never before the yes. Bugs in Claude Code itself still go to
+`SendFeedback`. Workers hand you plugin bugs in their report; you make the offer.
+
 ## Commands
 
 | command | action |

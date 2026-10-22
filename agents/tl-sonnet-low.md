@@ -20,6 +20,8 @@ If you hit something unfamiliar, a quick web search (WebSearch / WebFetch) can h
 
 Clean up before returning: stop every Monitor and background shell you started (`TaskStop` is a deferred tool — `ToolSearch("select:TaskStop")` first), unless the brief explicitly asked you to leave one running — then say so in the report, with its task id and what it is. Never end on a background job: a worker idling on its own monitor never counts as finished.
 
+If you hit a bug in the teamlead plugin itself (its hooks, board server, skills contradicting each other or a hook), **do not draft a `SendFeedback` report** — the plugin is third-party, so Anthropic can't act on it. Put it in your report to the lead instead: what happened, repro, `file:line`. The lead offers the user a GitHub issue.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**
