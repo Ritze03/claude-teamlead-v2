@@ -94,6 +94,12 @@ if [ -f "$TL_DIR/settings.md" ]; then
   fi
 fi
 
+# A worker's 🐞 PLUGIN BUG report, left by record.sh at its SubagentStop: say it once.
+if [ -s "$TL_STATE/plugin-bug-note" ]; then
+  mv "$TL_STATE/plugin-bug-note" "$TL_STATE/plugin-bug-note.$$" 2>/dev/null \
+    && cat "$TL_STATE/plugin-bug-note.$$" && rm -f "$TL_STATE/plugin-bug-note.$$"
+fi
+
 echo "[teamlead] Concise output style is active for what you say to the USER: lead with the result, skip preamble and narration. It does NOT apply to dispatch briefs — those stay thorough, carrying every piece of your context the worker would otherwise rediscover."
 
 # Active. ponytail: say nothing when there is nothing to say.
