@@ -9,9 +9,9 @@ repo.
 
 You are a dispatched worker building, auditing, or repairing a project's
 self-maintaining docs system. Your cwd is the **target repo**, not this skill's
-directory — every path below that starts with `/home/mo/.claude/skills/teamlead/` is
-this skill's own file and must be referenced by that absolute path (it will not
-resolve relative to your cwd). Every path that starts with `superdoc/` or `CLAUDE.md` is
+directory — this skill's own files (`assets/`) live under
+`$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/` and must be referenced by that
+absolute path (they will not resolve relative to your cwd). Every path that starts with `superdoc/` or `CLAUDE.md` is
 relative to the target repo root, i.e. your cwd.
 
 **`superdoc/` — the doc-root folder for this run.** The dispatching brief tells you the
@@ -19,8 +19,7 @@ value; it is **`superdoc/` by default (the recommended choice)**, or **`docs/`**
 user picked that instead. Wherever this playbook writes `superdoc/`, substitute the
 folder you were given — every path, skeleton, and `CLAUDE.md` `@`-ref. The folder name
 is the *only* thing that varies; the structure inside it, the `superdoc:` marker, and
-every rule below are identical for both. (The two `.../ForzaTelemetryV3/docs/...`
-example paths are the reference repo's real folder — leave those as `docs/`.)
+every rule below are identical for both.
 
 This file is doc-writing knowledge only — how to shape, write, and verify the
 `superdoc/` tree. It does not restate orchestration rules; those live in the
@@ -99,7 +98,7 @@ convention) is shape-agnostic — apply it directly, don't re-derive it per shap
 
 Create only the folders the project actually needs (YAGNI — a folder with one thin
 page is worse than no folder). This is the full taxonomy, mirrored from
-ForzaTelemetryV3's `docs/`:
+a mature reference project's `docs/`:
 
 | Path | Required? | Holds |
 | --- | --- | --- |
@@ -341,9 +340,7 @@ choice — code shows *what*, rarely *why this way and not the obvious alternati
 - **Capture it at the decision point, inline**, the moment it's made or a "why?" gets
   answered — not deferred to a doc-update pass, by which point the reasoning is gone.
   Write it as a short **`*Why:*`** note in the same sentence/bullet as the thing it
-  explains (see the real usage in
-  `/home/mo/Documents/Programming/ForzaTelemetryV3/docs/ui/STYLING-GUIDE.md` around
-  "no trailing colons on labels" for the exact style: `*Why:* the colon was applied
+  explains (exact style: `*Why:* the colon was applied
   inconsistently...`).
 - **Promote it to a standalone dated design-spec doc** (Part 3's skeleton) only when
   the decision is big enough that an inline note can't hold it — a real architecture
@@ -427,8 +424,7 @@ Never duplicate the `@` block. Preserve existing project-overview bullets and an
 project-overview stub — project name, one-line what-it-is, stack, key conventions, a
 few bullets — plus the block above. Not a competing template; the stub is scaffolding
 for the human to flesh out. Keep the whole file thin, entry-map style — detail lives in
-`superdoc/`, `CLAUDE.md` just points into it (see
-`/home/mo/Documents/Programming/ForzaTelemetryV3/CLAUDE.md` for the shape to match:
+`superdoc/`, `CLAUDE.md` just points into it (the shape to match:
 short project overview, a "Docs" pointer section, then the `@` block, nothing more).
 
 ## Part 6 — Pin the `superdoc:` marker
@@ -457,10 +453,11 @@ target repo. Copying preserves exact wording the discipline depends on; retyping
 memory drifts.
 
 ```bash
-cp /home/mo/.claude/skills/teamlead/superdoc-assets/documentation.md \
+PR="$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/assets"
+cp "$PR/documentation.md" \
    superdoc/claude-instructions/documentation.md
 
-cp /home/mo/.claude/skills/teamlead/superdoc-assets/version-policy-<variant>.md \
+cp "$PR/version-policy-<variant>.md" \
    superdoc/claude-instructions/documentation-version-policy.md
 ```
 
