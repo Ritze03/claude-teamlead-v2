@@ -362,6 +362,18 @@ a yes, run `gh issue create --repo Ritze03/claude-teamlead-v2 --title … --body
 outward-facing, so never before the yes. Bugs in Claude Code itself still go to
 `SendFeedback`. Workers hand you plugin bugs in their report; you make the offer.
 
+**Anonymize before filing.** The repo is public; an issue must carry nothing local.
+Paths: plugin files relative to the plugin root (`hooks/board-fence.sh:47`), user
+paths as `<project>/src/...`, `/home/<name>` as `~`; never an absolute path. Names:
+usernames, real names, emails, hostnames and the user's project or repo names become
+`<user>`, `<project>`. Content: no secrets, tokens, env values or internal URLs; no
+excerpts of the user's code or data beyond a minimal repro; describe their task
+generically ("unrelated work outside the plan"), not by its private subject. Keep
+plugin-internal evidence — hook names, plugin `file:line`, plugin error text — it is
+what makes the issue actionable. Then show the user the final title and body, and run
+`gh issue create` only once they approve that text; the earlier "Want me to?" yes
+does not cover the body.
+
 ## Commands
 
 | command | action |
