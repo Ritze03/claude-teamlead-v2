@@ -2969,6 +2969,25 @@ check "  foreign lock reason: refused" "$rc" 1
 grep -q "my own lock, hands off" "$T/wcout" && ok "  ... prints the lock reason" || bad "  ... prints the lock reason"
 [ -d "$T/wc-lkforeign" ] && git -C "$wm" worktree list --porcelain | grep -q "^locked my own lock" && ok "  ... worktree and lock kept" || bad "  ... worktree and lock kept"
 
+echo "== plugin-bug marker: a worker's 🐞 PLUGIN BUG report reaches the lead via mode.sh =="
+pbp=$T/pbug; mkdir -p $pbp/.claude/teamlead/.state; : > $pbp/.claude/teamlead/.state/active
+ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb1"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb1","last_assistant_message":"🐞 PLUGIN BUG: widget breaks\n   repro: x\n   at: hooks/a.sh:1\nrest"}' "$H/record.sh" >/dev/null
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/pbout" 2>&1
+grep -q 'plugin bug (🐞 PLUGIN BUG: widget breaks)' "$T/pbout" && ok "  marked report: reminder with the first line" || bad "  marked report: reminder with the first line"
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/pbout" 2>&1
+grep -q 'plugin bug' "$T/pbout" && bad "  reminder repeated on the next prompt" || ok "  reminder shown once"
+ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb2"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb2","last_assistant_message":"all done, no bugs"}' "$H/record.sh" >/dev/null
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/pbout" 2>&1
+grep -q 'plugin bug' "$T/pbout" && bad "  unmarked report: no reminder" || ok "  unmarked report: no reminder"
+# the report may live only in the SubagentHandback input, not in last_assistant_message
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"SubagentHandback","input":{"message":"🐞 PLUGIN BUG: from handback\nrest"}}]}}' > "$T/pbtr"
+ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb3"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb3","agent_transcript_path":"'$T'/pbtr","last_assistant_message":""}' "$H/record.sh" >/dev/null
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/pbout" 2>&1
+grep -q 'from handback' "$T/pbout" && ok "  marker found in the SubagentHandback input" || bad "  marker found in the SubagentHandback input"
+
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

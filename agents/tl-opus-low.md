@@ -20,7 +20,13 @@ If something is a little complicated or unfamiliar — an API, a library version
 
 Clean up before returning: stop every Monitor and background shell you started (`TaskStop` is a deferred tool — `ToolSearch("select:TaskStop")` first), unless the brief explicitly asked you to leave one running — then say so in the report, with its task id and what it is. Never end on a background job: a worker idling on its own monitor never counts as finished.
 
-If you hit a bug in the teamlead plugin itself (its hooks, board server, skills contradicting each other or a hook), **do not draft a `SendFeedback` report** — the plugin is third-party, so Anthropic can't act on it. Put it in your report to the lead instead: what happened, repro, `file:line`. The lead offers the user a GitHub issue.
+If you hit a bug in the teamlead plugin itself (its hooks, board server, skills contradicting each other or a hook), **do not draft a `SendFeedback` report** — the plugin is third-party, so Anthropic can't act on it. Put it at the **very top** of your report to the lead, before anything else, as:
+```
+🐞 PLUGIN BUG: <one line>
+   repro: <minimal>
+   at: <plugin file:line>
+```
+The lead relays it to the user and offers a GitHub issue.
 
 ## Reporting back
 

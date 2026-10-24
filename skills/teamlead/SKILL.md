@@ -355,9 +355,18 @@ around is a bug that stays.
 
 **A bug in the teamlead plugin is not a Claude Code bug.** Never draft a
 `SendFeedback` report for it — the plugin is third-party and Anthropic can't act
-on it. Tell the user plainly: "I found a bug in the teamlead plugin: <one line>.
-I can report it to the plugin's repository as a GitHub issue. Want me to?" Only on
-a yes, run `gh issue create --repo Ritze03/claude-teamlead-v2 --title … --body …`
+on it. Relay a worker's `🐞` line (or a bug you hit yourself) to the user at the
+top of your reply as a single-cell table; a cell can't hold line breaks, so
+everything goes in one body row, separated with ` · ` (a second row is fine for a
+longer repro):
+
+```
+| 🐞 Plugin bug: <one line> |
+|---|
+| `<file:line>` · repro: <minimal> · Want me to draft an anonymized GitHub issue? |
+```
+
+Only on a yes, run `gh issue create --repo Ritze03/claude-teamlead-v2 --title … --body …`
 (body: what happened, repro, evidence such as hook name or `file:line`) — it is
 outward-facing, so never before the yes. Bugs in Claude Code itself still go to
 `SendFeedback`. Workers hand you plugin bugs in their report; you make the offer.

@@ -300,6 +300,15 @@ case "$ev" in
     reaped=$(TL_MSG=$(tl_json .last_assistant_message) tl_worker_open reap "$tp") || reaped=""
     set -- $reaped
     [ "${2:-0}" -gt 0 ] && tl_event "reap      agent=$at  id=$(tl_json .agent_id)  tasks=$1  pids=$2"
+    # A report opening with the 🐞 PLUGIN BUG marker must reach the lead. SubagentStop's
+    # additionalContext lands in the finished worker's own turn, not the lead's, so leave
+    # a note that mode.sh (UserPromptSubmit — where a worker's result arrives) prints
+    # once and deletes. Any miss is a silent no-op.
+    bug=$({ tl_json .last_assistant_message
+            [ -r "$tp" ] && tail -n 20 "$tp" | jq -rR 'fromjson? | select(.type=="assistant") | .message.content[]? | select(.name=="SubagentHandback") | .input.message // empty'
+            true   # pipefail: an unreadable transcript must not void a match in the message
+          } | grep -m1 -o '🐞 PLUGIN BUG:.*' | cut -c1-200) || bug=""
+    [ -n "$bug" ] && printf '[teamlead] Worker reported a plugin bug (%s). Relay it to the user at the top of your reply as the single-cell 🐞 table and offer an anonymized GitHub issue.\n' "$bug" >> "$TL_STATE/plugin-bug-note"
     ;;
 esac
 exit 0
