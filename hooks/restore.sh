@@ -64,4 +64,18 @@ if [ "$src" = "clear" ]; then
   fi
 fi
 
+# A plan with a "## Handoff" section was left for exactly this: the lead wrote it
+# before the user cleared (or the context compacted). Point at it by name, so the
+# first thing read is the section that holds what chat did not.
+case "$src" in
+  clear|compact|resume)
+    ap="$TL_STATE/active-plan"
+    pf=$(cat "$ap" 2>/dev/null)
+    if [ -n "$pf" ] && [ -f "$pf" ] && grep -qx '## Handoff' "$pf" 2>/dev/null; then
+      hdr=$(grep -m1 -E '^> \*\*Stage [0-9]+\*\*' "$pf" 2>/dev/null)
+      echo "[teamlead] Plan $pf — ${hdr:-no stage header}. It has a '## Handoff' section: read the whole plan file now, Handoff first, then board_list, before doing anything else."
+    fi
+    ;;
+esac
+
 "$HERE/state.sh" "$TL_PROJECT"

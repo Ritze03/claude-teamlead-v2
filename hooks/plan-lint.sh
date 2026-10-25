@@ -17,12 +17,14 @@ add() { fail+="  - $1"$'\n'; }
 # settled decisions, so before then they are simply absent. Both land ABOVE the two
 # inboxes: 'Open questions' and 'Notes from me' are the user's half of the file and
 # stay at the bottom, quick to reach and with nothing large growing underneath them.
+# 'Handoff' is optional too: the lead's note to its own next context, written at a phase
+# boundary (SKILL.md, "Clearing context between phases"); it sits above the inboxes.
 # 'Brainstorm request' is likewise optional — it holds a topic the user opts into —
 # and sits between the two inboxes: it is written like a question, cleared like one.
 # 'Research request' is the same kind of thing and sits directly above it (research
 # feeds the brainstorm).
 order=$(grep '^## ' "$f" | sed 's/^## //')
-canon=$'Goal\nContext\nDecisions\nDone when\nImplementation plan\nOpen questions\nResearch request\nBrainstorm request\nNotes from me'
+canon=$'Goal\nContext\nDecisions\nDone when\nImplementation plan\nHandoff\nOpen questions\nResearch request\nBrainstorm request\nNotes from me'
 always=$'Goal\nContext\nDecisions\nOpen questions\nNotes from me'
 bad=$(grep -vFx "$canon" <<<"$order" || true)
 gone=$(grep -vFx "$order" <<<"$always" || true)
@@ -30,7 +32,7 @@ gone=$(grep -vFx "$order" <<<"$always" || true)
 [ -n "$gone" ] && add "missing section(s): $(tr '\n' ' ' <<<"$gone")"
 # Only meaningful once the headings themselves are right, or it reports twice.
 if [ -z "$bad" ] && [ -z "$gone" ] && [ "$order" != "$(grep -Fx "$order" <<<"$canon")" ]; then
-  add "sections out of order. Want: Goal, Context, Decisions, [Done when, Implementation plan,] Open questions, Research request, Brainstorm request, Notes from me"
+  add "sections out of order. Want: Goal, Context, Decisions, [Done when, Implementation plan, Handoff,] Open questions, Research request, Brainstorm request, Notes from me"
 fi
 
 # table rows: | wave | id | task | agent | owns | after |

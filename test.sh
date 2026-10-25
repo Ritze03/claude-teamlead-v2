@@ -1668,6 +1668,32 @@ stp_out=$(python3 "$B" ledger --project $stp | python3 -c 'import json,sys;print
 check "compact: a stale foreign-session worker is still outstanding, not forgotten" "$stp_out" "['foreign1']"
 rm -f "$stpL"
 
+echo "== restore.sh: a plan's '## Handoff' is pointed at after clear/compact/resume =="
+hop=$T/handoff1; mkdir -p $hop/.claude/teamlead/plan $hop/.claude/teamlead/.state
+git -C $hop init -q; git -C $hop config user.email t@t.t; git -C $hop config user.name t
+echo a > $hop/a.txt; git -C $hop add -A >/dev/null; git -C $hop commit -qm init >/dev/null
+hof=$hop/.claude/teamlead/plan/topic.md
+echo "$hof" > $hop/.claude/teamlead/.state/active-plan
+: > $hop/.claude/teamlead/.state/active
+printf '# T\n\n> **Stage 5** — phase B done, next: phase C\n\n## Goal\nG\n\n## Handoff\nnext: phase C\n\n## Open questions\n\n## Notes from me\n\n' > $hof
+for hsrc in clear compact resume; do
+  hout=$(echo '{"hook_event_name":"SessionStart","source":"'$hsrc'","session_id":"H1","cwd":"'$hop'"}' | "$H/restore.sh")
+  grep -q "Plan $hof" <<<"$hout" && grep -q '## Handoff' <<<"$hout" && ok "$hsrc: names the plan path and its Handoff" || bad "$hsrc: names the plan path and its Handoff"
+done
+grep -q 'phase B done, next: phase C' <<<"$hout" && ok "  and quotes the header's stage line" || bad "  and quotes the header's stage line"
+hout=$(echo '{"hook_event_name":"SessionStart","source":"startup","session_id":"H1","cwd":"'$hop'"}' | "$H/restore.sh")
+grep -q '## Handoff' <<<"$hout" && bad "startup: should not mention Handoff" || ok "startup: no Handoff line"
+printf '# T\n\n> **Stage 5** — building\n\n## Goal\nG\n\n## Open questions\n\n## Notes from me\n\n' > $hof
+hout=$(echo '{"hook_event_name":"SessionStart","source":"clear","session_id":"H1","cwd":"'$hop'"}' | "$H/restore.sh")
+grep -q 'Handoff' <<<"$hout" && bad "plan without a Handoff: no Handoff line expected" || ok "plan without a Handoff: no Handoff line"
+rm -f $hop/.claude/teamlead/.state/active-plan
+hout=$(echo '{"hook_event_name":"SessionStart","source":"clear","session_id":"H1","cwd":"'$hop'"}' | "$H/restore.sh"); hrc=$?
+grep -qE 'Handoff|Plan /' <<<"$hout" && bad "no active plan: no plan line expected" || ok "no active plan: no plan line"
+check "  and restore.sh exits 0" "$hrc" 0
+
+echo "== skill text documents clearing between phases =="
+grep -q '^## Clearing context between phases' "$PS2" && ok "teamlead-plan/SKILL.md has the section" || bad "section missing"
+
 echo "== skill text reflects the phase-A changes =="
 grep -q 'stop teamlead' "$SK" && bad "teamlead/SKILL.md still says 'stop teamlead'" || ok "teamlead/SKILL.md no longer says 'stop teamlead'"
 grep -q 'normal mode' "$SK" && bad "teamlead/SKILL.md still mentions 'normal mode'" || ok "teamlead/SKILL.md no longer mentions 'normal mode'"
@@ -1747,6 +1773,13 @@ grep -q "non-empty 'Brainstorm request'" "$T/brnout" && ok "  names it" || bad "
 check "non-empty Brainstorm request at stage 3: ok (still available while planning)" "$(mkbrn 3 'y — run it\n\n')" 0
 check "Brainstorm request placed after 'Notes from me': out of order" "$(mkbrn 5 '' after)" 1
 grep -q 'out of order' "$T/brnout" && ok "  says so" || bad "  says so"
+
+echo "== plan-lint: a '## Handoff' section between Implementation plan and Open questions is accepted =="
+mkbrn 5 '' >/dev/null
+sed -i 's/^## Open questions$/## Handoff\nphase A done (abc123). Next: phase B, wave 3.\n\n## Open questions/' "$T/brn.md"
+check "plan with a Handoff at stage 5: lint passes" "$("$PL" "$T/brn.md" >"$T/hlout" 2>&1; echo $?)" 0
+sed -i '/^## Handoff$/,/^$/d' "$T/brn.md"; sed -i 's/^## Notes from me$/## Handoff\nx\n\n## Notes from me/' "$T/brn.md"
+check "Handoff after the inboxes: out of order" "$("$PL" "$T/brn.md" >"$T/hlout" 2>&1; echo $?)" 1
 
 echo "== plan-lint: 'Research request' must be run or cleared by stage 5 =="
 # Same shape as mkbrn above: $2 = the section's content, $3 = 'after' puts it below

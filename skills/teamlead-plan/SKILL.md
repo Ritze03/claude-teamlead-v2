@@ -287,6 +287,9 @@ Constraints, what exists, what must not break. Scout findings land here.
 | 1 | I1 | … | `tl-sonnet-medium` | *(read-only)* | — |
 | 2 | I2 | … — **D1** | `tl-sonnet-high` | `src/x/` | I1 |
 
+## Handoff
+*Optional — only at a phase boundary; see Clearing context between phases.*
+
 ## Open questions
 1. The question?
    *Suggest:* what you'd do — *why, in one line.* *Or:* the real alternative and its cost.
@@ -318,9 +321,10 @@ one empty line after its last line** — as drawn above. Keep it there on every
 write, so the user can type straight below the last section; `plan-lint` fails
 a file without it.
 
-**`## Done when` and `## Implementation plan` do not exist until stage 4.** Create
-the file with all the other sections only, and insert both *above* `## Open
-questions` when you write them.
+**`## Done when` and `## Implementation plan` do not exist until stage 4, and
+`## Handoff` not until a phase boundary.** Create the file with all the other
+sections only, and insert them *above* `## Open questions` when you write them
+(`## Handoff` last of the three — see *Clearing context between phases*).
 
 **Why there.** The last four sections — `Open questions`, `Research request`,
 `Brainstorm request`, `Notes from me` — are the user's half of the file, the only ones they type into.
@@ -530,6 +534,9 @@ requires the *current* phase's `I<n>` rows on the board — it finds the current
 phase by which one already has a step there, so nothing complains that phase C
 hasn't been added yet.
 
+Between phases is the natural place to start a fresh context — see *Clearing
+context between phases*.
+
 ## Stage 6 — Agent-Testing
 
 When the board is empty and every implementation step has merged, set the header to
@@ -585,6 +592,48 @@ stage 7 — try, change, try again — is a normal use of it.
 
 If a plan has no `user` criteria at all, stage 7 is still theirs: say the agent
 checks all passed, say there is nothing needing their eyes, and let them close it.
+
+## Clearing context between phases
+
+A phase boundary is where a fresh context is cheapest and safest: the plan file
+and the board hold the work, and chat holds mostly noise. **Recommend `/clear`
+there — and write down what chat alone knows first.** You cannot run `/clear`
+yourself; you can only say when.
+
+**When:** the phase's rows are all merged, its worktrees are gone, no worker is
+running, and the user has finished stage 7 for it (or says outright they want to
+clear). Never mid-wave, never with a worker running — its report would land in
+nobody's hands.
+
+**Before recommending it**, in this order:
+
+1. **Write `## Handoff`** into the plan file, between `Implementation plan` and
+   `Open questions`. It is overwritten at each boundary, never appended to — only
+   the latest state matters. It holds:
+   - phases done, with their merge commits
+   - decisions and user answers from chat that the plan does not already hold
+   - deviations from the plan, and why
+   - gotchas and worker findings the next phase needs
+   - open questions
+   - **the exact next step** — which phase, which wave, the first rows to board
+2. **Fold anything that changes the plan itself into its own section** —
+   a new decision into `## Decisions`, a changed constraint into `## Context` —
+   not only into the handoff. The handoff is a note; the sections are the plan.
+3. **Set the header**: `> **Stage 5** — phase B done, next: phase C · handoff written <date>`.
+4. **Stop what you own**: the watcher, if it is on (*The watcher follows who has control*), and
+   any other background task. A `/clear` does not end them.
+5. Run `plan-lint` and keep the file's trailing blank line.
+
+**Then say it plainly:** this is a good point to `/clear` — the next phase starts
+with fresh context and everything it needs is already in the plan file. A
+recommendation, not a requirement; if they would rather carry on, carry on.
+
+**After a `/clear`** the plan file is the source of truth, not whatever you half
+remember. Read the whole file, `## Handoff` first; run `board_list`; read
+`superdoc/` if the plan relies on it; then do the handoff's next step. When the
+handoff is stale or the board disagrees with it, say so and trust the board. Once
+the next phase is boarded, the handoff has been used — overwrite it at the next
+boundary.
 
 ## Retiring a finished plan
 
