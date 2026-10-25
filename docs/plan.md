@@ -399,6 +399,8 @@ at stage 5.
 
 **Compaction-proof by construction:** the plan file *is* the durable state, so `restore.sh`
 only needs to re-inject the active plan's path, not its content.
+At a phase boundary the lead writes a `## Handoff` section into the plan and recommends `/clear`;
+`restore.sh` then points the fresh context at that section by name.
 
 ### Plan file structure — **DECIDED**
 
