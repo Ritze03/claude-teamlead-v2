@@ -2,7 +2,19 @@
 
 Newest first. One line per change, commit id at the end.
 
-## Unreleased
+Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
+
+## 2.1.0 — 2026-10-28
+
+First version bump since 2.0.0. Claude Code caches installs by version, so earlier changes may not have reached you; update the plugin (`claude plugin update teamlead@teamlead`, then restart) to get everything below. The session-start line now reads `[teamlead v2.1.0] Active for this project. ...`.
+
+- Board fence: only `plan:` rows wait for plan stage 5; scouts, read-only rows and unrelated `owns:` work are allowed before it (GH#1). #e591db8 #c143868
+- superdoc playbook: no hardcoded machine paths (GH#2). #13e7595
+- Plugin bugs a worker finds are offered to you as an anonymized GitHub issue (nothing is sent as Claude Code feedback); workers flag them with a `🐞 PLUGIN BUG` line, relayed to you in a single-cell table, and `record.sh` reminds the lead. #4f3cd64 #6446610 #0c16538
+- Planning: a `## Handoff` section in the plan, and the lead recommends `/clear` between phases; `restore.sh` points at the handoff after clear, compact or resume. #e42ae65
+- Planning: the first Go audits context against the plan file; 6 to 7 happens on its own when there is nothing to test, 7 to 5 is explicit, phases by default; the watcher keeps running through stage 7; the plan file always ends with one empty line. #1e9b664 #ea2b4a6 #9561129 #e043aac
+- Every dispatch, scouts and QC included, gets a board row first; relevant `docs/` and `superdoc/` pages go into every worker brief. #85460c0 #73af0c8
+- Statusline prints a cached segment and refreshes in a detached single-flight child, so it no longer gets cancelled on slow disks. #d20afcf
 
 - `worker-cleanup.sh` lifts a stale Claude Code agent lock (`claude agent agent-<id> (pid P start S)`: pid dead or reused, or the ledger no longer lists the agent as working) before removing the worktree; a live agent's lock or any foreign lock still refuses.
 - When a `tl-*` worker really returns, `record.sh` stops the background Bash tasks it launched and left open (found via the task's `.output` file; ones the worker finished, TaskStop'd or named in its report are kept) and logs a `reap` event; a `pause` event now lists the worker's `open=` task ids. Covers read-only workers with no worktree; Monitors are not covered.
