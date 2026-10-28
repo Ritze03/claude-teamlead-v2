@@ -70,6 +70,11 @@ Or run against a local checkout without installing:
 claude --plugin-dir /path/to/claude-teamlead-v2
 ```
 
+To update later: `claude plugin update teamlead@teamlead`, then restart Claude Code. Check
+which build you have with `/plugin`, the `[teamlead vX.Y.Z]` line at session start, or
+`jq '.plugins["teamlead@teamlead"]' ~/.claude/plugins/installed_plugins.json` (version and
+`gitCommitSha`). See [CHANGELOG.md](CHANGELOG.md).
+
 Then say `/teamlead` — or just ask it to act as a team lead. Activation is per project and
 **persists across sessions** until you say `/teamlead stop`.
 

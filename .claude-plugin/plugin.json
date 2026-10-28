@@ -1,7 +1,7 @@
 {
   "name": "teamlead",
   "description": "Orchestration mode: the lead thinks and delegates, cheap workers implement. Durable task board, planning mode, brainstorm, and superdoc.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": {
     "name": "Ritze03"
   },

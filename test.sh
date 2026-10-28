@@ -1650,6 +1650,14 @@ printf '# T\n\n> **Stage 3** — x\n' > $stf
 rsout=$(echo '{"hook_event_name":"SessionStart","source":"clear","cwd":"'$stp'"}' | "$H/restore.sh")
 grep -q 'Session was cleared mid-plan' <<<"$rsout" && bad "stage 3: should not flag the clear" || ok "stage 3: does not flag the clear"
 
+echo "== restore.sh: the lead line carries the plugin.json version =="
+want_ver=$(jq -r .version "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json")
+rsout_ver=$(echo '{"hook_event_name":"SessionStart","source":"startup","cwd":"'$stp'"}' | "$H/restore.sh")
+grep -qF "[teamlead v$want_ver] Active for this project." <<<"$rsout_ver" && ok "lead line starts with [teamlead v$want_ver]" || bad "lead line starts with [teamlead v$want_ver]"
+verroot="$T/noverroot"; mkdir -p "$verroot"
+rsout_nover=$(echo '{"hook_event_name":"SessionStart","source":"startup","cwd":"'$stp'"}' | CLAUDE_PLUGIN_ROOT="$verroot" "$H/restore.sh" 2>/dev/null)
+grep -qF "[teamlead] Active for this project." <<<"$rsout_nover" && ok "  unreadable plugin.json falls back to plain [teamlead]" || bad "  unreadable plugin.json falls back to plain [teamlead]"
+
 echo "== restore.sh: resume and compact also print the lead line and the state block (F23) =="
 rsout_resume=$(echo '{"hook_event_name":"SessionStart","source":"resume","session_id":"RS1","cwd":"'$stp'"}' | "$H/restore.sh")
 grep -q 'You are the lead' <<<"$rsout_resume" && ok "resume: prints the lead line" || bad "resume: prints the lead line"

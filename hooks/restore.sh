@@ -23,7 +23,9 @@ if [ -f "$TL_STATE/board.json" ] || [ -f "$TL_BOARD" ]; then
   python3 "$BOARD" render --project "$TL_PROJECT" >/dev/null 2>&1
 fi
 
-echo "[teamlead] Active for this project. You are the lead: split work into .claude/teamlead/board.md, dispatch tl-* workers, never implement it yourself."
+# Version tag from the installed plugin.json, read at runtime; silently omitted if unreadable.
+tl_ver=$(jq -r '.version // empty' "${CLAUDE_PLUGIN_ROOT:-$HERE/..}/.claude-plugin/plugin.json" 2>/dev/null)
+echo "[teamlead${tl_ver:+ v$tl_ver}] Active for this project. You are the lead: split work into .claude/teamlead/board.md, dispatch tl-* workers, never implement it yourself."
 
 # D1: on startup/resume/clear (not compact — agents survive it) close out every
 # outstanding worker whose start predates THIS session's own first event — no
