@@ -4,6 +4,11 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.3.0 — 2026-11-01
+
+- worktree-fence: a write that matches an absolute (or `~`) entry of the worker's own row's `owns` outside its worktree now also answers Claude Code's permission prompt with a `permissionDecision: "allow"` ("teamlead: path is in board row N's owns"), which a background worker could never answer itself. Per the hooks docs deny/ask rules still apply. In-worktree, scratchpad and project-root passes stay silent, and a relative `owns` entry never opens the main checkout.
+- workers + teamlead: scope requests. A `tl-*` worker that needs a path its `owns` doesn't cover sends the lead a `SCOPE REQUEST: <path>` / `why:` / `row:` block (`SendMessage` to `main`, or the top of its hand-back when blocked) instead of working around it. The lead checks it, reads the docs, checks overlap, `board_update`s `owns` and replies `granted`/`denied`; outside the project it asks the user first, and it tells the user before dispatching a row that owns outside paths. The fence's refusal message and the agents' boundary line now point at that flow instead of "stop and report". `record.sh` flags a `SCOPE REQUEST` hand-back to the lead through the same one-shot note as the 🐞 marker.
+
 ## 2.2.4 — 2026-11-01
 
 - plan: the "/clear, then /teamlead plan continue" offer is printed only in the reply to the second Go, once the header is Stage 5 — never at the end of stage 4 while asking for the Go (a /clear there lost the unrecorded Go and `plan continue` refused). The Stop gate blocks the offer at stage 4; `plan continue` at stage 4 without a Go says "No Go recorded ... say Go to start building".

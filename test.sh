@@ -1307,6 +1307,10 @@ check "hooks.json registers the fence on the file tools only" \
   "$(jq -r '[.hooks.PreToolUse[]|select(any(.hooks[];.command|test("worktree-fence")))|.matcher]|join(",")' "$CLAUDE_PLUGIN_ROOT/hooks/hooks.json")" "Edit|Write|MultiEdit|NotebookEdit"
 fmsg=$(fe "$FO/x" | CLAUDE_PROJECT_DIR="$FP" "$F" | jq -r .hookSpecificOutput.permissionDecisionReason)
 case "$fmsg" in *owns*Bash*|*Bash*owns*) ok "refusal names the owns exception and that Bash is no way round" ;; *) bad "refusal names the owns exception and that Bash is no way round (got: $fmsg)" ;; esac
+case "$fmsg" in *"SCOPE REQUEST"*SendMessage*main*|*SendMessage*main*"SCOPE REQUEST"*) ok "refusal tells the worker to send a SCOPE REQUEST" ;; *) bad "refusal tells the worker to send a SCOPE REQUEST (got: $fmsg)" ;; esac
+for ag in "$CLAUDE_PLUGIN_ROOT"/agents/tl-*.md; do
+  grep -q 'ask the lead for it with a `SCOPE REQUEST`' "$ag" && ok "  $(basename "$ag"): boundary line points at SCOPE REQUEST" || bad "  $(basename "$ag"): boundary line points at SCOPE REQUEST"
+done
 # git project: a worker that inherited a subdirectory cwd is anchored to the project, a linked
 # worktree worker is not allowed into the main checkout.
 FG="$T/fg"; mkdir -p "$FG/src" "$FG/sub"; git -C "$FG" init -q; git -C "$FG" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m i
@@ -1320,6 +1324,28 @@ check "git: linked-worktree worker writes its own worktree"         "$(fenceg "$
 mkdir -p "$FG/.claude/teamlead/.state"
 printf '{"next_id":2,"tasks":[{"id":1,"state":"running","worker":"w1","owns":["%s"]}]}' "$FO" > "$FG/.claude/teamlead/.state/board.json"
 check "git: worktree worker finds its row in the MAIN checkout's board" "$(fenceg "$(ge "$FG/.claude/worktrees/agent-x" "$FO/x")")" allow
+
+echo "== worker fence: an owned outside path also answers Claude Code's permission prompt =="
+# "allow" via fence() above is "no output OR allow JSON"; here tell the two apart.
+fjson(){ echo "$1" | CLAUDE_PROJECT_DIR="$FG" "$F"; }
+WTX="$FG/.claude/worktrees/agent-x"
+fjo=$(fjson "$(ge "$WTX" "$FO/sub/x")")
+check "owned absolute path outside the worktree: allow JSON" "$(jq -r .hookSpecificOutput.permissionDecision <<<"$fjo")" allow
+check "  ... event name is PreToolUse"                       "$(jq -r .hookSpecificOutput.hookEventName <<<"$fjo")" PreToolUse
+check "  ... reason names the board row"                     "$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$fjo")" "teamlead: path is in board row 1's owns"
+check "in-worktree write: plain pass, no allow JSON"         "$(fjson "$(ge "$WTX" "$WTX/src/x")")" ""
+check "scratchpad write: plain pass, no allow JSON"          "$(fjson "$(ge "$WTX" "/tmp/claude-1000/a/S/scratchpad/x" | jq -c '.session_id="S"')")" ""
+check "unowned outside path: still refused"                  "$(fenceg "$(ge "$WTX" "$FX/x")")" deny
+printf '{"next_id":2,"tasks":[{"id":1,"state":"running","worker":"w1","owns":["hooks/"]}]}' > "$FG/.claude/teamlead/.state/board.json"
+check "relative owns does not open the main checkout"        "$(fenceg "$(ge "$WTX" "$FG/hooks/x")")" deny
+check "relative owns: no allow JSON for an in-worktree write" "$(fjson "$(ge "$WTX" "$WTX/hooks/x")")" ""
+
+echo "== scope requests: agents carry the block, the lead skill has the paragraph =="
+for ag in "$CLAUDE_PLUGIN_ROOT"/agents/tl-*.md; do
+  grep -q '^SCOPE REQUEST: <path or glob>$' "$ag" && grep -q 'SendMessage. to `"main"`' "$ag" && grep -q 'starts with' "$ag" \
+    && ok "  $(basename "$ag"): SCOPE REQUEST block" || bad "  $(basename "$ag"): SCOPE REQUEST block"
+done
+grep -q '^\*\*Scope requests\.\*\*' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" && ok "  teamlead skill: Scope requests paragraph" || bad "  teamlead skill: Scope requests paragraph"
 
 echo "== plan-lint stage awareness =="
 mkplan(){ cat > "$T/pl.md" <<PEOF
@@ -3629,6 +3655,23 @@ ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-hi
 ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"pb3","agent_transcript_path":"'$T'/pbtr","last_assistant_message":""}' "$H/record.sh" >/dev/null
 echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/pbout" 2>&1
 grep -q 'from handback' "$T/pbout" && ok "  marker found in the SubagentHandback input" || bad "  marker found in the SubagentHandback input"
+
+echo "== scope-request marker: a blocked worker's SCOPE REQUEST hand-back reaches the lead =="
+ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr1"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr1","last_assistant_message":"SCOPE REQUEST: docs/extra.md\nwhy: needs a doc\nrow: 7\nrest"}' "$H/record.sh" >/dev/null
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/srout" 2>&1
+grep -q 'asked for more scope (SCOPE REQUEST: docs/extra.md)' "$T/srout" && ok "  marked report: reminder with the requested path" || bad "  marked report: reminder with the requested path"
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/srout" 2>&1
+grep -q 'asked for more scope' "$T/srout" && bad "  scope reminder repeated" || ok "  scope reminder shown once"
+ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr2"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr2","last_assistant_message":"done; I did not need a SCOPE REQUEST: nothing"}' "$H/record.sh" >/dev/null
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/srout" 2>&1
+grep -q 'asked for more scope' "$T/srout" && bad "  mid-line mention: no reminder" || ok "  mid-line mention: no reminder"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"SubagentHandback","input":{"message":"SCOPE REQUEST: src/x/**\nwhy: y\nrow: 3"}}]}}' > "$T/srtr"
+ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr3"}' "$H/record.sh" >/dev/null
+ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr3","agent_transcript_path":"'$T'/srtr","last_assistant_message":""}' "$H/record.sh" >/dev/null
+echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/srout" 2>&1
+grep -q 'SCOPE REQUEST: src/x/\*\*' "$T/srout" && ok "  marker found in the SubagentHandback input" || bad "  marker found in the SubagentHandback input"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"

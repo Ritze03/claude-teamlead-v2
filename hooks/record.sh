@@ -309,6 +309,14 @@ case "$ev" in
             true   # pipefail: an unreadable transcript must not void a match in the message
           } | grep -m1 -o '🐞 PLUGIN BUG:.*' | cut -c1-200) || bug=""
     [ -n "$bug" ] && printf '[teamlead] Worker reported a plugin bug (%s). Relay it to the user at the top of your reply as the single-cell 🐞 table and offer an anonymized GitHub issue.\n' "$bug" >> "$TL_STATE/plugin-bug-note"
+    # Same channel for a blocked worker's SCOPE REQUEST hand-back (a line of its own,
+    # so a report that merely mentions the words does not match). A mid-task
+    # SendMessage request needs no hook: it reaches the lead directly.
+    scope=$({ tl_json .last_assistant_message
+              [ -r "$tp" ] && tail -n 20 "$tp" | jq -rR 'fromjson? | select(.type=="assistant") | .message.content[]? | select(.name=="SubagentHandback") | .input.message // empty'
+              true
+            } | grep -m1 -o '^SCOPE REQUEST:.*' | cut -c1-200) || scope=""
+    [ -n "$scope" ] && printf '[teamlead] Worker asked for more scope (%s). Handle it per "Scope requests" in the teamlead skill: check, board_update the row'"'"'s owns, reply granted/denied by SendMessage (outside the project: ask the user first).\n' "$scope" >> "$TL_STATE/plugin-bug-note"
     ;;
 esac
 exit 0
