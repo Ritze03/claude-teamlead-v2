@@ -2251,6 +2251,25 @@ check "exactly one problem line (real merge, not a squash-mismatch too)" "$lines
 git worktree remove "$T/d7wt"
 python3 "$B" check --project $d7p >/dev/null 2>&1; rc=$?
 check "worktree removed: check passes" "$rc" 0
+# A merged row whose branch IS the main checkout's branch (work committed straight
+# onto it) must never be told to remove the main checkout — git refuses, so the
+# finding would come back every turn. Same for a main branch not named master.
+for d7b in master trunk; do
+  d7m=$T/d7main-$d7b; mkdir -p $d7m; cd $d7m; git init -q -b $d7b; git config user.email t@t.t; git config user.name t
+  printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
+  echo base > a.txt; git add -A >/dev/null; git commit -qm init
+  python3 "$B" add --project $d7m --task w --agent tl-sonnet-high --owns a.txt >/dev/null               # id 1
+  python3 "$B" update --project $d7m --id 1 --state merged --branch $d7b >/dev/null
+  python3 "$B" check --project $d7m >"$T/d7mout" 2>&1; rc=$?
+  check "merged row on the main branch ($d7b): check passes" "$rc" 0
+  grep -q 'git worktree remove' "$T/d7mout" && bad "  never suggests removing the main checkout" || ok "  never suggests removing the main checkout"
+done
+# a branch checked out in a hand-made linked worktree is still a real leftover
+git worktree add -q "$T/d7hand" -b handb >/dev/null 2>&1
+python3 "$B" update --project $d7m --id 1 --branch handb >/dev/null
+python3 "$B" check --project $d7m >"$T/d7mout" 2>&1
+grep -q "is merged but worktree $T/d7hand still exists" "$T/d7mout" && ok "  linked (non-agent) worktree of a merged row is still flagged" || bad "  linked (non-agent) worktree of a merged row is still flagged"
+git worktree remove "$T/d7hand"
 cd $proj
 
 echo "== D12: worker-start/worker-stop lifecycle =="
