@@ -7,6 +7,13 @@
 
 tl_json() { jq -r "$1 // empty" <<<"$IN" 2>/dev/null; }
 
+# Every hook that sources this runs board.py as the HOOK, not as a worker's Bash:
+# board.py refuses CLI writes from a worker's worktree, and exempts only the
+# hook-driven commands (worker-start/-stop, render, forget) when this is set. A
+# worker's own Bash never has it. Exported at source time, so even a hook that
+# exits early inherits it.
+export TL_HOOK=1
+
 tl_init() {
   IN=$(cat)
   # CLAUDE_PROJECT_DIR is not set for every event; fall back to the event's cwd.

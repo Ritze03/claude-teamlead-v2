@@ -11,6 +11,9 @@ Two front ends over the same core:
 
 Commands: add, update, remove, list, status, check, render, clean, drop,
           forget, hold, release, held, ledger, worker-start, worker-stop.
+  Read-only: list, status, check, held, ledger.  Everything else writes and goes
+  through _cli_write_project: refused for a worker (cwd in an agent worktree of
+  the project whose board it is) and for a blank/valueless --project.
 
 Validation happens at WRITE time, so a bad board cannot exist rather than being
 detected afterwards.
@@ -52,10 +55,56 @@ def _refuse_if_worker() -> None:
     """D4/F17: a worker can reach the CLI as easily as the lead's shell. The MCP
     tools are fenced by board-fence.sh (it sees agent_id on the hook payload);
     the CLI has no such gate, so it needs the same refusal here. CLAUDE_AGENT_ID
-    is set by the harness for subagents and absent from the lead's own shell."""
+    is set by the harness for subagents and absent from the lead's own shell —
+    but NOT reliably present in a worker's Bash tool environment (a worker's
+    `env` carries AI_AGENT/CLAUDE_CODE_* and no CLAUDE_AGENT_ID), so on its own
+    this catches nothing in practice. _refuse_agent_worktree is the check that does."""
     if os.environ.get("CLAUDE_AGENT_ID"):
         raise ValueError("refused — board writes are the lead's; workers report, "
                          "the lead records (CLAUDE_AGENT_ID is set)")
+
+
+_AGENT_WT = re.compile(r"^(?P<main>.*?)/\.claude/worktrees/agent-[^/]+(?:/|$)")
+
+
+def _worker_home(cwd: str) -> str | None:
+    """The main checkout of the repo that cwd is a WORKER's worktree of, else None.
+    A worker is dispatched with isolation:worktree, which puts it in a linked
+    worktree named agent-<id> (git-dir <main>/.git/worktrees/agent-<id>, normally
+    under <main>/.claude/worktrees/). Either signal marks it — the git one holds
+    wherever the worktree lives, the path one still holds if git cannot answer. A
+    lead's own linked worktree (`claude --worktree foo`) carries neither."""
+    cwd = os.path.realpath(cwd)
+    home, named = None, False
+    try:
+        r = subprocess.run(["git", "-C", cwd, "rev-parse", "--git-dir", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5)
+        out = r.stdout.split("\n") if r.returncode == 0 else []
+        if len(out) >= 2 and out[0].strip() and out[1].strip():
+            gd, common = (pathlib.Path(cwd, x.strip()).resolve() for x in out[:2])
+            if gd != common:                          # a linked worktree, not a main checkout
+                named = gd.name.startswith("agent-")
+                home = str(common.parent)
+    except Exception:
+        pass
+    m = _AGENT_WT.match(cwd)
+    if m and m.group("main"):
+        named, home = True, home or os.path.realpath(m.group("main"))
+    return home if named else None
+
+
+def _refuse_agent_worktree(project: str) -> None:
+    """Flaw 2 of the stale-base incident: a worker ran board.py from inside its own
+    worktree and wrote the lead's real board — CLAUDE_AGENT_ID was not set, so
+    _refuse_if_worker let it through. Detect the worker by WHERE it runs instead:
+    refuse when cwd is an agent worktree whose repo is the one this board belongs
+    to. A worker exercising board.py against a scratch project of its own (the
+    test suite does) is a different repo, and stays allowed."""
+    home = _worker_home(os.getcwd())
+    if home and os.path.realpath(_main_checkout(project)) == os.path.realpath(home):
+        raise ValueError("refused — board writes are the lead's; you are running in a worker "
+                         f"worktree ({os.getcwd()}) of the project whose board this is "
+                         f"({home}). Report to the lead instead; the lead records.")
 
 
 def _write_project(project: str | None) -> str:
@@ -67,6 +116,25 @@ def _write_project(project: str | None) -> str:
     if not p:
         raise ValueError("refused — pass --project <main checkout> "
                          "(board writes never resolve from cwd)")
+    return p
+
+
+def _cli_write_project(project: str | None, hook_ok: bool = False) -> str:
+    """The one guard every mutating CLI command goes through. Order: who is
+    asking (worker?), then where it writes (a real directory — `--project true`
+    must not conjure true/.claude/... under cwd). hook_ok: the hook-driven commands
+    (worker-start/-stop, render, forget) are also run by hooks, whose payload —
+    not their environment or cwd — says whose event it is; lib.sh's tl_init
+    exports TL_HOOK=1 for them, which a worker's Bash never has."""
+    hook = hook_ok and bool(os.environ.get("TL_HOOK"))
+    if not hook:
+        _refuse_if_worker()
+    p = _write_project(project)
+    if not os.path.isdir(p):
+        raise ValueError(f"refused — --project {p!r} is not a directory "
+                         "(board writes never create the project)")
+    if not hook:
+        _refuse_agent_worktree(p)
     return p
 
 
@@ -1224,6 +1292,12 @@ def main(argv):
             took = i + 1 < len(rest) and not rest[i + 1].startswith("--")
             v = rest[i + 1] if took else "true"
             if k == "project":
+                # A valueless/blank --project must never fall through to cwd (or to
+                # the literal "true" a valueless flag turns into): `--project $EMPTY`
+                # unquoted drops the word, so the NEXT flag is what we see here.
+                if not took or not v.strip():
+                    raise ValueError("refused — --project needs a non-empty directory "
+                                     "(got " + ("nothing" if not took else repr(v)) + ")")
                 proj = v
             elif k == "owns":
                 kw[k] = _norm_owns(v)
@@ -1244,27 +1318,23 @@ def main(argv):
     if cmd == "list":
         print(json.dumps(summary(load(proj)), indent=2))
     elif cmd == "add":
-        _refuse_if_worker()
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj)
         print(json.dumps(mutate(op_add, project=proj, **kw), indent=2))
     elif cmd == "update":
-        _refuse_if_worker()
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj)
         if kw.get("id") is None:
             print("usage: board.py update --id N [--state s] [--branch b] [--agent a] "
                  "[--owns p,...] [--notes n] [--worker w]", file=sys.stderr)
             return 1
         print(json.dumps(mutate(op_update, project=proj, **kw), indent=2))
     elif cmd == "remove":
-        _refuse_if_worker()
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj)
         rid = pos[0] if pos else kw.get("id")
         if rid is None:
             print("usage: board.py remove <id>", file=sys.stderr); return 1
         print(json.dumps(mutate(op_remove, project=proj, id=rid), indent=2))
     elif cmd == "clean":
-        _refuse_if_worker()
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj)
         res = clean(proj)
         ids = ", ".join(f"#{i}" for i in res["cleaned"]) or "none"
         print(f"cleaned {res['removed']} merged task(s): {ids}")
@@ -1278,8 +1348,7 @@ def main(argv):
         # confirmation names how many open rows go, which workers stop and
         # whether a plan is active — facts only this report holds, so there
         # has to be a way to get them without the destruction they describe.
-        _refuse_if_worker()
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj)
         dry = "dry_run" in kw
         rep = drop_report(proj)
         if not rep["exists"]:
@@ -1301,10 +1370,11 @@ def main(argv):
         print(f"  backup: {res['backup']}")
     elif cmd == "worker-start":
         # D12: hook-driven (SubagentStart/PostToolUse carry the worker's id in
-        # the payload, not CLAUDE_AGENT_ID) — no _refuse_if_worker() here. Safe
-        # to leave ungated: all this can do is move a row along its own
-        # lifecycle through mutate, where D9/overlap validation still applies.
-        proj = _write_project(proj)
+        # the payload, not CLAUDE_AGENT_ID), so a hook may run this with a
+        # worker's cwd or env. hook_ok exempts exactly that: TL_HOOK=1, which
+        # lib.sh's tl_init exports. From a worker's own Bash it is refused like
+        # every other write.
+        proj = _cli_write_project(proj, hook_ok=True)
         if kw.get("id") is None:
             print("usage: board.py worker-start --id A [--board N] [--branch B]",
                  file=sys.stderr)
@@ -1312,7 +1382,7 @@ def main(argv):
         res = worker_start(kw["id"], proj, board=kw.get("board"), branch=kw.get("branch"))
         print(json.dumps(res if res is not None else {"updated": None}, indent=2))
     elif cmd == "worker-stop":
-        proj = _write_project(proj)                # D12: hook-driven, see worker-start above
+        proj = _cli_write_project(proj, hook_ok=True)   # D12: hook-driven, see worker-start above
         if kw.get("id") is None:
             print("usage: board.py worker-stop --id A", file=sys.stderr)
             return 1
@@ -1337,8 +1407,7 @@ def main(argv):
         for p_ in probs:
             print(f"  ! {p_}")
     elif cmd in ("hold", "release"):
-        _refuse_if_worker()
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj)
         rid = pos[0] if pos else kw.get("id")
         if rid is None:
             print(f"usage: board.py {cmd} <row> "
@@ -1357,11 +1426,12 @@ def main(argv):
     elif cmd == "ledger":
         print(json.dumps(ledger(proj), indent=2))
     elif cmd == "forget":
-        proj = _write_project(proj)
+        proj = _cli_write_project(proj, hook_ok=True)    # restore.sh's session-start sweep
         print(json.dumps(forget(pos or ["all"], proj,
                                  before=kw.get("before"), not_session=kw.get("not_session")),
                           indent=2))
     elif cmd == "render":                       # re-render md from json
+        proj = _cli_write_project(proj, hook_ok=True)    # writes board.md; mode.sh/restore.sh call it
         with _board_lock(proj):                 # load->save must not race a mutate()
             db = load(proj)
             _, m = _paths(proj)
