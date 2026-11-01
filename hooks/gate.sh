@@ -87,19 +87,32 @@ fi
 if git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   dirty=""
   main=$(git -C "$TL_PROJECT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+  # Worktrees the lead marked as kept on purpose (`board.py hold`, #4/#9): row,
+  # and why the hold stopped applying ("" while it is good). A good hold is not a
+  # finding — without it this check re-fired every turn on a correct state.
+  declare -A held_row=() held_lapsed=()
+  while IFS=$'\t' read -r hp_ hr_ hl_; do
+    [ -n "$hp_" ] && { held_row[$hp_]=$hr_; held_lapsed[$hp_]=$hl_; }
+  done < <(python3 "$BOARD_PY" held --project "$TL_PROJECT" 2>/dev/null | python3 -c "
+import json,sys
+try:
+    for p,h in json.load(sys.stdin).items(): print(p,h['row'],h['lapsed'] or '',sep='\t')
+except Exception: pass" 2>/dev/null)
   while read -r w; do
     [ -n "$w" ] || continue
     [ "$w" = "$TL_PROJECT" ] && continue
     # .claude/worktrees/agent-<id> — skip it while that worker is still out.
     wid=$(basename "$w"); wid=${wid#agent-}
     case " $out_ids " in *" $wid "*) continue ;; esac
+    [ -n "${held_row[$w]:-}" ] && [ -z "${held_lapsed[$w]:-}" ] && continue
     note=""
     [ -n "$(git -C "$w" status --porcelain 2>/dev/null)" ] && note="uncommitted changes"
     n=$(git -C "$w" rev-list --count "$main..HEAD" 2>/dev/null) || n=0
     [ "${n:-0}" -gt 0 ] && note="${note:+$note, }$n commit(s) not in $main"
+    [ -n "$note" ] && [ -n "${held_row[$w]:-}" ] && note+=" (hold on row ${held_row[$w]} lapsed: ${held_lapsed[$w]})"
     [ -n "$note" ] && dirty+="  $w — $note"$'\n'
   done < <(git -C "$TL_PROJECT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
-  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"$dirty"
+  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"${dirty}  Kept on purpose (paused work, a commit awaiting the user's decision)? Say so once: board.py hold <row> --reason \"…\" --project \"\$PWD\" — it stops this firing until the row or the worktree changes."
 fi
 
 # Plan mode. The header line `> **Stage N** —…` in the active plan file is the one
