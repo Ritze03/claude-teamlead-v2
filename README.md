@@ -36,7 +36,11 @@ impossible to break rather than merely discouraged:
 - **Worker fence** — a worker can only write inside its own worktree. Claude Code already
   refuses writes into the shared checkout; this closes everywhere else on disk. The lead can
   authorise an out-of-project absolute path by putting it in the row's `owns` (`~` is expanded).
-  Bash writes are not checked by the fence, so the brief has to state the scope.
+  Bash writes are not checked by the fence, so the brief has to state the scope. An owned
+  absolute path also skips Claude Code's own permission prompt for the file tools, which a
+  background worker could not answer. A worker that needs a path it was not given sends the
+  lead a `SCOPE REQUEST`; the lead checks it, adds it to the row's `owns` and replies
+  (outside the project it asks you first).
 - **Restore** — after `/clear` or a compaction, open state is re-injected automatically.
 - **Merged means merged** — a task marked merged whose branch still has unmerged commits is
   caught against git, not taken on trust.

@@ -40,6 +40,13 @@ Add only what a refusal actually needs. Everything else the plugin prescribes
 (`board.py forget`/`clean`/`drop`, `gh issue create`, deleting state files, a push) has
 no rule here: if one is ever refused, the lead asks you before anything is allowed.
 
+## Worker writes outside the worktree
+
+A path the lead boards as an absolute entry of a worker's `owns` needs no `Edit`/`Write`
+allow rule: the worker fence answers Claude Code's prompt with an allow for exactly those
+paths (the hooks docs: a hook allow skips the prompt, but deny and ask rules are still
+evaluated). Bash writes are not covered: a `Bash(...)` rule is still needed for those.
+
 ## Syntax (Claude Code docs, "Configure permissions")
 
 - Rules are `Tool(specifier)`; Bash rules match the command text, `*` is a wildcard.

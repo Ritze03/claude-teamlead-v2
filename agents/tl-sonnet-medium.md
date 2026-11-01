@@ -29,6 +29,17 @@ If you hit a bug in the teamlead plugin itself (its hooks, board server, skills 
 ```
 The lead relays it to the user and offers a GitHub issue.
 
+## Needing a path your row does not cover
+
+If you must write a path your board row's `owns` does not cover — in the project or outside it — **ask the lead; never work around it** (no Bash write into an unowned path, no copy elsewhere). Use this fixed block:
+```
+SCOPE REQUEST: <path or glob>
+why: <one line>
+row: <N>
+```
+- Preferred: `SendMessage` to `"main"` with that block (`SendMessage` is deferred for some workers: `ToolSearch("select:SendMessage")` first). Keep working on anything that doesn't need the path; when a message says `granted: <path>`, proceed. `denied: <why>` means leave it out and say so in your report.
+- Blocked with nothing else to do: end your turn with a hand-back whose report **starts with** the same `SCOPE REQUEST` block (above the `🐞` block if both apply). The lead grants it and resumes you with `SendMessage`.
+
 ## Reporting back
 
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**

@@ -146,7 +146,23 @@ wrong: narrow the scopes or sequence the tasks.
 An absolute path in `owns` (`~` is expanded) is how you authorise a worker to write
 outside the project. The exception only applies once the worker is linked to its row,
 which happens at dispatch for a background dispatch with `board: N` on its own line in
-the brief. Bash writes are not fenced, so the brief must state the scope.
+the brief. Bash writes are not fenced, so the brief must state the scope. An owned
+absolute path also answers Claude Code's own permission prompt for the file tools (the
+fence emits an allow), so the worker is not stuck on a prompt it cannot answer. When
+you board a row with paths outside the project, tell the user before dispatching.
+
+**Scope requests.** A worker that needs a path its `owns` doesn't cover asks you with a
+`SCOPE REQUEST: <path or glob>` / `why:` / `row: <N>` block, by `SendMessage` to you
+(it keeps working meanwhile) or as the top of its hand-back (it is blocked; a
+`[teamlead] Worker asked for more scope` note then appears once on your next turn).
+Handle it: check it fits the task; read the docs that bear on it when it is a real
+change (docs-first, above); check other unfinished rows for overlap — `board_update`
+refuses overlapping `owns` unless linked by `blocked_by`, so then sequence the rows or
+have the worker hand back; then `board_update` the row's `owns` to add the path and
+reply `granted: <path>` (or `denied: <why>`) by `SendMessage` to the worker — to a
+worker that handed back this resumes it from its transcript. **Outside the project you
+grant nothing yourself: ask the user first.** Once granted, the fence's allow means the
+worker gets no permission prompt either.
 
 When you merge a task, set `notes` to **how it was solved**, not what was asked.
 That is the part worth having in three weeks, and it is rendered into the board's

@@ -19,7 +19,9 @@
 # exception (#7): if the lead boards an out-of-project dir as the task's write
 # scope, the worker may write there. The row is found by the `worker` id that
 # record.sh stores on it (PostToolUse(Agent), from the brief's `board: N`).
-# Relative owns entries are inside the worktree already and grant nothing here.
+# Relative owns entries are inside the worktree already and grant nothing here (a
+# relative `hooks/` never opens the main checkout). A match on an absolute entry
+# answers with an explicit allow, so Claude Code skips its own permission prompt too.
 #
 # Bash is NOT fenced, deliberately (#7). A write target cannot be reliably read out
 # of arbitrary shell (cd, variables, quoting, scripts that write on their own), so a
@@ -75,6 +77,18 @@ if [ -n "$anchor" ] && [ "$anchor" != / ]; then
   case "$target" in "$anchor"/*) exit 0 ;; esac
 fi
 
+# An owned path outside the worktree is a grant from the lead, so it also answers
+# Claude Code's own permission prompt (a background worker cannot answer one): emit
+# an explicit allow. Per the hooks docs, allow skips the prompt, but deny/ask rules
+# are still evaluated regardless of what the hook returns. Not emitted for the plain
+# in-worktree / scratchpad / project-root passes above: those already work, and an
+# allow there would mask Claude Code's normal behaviour.
+owned_ok() {
+  jq -n --arg n "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",
+    permissionDecisionReason:("teamlead: path is in board row " + $n + "'"'"'s owns")}}'
+  exit 0
+}
+
 # Absolute entries of this worker's own board row(s). The board lives in the MAIN
 # checkout, so resolve that from a linked worktree the way lib.sh does.
 aid=$(j .agent_id); bp="$proj_env"
@@ -84,15 +98,15 @@ if common=$(git -C "$bp" rev-parse --git-common-dir 2>/dev/null); then
 fi
 board="$bp/.claude/teamlead/.state/board.json"
 if [ -f "$board" ]; then
-  while IFS= read -r o; do
+  while IFS=$'\t' read -r bid o; do
     case "$o" in "~") o="$HOME" ;; "~/"*) o="$HOME/${o#\~/}" ;; esac
     case "$o" in /*) ;; *) continue ;; esac               # relative: inside the worktree already
     o=$(realpath -m "$o"); [ "$o" != / ] || continue       # never a blank cheque
     case "$o" in
-      *[\*\?\[]*) case "$target" in $o) exit 0 ;; esac ;;  # glob entry
-      *)          case "$target" in "$o"|"$o"/*) exit 0 ;; esac ;;
+      *[\*\?\[]*) case "$target" in $o) owned_ok "$bid" ;; esac ;;  # glob entry
+      *)          case "$target" in "$o"|"$o"/*) owned_ok "$bid" ;; esac ;;
     esac
-  done < <(jq -r --arg a "$aid" '.tasks[]? | select(.worker == $a and .state != "merged") | .owns[]?' "$board" 2>/dev/null)
+  done < <(jq -r --arg a "$aid" '.tasks[]? | select(.worker == $a and .state != "merged") | .id as $i | .owns[]? | "\($i)\t\(.)"' "$board" 2>/dev/null)
 fi
 
 jq -n --arg t "$target" --arg r "$root" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
