@@ -1015,7 +1015,9 @@ touch .claude/teamlead/board.md
 check "board updated -> passes" "$(ev "$STOP" "$H/gate.sh")" 0
 
 echo "== worktrees =="
-git worktree add -q "$T/wt" -b w1 2>/dev/null; echo dirty > "$T/wt/new.txt"
+# A worker's worktree is always .claude/worktrees/agent-<id>; check 3 ignores any other
+# linked worktree that no board row names (see the #9 scope tests below).
+git worktree add -q "$T/.claude/worktrees/agent-w1" -b w1 2>/dev/null; echo dirty > "$T/.claude/worktrees/agent-w1/new.txt"
 check "dirty worktree blocks" "$(ev "$STOP" "$H/gate.sh")" 2
 
 echo "== activation / deactivation =="
@@ -1041,7 +1043,7 @@ ev "$S" "$H/mode.sh" >/dev/null
 
 echo "== reconcile counts state from JSON, not from text =="
 mkdir -p .claude/teamlead/.state; : > .claude/teamlead/.state/active   # re-arm
-git -C "$T/wt" reset -q --hard 2>/dev/null; rm -f "$T/wt/new.txt" 2>/dev/null
+git -C "$T/.claude/worktrees/agent-w1" reset -q --hard 2>/dev/null; rm -f "$T/.claude/worktrees/agent-w1/new.txt" 2>/dev/null
 rm -f .claude/teamlead/.state/board.json
 python3 "$B" add --project $proj --task "running the migration script" --agent tl-sonnet-low --owns src/x >/dev/null
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -1623,6 +1625,14 @@ python3 "$B" add --project $gtp --task "w2" --agent tl-sonnet-low --owns src/y >
 python3 "$B" update --project $gtp --id 2 --state returned >/dev/null
 check "a task sitting in 'returned': exit 2" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 2
 grep -q 'returned' "$T/gtout" && ok "  names it" || bad "  names it"
+# #9 class: "waiting on the user" is a correct state of a returned row, and the only way
+# to acknowledge it is `blocked` + a note. The message has to say so, or the lead can only
+# answer it "deliberately skipping" every turn.
+grep "task(s) are in 'returned'" "$T/gtout" | grep -q "'blocked'" && ok "  and says a row waiting on the user goes to 'blocked'" || bad "  and says a row waiting on the user goes to 'blocked' (got: $(grep returned "$T/gtout"))"
+grep "task(s) are in 'returned'" "$T/gtout" | grep -q "'blocked' with a note" && ok "  with a note saying what it waits for" || bad "  with a note saying what it waits for"
+python3 "$B" update --project $gtp --id 2 --state blocked --notes "waiting on the user: keep or drop?" >/dev/null
+grep -q "'returned'" <<<"$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}' >/dev/null; cat "$T/gtout")" && bad "  and a blocked row is not flagged by check 7" || ok "  and a blocked row is not flagged by check 7"
+python3 "$B" update --project $gtp --id 2 --state returned >/dev/null
 
 python3 "$B" update --project $gtp --id 2 --state merged >/dev/null
 printf '# T\n\n> **Stage 3** — x\n' > $gtf
@@ -3211,6 +3221,43 @@ check "  row merged while the worktree is still there: flagged again" "$(ev "$HG
 grep -q 'agent-h2' $T/out && ok "  naming the worktree" || bad "  naming the worktree"
 check "  and the hold is gone from the row" "$(hjq 2 "'held' in t")" False
 git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h2"; git -C "$hp" branch -D worktree-agent-h2 >/dev/null 2>&1
+
+# #9 (b): the message has to be enough on its own. A fresh lead has not read the skill's
+# hold paragraph; the gate names the row and prints a command it can run as written.
+python3 "$B" update --project $hp --id 3 --state blocked --worker h5 --branch worktree-agent-h5 --owns "" --notes "superseded, kept as reference" >/dev/null 2>&1
+hwt h5; echo x > "$hp/.claude/worktrees/agent-h5/x.txt"
+git -C "$hp/.claude/worktrees/agent-h5" add -A; git -C "$hp/.claude/worktrees/agent-h5" commit -qm "superseded commit"
+check "#9 message: the blocked row's worktree is flagged" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h5 — 1 commit(s) not in .* (board row 3)' $T/out && ok "  the line names the board row to hold" || bad "  the line names the board row to hold (got: $(grep agent-h5 $T/out))"
+grep -qE 'python3 [^ ]*scripts/board\.py hold 3 --reason' $T/out && ok "  and prints a runnable command for that row, not a <row> placeholder" || bad "  runnable hold command for row 3 (got: $(grep 'board.py hold' $T/out))"
+grep -qF 'queued, blocked or returned' $T/out && ok "  and says which rows can be held" || bad "  and says which rows can be held"
+eval "$(grep -oE 'python3 [^ ]*scripts/board\.py hold 3 --reason' $T/out | head -1) \"kept for the user\" --project $hp" >/dev/null 2>&1
+check "  running the printed command (reason added) silences the gate" "$(ev "$HGATE" "$H/gate.sh")" 0
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h5"; git -C "$hp" branch -D worktree-agent-h5 >/dev/null 2>&1
+python3 "$B" update --project $hp --id 3 --state merged >/dev/null 2>&1
+
+# check 3 scope (#9): only the plugin's own worktrees. A worktree the user made by hand
+# for their own branch has no board row and cannot be held; flagging it fired every turn.
+# Worker worktrees are always .claude/worktrees/agent-<id>, so nothing of a worker's escapes.
+git -C "$hp" worktree add -q "$T/h4-own" -b my-own-branch 2>/dev/null
+echo mine > "$T/h4-own/m.txt"; git -C "$T/h4-own" add -A; git -C "$T/h4-own" commit -qm "my own work"; echo wip > "$T/h4-own/wip.txt"
+check "check 3: a hand-made worktree (own branch, no row), commit + dirty: not flagged" "$(ev "$HGATE" "$H/gate.sh")" 0
+hwt h6; echo y > "$hp/.claude/worktrees/agent-h6/y.txt"
+git -C "$hp/.claude/worktrees/agent-h6" add -A; git -C "$hp/.claude/worktrees/agent-h6" commit -qm "orphaned worker commit"
+check "  an agent-* worktree with no board row is still flagged" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h6 — 1 commit(s) not in .* (no board row)' $T/out && ok "  naming it, with no row" || bad "  naming it, with no row (got: $(grep agent-h6 $T/out))"
+grep -q 'h4-own' $T/out && bad "  and never the hand-made one" || ok "  and never the hand-made one"
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h6"; git -C "$hp" branch -D worktree-agent-h6 >/dev/null 2>&1
+# a worktree outside .claude/worktrees whose branch IS a board row's is the plugin's
+python3 "$B" add --project $hp --task "own-branch row" --agent tl-sonnet-low --owns h4/own >/dev/null
+hrow=$(python3 -c "import json;print(max(t['id'] for t in json.load(open('$HJ'))['tasks']))")
+python3 "$B" update --project $hp --id $hrow --state blocked --worker ob1 --branch my-own-branch >/dev/null 2>&1
+check "  a hand-made worktree whose branch a board row names is flagged" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q "h4-own — .*(board row $hrow)" $T/out && ok "  naming that row" || bad "  naming that row (got: $(grep h4-own $T/out))"
+python3 "$B" hold $hrow --worktree "$T/h4-own" --reason "r" --project $hp >/dev/null 2>&1
+check "  and holding that row silences it" "$(ev "$HGATE" "$H/gate.sh")" 0
+git -C "$hp" worktree remove --force "$T/h4-own"; git -C "$hp" branch -D my-own-branch >/dev/null 2>&1
+python3 "$B" update --project $hp --id $hrow --state merged >/dev/null 2>&1
 
 echo "== T76: a real return reaps the background tasks the worker left open =="
 t76d=$T/t76; mkdir -p "$t76d/tasks"
