@@ -56,7 +56,8 @@ tools:
 | `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
 **Check the docs before you board and dispatch.** If the project has `superdoc/`
-(agent-facing) or `docs/` (user-facing), find the pages that bear on each task
+(agent-facing) or `docs/` (user-facing), or a doc folder CLAUDE.md's
+`superdoc:start` block points at, find the pages that bear on each task
 *first* — they can change the split, `owns`, or the wording. You already know what
 exists: glance at `superdoc/architecture/overview.md` (the hub — "where to look
 for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`;

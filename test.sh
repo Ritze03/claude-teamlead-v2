@@ -683,6 +683,8 @@ grep -q '<doc root>/brainstorm/' "$BR" && ! grep -q 'save\*\* to `superdoc/brain
 grep -q 'Part 4a — Privacy' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md" && ok "playbook: privacy rule" || bad "playbook: privacy rule"
 grep -q 'Privacy scan' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md" && ok "  audit greps for leaks" || bad "  audit privacy scan"
 
+grep -q 'docs/.*superdoc:start' <(grep -A3 'After a `/clear`' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" | tr '\n' ' ') && ok "plan: after-/clear reads docs/ and the superdoc:start folder" || bad "plan: after-/clear doc folders"
+
 echo "== the @-budget rule keeps its reasoning =="
 PB="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md"
 grep -q 'nothing else, ever' "$PB" && ok "the exact set is still mandated" || bad "the exact set is still mandated"
