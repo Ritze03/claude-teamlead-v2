@@ -1558,6 +1558,72 @@ python3 "$B" update --project $gtp --id 2 --state merged >/dev/null
 printf '# T\n\n> **Stage 3** — x\n' > $gtf
 check "no transcript_path: footer check skipped, exit 0" "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false}')" 0
 
+echo "== gate.sh check 6: 'every board row merged' is not 'the plan is done' (#6) =="
+# The board holds one wave/phase at a time, so all-merged between waves is normal
+# while later I<n> steps have no row yet. Check 6 may fire only once every step of
+# the current scope (the current phase, or the whole table without phases) is
+# boarded AND merged.
+g6=$T/g6gate; mkdir -p $g6/.claude/teamlead/plan $g6/.claude/teamlead/.state
+: > $g6/.claude/teamlead/.state/active
+g6f=$g6/.claude/teamlead/plan/topic.md
+echo "$g6f" > $g6/.claude/teamlead/.state/active-plan
+git -C $g6 init -q; git -C $g6 config user.email t@t.t; git -C $g6 config user.name t
+echo a > $g6/a.txt; git -C $g6 add -A >/dev/null; git -C $g6 commit -qm init >/dev/null
+g6run(){ echo '{"hook_event_name":"Stop","cwd":"'$g6'","stop_hook_active":false}' | "$H/gate.sh" >"$T/g6out" 2>&1; echo $?; }
+g6s6(){ g6run >/dev/null; grep -q 'set the header to Stage 6' "$T/g6out" && echo fires || echo quiet; }
+g6add(){ python3 "$B" add --project $g6 --task "t$1" --agent tl-sonnet-low --owns src/$1 --plan $1 >/dev/null; }
+g6set(){ python3 "$B" update --project $g6 --id "$1" --state "$2" >/dev/null; }
+g6reset(){ rm -f $g6/.claude/teamlead/.state/board.json $g6/.claude/teamlead/.state/phase-accepted $g6/.claude/teamlead/.state/plan-stage; }
+G6HEAD='# T\n\n> **Stage 5** — x\n\n## Implementation plan\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n'
+# unphased: I1..I4
+printf "$G6HEAD"'| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n| 1 | I2 | b — **D1** | `tl-sonnet-low` | src/I2 | — |\n| 2 | I3 | c — **D1** | `tl-sonnet-low` | src/I3 | I1 |\n| 3 | I4 | d — **D1** | `tl-sonnet-low` | src/I4 | I3 |\n' > $g6f
+g6reset; g6add I1; g6add I2; g6set 1 merged; g6set 2 merged
+# (board.py check_plan may still nudge to board the next wave of an unphased table —
+# that is its own message; what must not fire is the Stage 6 one.)
+check "#6 repro: I1+I2 merged, I3+I4 not boarded: no Stage 6 demand" "$(g6s6)" quiet
+check "  still quiet on the next turn" "$(g6s6)" quiet
+g6add I3; g6set 3 merged
+check "I1-I3 merged, I4 still unboarded: no Stage 6 demand" "$(g6s6)" quiet
+g6add I4
+check "I4 boarded but queued: exit 0" "$(g6run)" 0
+g6set 4 merged
+check "every step boarded and merged: exit 2" "$(g6run)" 2
+check "  now demands Stage 6" "$(g6s6)" fires
+# merged rows with no plan link (scouts) prove nothing about the plan's steps
+g6reset; python3 "$B" add --project $g6 --task "scout" --agent tl-sonnet-low --owns src/s >/dev/null; g6set 1 merged
+check "only a merged non-plan row, steps unboarded: no Stage 6 demand" "$(g6s6)" quiet
+# an unboarded step is never 'merged', even when a wave-mate is
+g6reset; g6add I1; g6set 1 merged
+check "I1 merged, same-wave I2 unboarded: no Stage 6 demand" "$(g6s6)" quiet
+# a header-only plan (no I<n> steps at all) keeps the old behaviour
+printf '# T\n\n> **Stage 5** — x\n' > $g6f
+g6reset; python3 "$B" add --project $g6 --task "w" --agent tl-sonnet-low --owns src/x >/dev/null; g6set 1 merged
+check "plan without any I<n> step, board all merged: still exit 2" "$(g6run)" 2
+g6reset
+check "plan without any I<n> step, empty board: exit 0" "$(g6run)" 0
+# phased: A = I1,I2   B = I3
+printf "$G6HEAD"'| — | **A** | **First** | | | |\n| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n| 1 | I2 | b — **D1** | `tl-sonnet-low` | src/I2 | — |\n| — | **B** | **Second** | | | |\n| 2 | I3 | c — **D1** | `tl-sonnet-low` | src/I3 | — |\n' > $g6f
+g6reset; g6add I1; g6set 1 merged
+check "phased: phase A half boarded: no Stage 6 demand" "$(g6s6)" quiet
+g6add I2; g6set 2 merged
+check "phased: phase A fully merged, B not boarded: exit 2 (A is the current phase)" "$(g6run)" 2
+grep -q 'Stage 6' "$T/g6out" && ok "  demands Stage 6 for the finished phase" || bad "  demands Stage 6"
+# A passes 6 and 7, the header returns to 5 for B: A's merged rows may still sit on the board
+sed -i 's/Stage 5/Stage 6/' $g6f; g6run >/dev/null
+sed -i 's/Stage 6/Stage 7/' $g6f; g6run >/dev/null
+sed -i 's/Stage 7/Stage 5/' $g6f
+check "phased: back at stage 5 after A was accepted, B unboarded: exit 0" "$(g6run)" 0
+g6add I3
+check "phased: B boarded, not merged: exit 0" "$(g6run)" 0
+g6set 3 merged
+check "phased: B fully merged: exit 2" "$(g6run)" 2
+# a step of an accepted phase that is reopened (stage 6/7 failure) is current again
+g6set 1 queued
+check "phased: accepted step reopened: exit 0 while it is open" "$(g6run)" 0
+g6set 1 merged
+check "phased: accepted step re-merged, B merged: exit 2" "$(g6run)" 2
+g6reset
+
 echo "== board.py check_plan: the wave table's CURRENT phase must be on the board (D22) =="
 cpp=$T/cplan; mkdir -p $cpp/.claude/teamlead/plan $cpp/.claude/teamlead/.state
 git -C $cpp init -q; git -C $cpp config user.email t@t.t; git -C $cpp config user.name t
