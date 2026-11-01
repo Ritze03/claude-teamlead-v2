@@ -87,7 +87,7 @@ Then say `/teamlead` — or just ask it to act as a team lead. Activation is per
 | **orchestration** | The always-on mode. Board, dispatch, gates. |
 | **`/teamlead plan <topic>`** | Interactive planning in a file you keep open in your editor. Scouts first, asks second, never decides the plan is finished — you type "Go". |
 | **`/teamlead brainstorm <agents> <iterations> <topic>`** | N independent thinkers × M rounds, overlapping lenses, questions back to you between rounds, a final Opus verify. |
-| **`/teamlead superdoc`** | Sets up / audits the agent-facing knowledge base in `superdoc/`. `docs/` stays user-facing. |
+| **`/teamlead superdoc`** | Sets up / audits the agent-facing knowledge base in `superdoc/` (or another folder if you ask for one). `docs/` stays user-facing. |
 
 ## What a session looks like
 

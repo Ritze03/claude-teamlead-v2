@@ -672,6 +672,13 @@ printf 'terms\n' > $sdp/superdoc/meta/TERMINOLOGY.md
 miss=$(cd $sdp && grep -oE '@superdoc/[^ )`]+' CLAUDE.md | sed 's/^@//' | while read -r f; do test -f "$f" || echo "$f"; done)
 check "flags exactly the missing ref" "$miss" "superdoc/meta/GONE.md"
 
+echo "== superdoc: default folder yields to an explicit user request; privacy rule present =="
+grep -q 'explicitly asks in plain text for another folder' "$SD" && ok "SKILL: an explicit user folder request wins" || bad "SKILL: user folder request"
+! grep -q 'Always. No alternative' "$SD" && ok "  no 'always, no alternative' left" || bad "  stale 'always' wording"
+grep -q 'Privacy' "$SD" && ok "  SKILL tells the lead to put privacy in briefs" || bad "  SKILL privacy line"
+grep -q 'Part 4a — Privacy' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md" && ok "playbook: privacy rule" || bad "playbook: privacy rule"
+grep -q 'Privacy scan' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md" && ok "  audit greps for leaks" || bad "  audit privacy scan"
+
 echo "== the @-budget rule keeps its reasoning =="
 PB="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md"
 grep -q 'nothing else, ever' "$PB" && ok "the exact set is still mandated" || bad "the exact set is still mandated"

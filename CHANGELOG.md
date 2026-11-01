@@ -4,6 +4,11 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.2.1 — 2026-11-01
+
+- superdoc: the doc folder defaults to `superdoc/`, but an explicit plain-text user request for another folder wins and is passed to every worker brief; removed the contradictory "always, no alternative" and "docs/ only" wording.
+- superdoc: new privacy rule (playbook Part 4a). Pages are committed and often public, so repo-relative paths only and no usernames, emails, hostnames, absolute host paths, secrets or local setup; the verify gate and audit mode grep for leaks.
+
 ## 2.2.0 — 2026-11-01
 
 - Stop gate never tells the lead to remove the main checkout (GH#10). #76905a7
