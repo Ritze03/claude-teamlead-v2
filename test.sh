@@ -2621,6 +2621,56 @@ python3 "$B" forget Q --project $qc4bp >/dev/null 2>&1
 st1qc4b=$(python3 -c "import json;print([t['state'] for t in json.load(open('$qc4bp/.claude/teamlead/.state/board.json'))['tasks'] if t['id']==1][0])")
 check "no blockers: requeue still lands in queued" "$st1qc4b" "queued"
 
+echo "== #4/#9: hold / release — the lead marks a kept worktree, tied to its row =="
+hop=$T/hop; mkdir -p $hop
+git -C $hop init -q; git -C $hop config user.email t@t.t; git -C $hop config user.name t
+echo a > $hop/a; git -C $hop add a; git -C $hop commit -qm init
+git -C $hop worktree add -q $hop/.claude/worktrees/agent-o1 -b worktree-agent-o1 2>/dev/null
+git -C $hop worktree add -q $hop/.claude/worktrees/agent-o2 -b worktree-agent-o2 2>/dev/null
+HOJ=$hop/.claude/teamlead/.state/board.json
+hoq(){ python3 -c "import json;d=json.load(open('$HOJ'));t=[x for x in d['tasks'] if x['id']==$1][0];print($2)"; }
+python3 "$B" add --project $hop --task "queued row" --agent tl-sonnet-low --owns ho/a >/dev/null    # 1
+python3 "$B" add --project $hop --task "blocked row" --agent tl-sonnet-low --owns ho/b >/dev/null   # 2
+python3 "$B" add --project $hop --task "running row" --agent tl-sonnet-low --owns ho/c >/dev/null   # 3
+python3 "$B" add --project $hop --task "merged row" --agent tl-sonnet-low --owns ho/d >/dev/null    # 4
+python3 "$B" update --project $hop --id 1 --worker o1 --branch worktree-agent-o1 >/dev/null
+python3 "$B" update --project $hop --id 2 --state blocked --worker o2 >/dev/null
+python3 "$B" update --project $hop --id 3 --state running --worker o3 --branch worktree-agent-o1 >/dev/null
+python3 "$B" update --project $hop --id 4 --state merged >/dev/null
+check "hold: an unknown row is refused" "$(python3 "$B" hold 99 --project $hop >/dev/null 2>&1; echo $?)" 1
+check "  a running row is refused (its worker is out)" "$(python3 "$B" hold 3 --project $hop >"$T/hoout" 2>&1; echo $?)" 1
+grep -q 'running' "$T/hoout" && ok "  and says why" || bad "  and says why (got: $(cat $T/hoout))"
+check "  a merged row is refused" "$(python3 "$B" hold 4 --worktree $hop/.claude/worktrees/agent-o1 --project $hop >/dev/null 2>&1; echo $?)" 1
+check "  the main checkout is not a worktree to hold" "$(python3 "$B" hold 1 --worktree $hop --project $hop >"$T/hoout" 2>&1; echo $?)" 1
+grep -q 'not a linked worktree' "$T/hoout" && ok "  and says so" || bad "  and says so (got: $(cat $T/hoout))"
+check "  a plain directory is refused" "$(python3 "$B" hold 1 --worktree $T --project $hop >/dev/null 2>&1; echo $?)" 1
+check "  a worker may not hold (the board is the lead's)" "$(CLAUDE_AGENT_ID=x python3 "$B" hold 1 --project $hop >/dev/null 2>&1; echo $?)" 1
+check "  no --project and no CLAUDE_PROJECT_DIR is refused (writes never resolve from cwd)" "$(env -u CLAUDE_PROJECT_DIR python3 "$B" hold 1 >/dev/null 2>&1; echo $?)" 1
+check "  nothing was held by any refusal" "$(hoq 1 "'held' in t")" False
+check "hold 2 with no branch resolves the path from the worker id" "$(python3 "$B" hold 2 --reason "kept as reference" --project $hop >/dev/null 2>&1; echo $?)" 0
+check "  recorded path" "$(hoq 2 "t['held']['worktree']")" "$hop/.claude/worktrees/agent-o2"
+check "  recorded the state it was held in" "$(hoq 2 "t['held']['state']")" blocked
+check "  and the worker" "$(hoq 2 "t['held']['worker']")" o2
+check "hold 1 with an explicit --worktree: exit 0" "$(python3 "$B" hold 1 --worktree $hop/.claude/worktrees/agent-o1/ --project $hop >/dev/null 2>&1; echo $?)" 0
+check "  the stored path is the one git lists, not the spelling given" "$(hoq 1 "t['held']['worktree']")" "$hop/.claude/worktrees/agent-o1"
+python3 "$B" held --project $hop >"$T/hheld" 2>&1
+check "held lists both, neither lapsed" "$(python3 -c "import json;d=json.load(open('$T/hheld'));print(sorted((v['row'],v['lapsed']) for v in d.values()))")" "[(1, None), (2, None)]"
+check "board check accepts held rows" "$(python3 "$B" check --project $hop >/dev/null 2>&1; echo $?)" 0
+check "board_list (MCP) carries the hold" "$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"board_list","arguments":{}}}' | CLAUDE_PROJECT_DIR=$hop python3 "$B" --mcp | grep -c 'kept as reference')" 1
+# anything that moves the row off the state it was held in drops the hold
+python3 "$B" update --project $hop --id 2 --state queued >/dev/null 2>&1
+check "blocked -> queued drops the hold" "$(hoq 2 "'held' in t")" False
+python3 "$B" update --project $hop --id 1 --worker other >/dev/null 2>&1
+check "a new worker on the row drops the hold" "$(hoq 1 "'held' in t")" False
+python3 "$B" update --project $hop --id 1 --notes "just a note" >/dev/null 2>&1
+python3 "$B" hold 1 --worktree $hop/.claude/worktrees/agent-o1 --project $hop >/dev/null 2>&1
+python3 "$B" update --project $hop --id 1 --notes "a note does not lift it" >/dev/null 2>&1
+check "an unrelated edit (notes) keeps the hold" "$(hoq 1 "'held' in t")" True
+python3 "$B" release 1 --project $hop >/dev/null 2>&1
+check "release drops it" "$(hoq 1 "'held' in t")" False
+check "  releasing a row that is not held is harmless" "$(python3 "$B" release 1 --project $hop >/dev/null 2>&1; echo $?)" 0
+check "  a worker may not release" "$(CLAUDE_AGENT_ID=x python3 "$B" release 1 --project $hop >/dev/null 2>&1; echo $?)" 1
+
 echo "== I5/D3/D4: hooks.json wires PostToolUse(Agent) -> record.sh =="
 check "hooks.json declares the PostToolUse Agent matcher" \
   "$(jq -e '.hooks.PostToolUse[0].matcher == "Agent"' "$H/hooks.json")" "true"
@@ -3082,6 +3132,85 @@ ev "$(TSTOP tw2 $T/t65-old.jsonl done)" "$H/record.sh" >/dev/null
 check "harness without SubagentHandback (never named): final, row 2 -> returned" "$(rowt 2)" returned
 ev "$(TSTOP tw3 $T/nope.jsonl done)" "$H/record.sh" >/dev/null
 grep -q '  return    agent=teamlead:tl-sonnet-low  id=tw3' $LT && ok "unreadable transcript: final, return line written" || bad "unreadable transcript: final, return line written"
+
+echo "== #4/#9: a worktree kept on purpose is held, not re-flagged every turn =="
+# The flaw class: check 3 cannot tell "kept on purpose" from "forgotten", so it fires
+# every turn on a correct state. `board.py hold` is the acknowledgement; it lapses on
+# any state change (row state, re-dispatch, new commit or edit in the worktree).
+hp=$T/h4; mkdir -p "$hp/.claude/teamlead/.state"; : > "$hp/.claude/teamlead/.state/active"
+git -C "$hp" init -q; git -C "$hp" config user.email t@t.t; git -C "$hp" config user.name t
+echo a > "$hp/a"; git -C "$hp" add a; git -C "$hp" commit -qm init
+HGATE='{"hook_event_name":"Stop","cwd":"'$hp'","stop_hook_active":false}'
+HJ=$hp/.claude/teamlead/.state/board.json
+hjq(){ python3 -c "import json;d=json.load(open('$HJ'));t=[x for x in d['tasks'] if x['id']==$1][0];print($2)"; }
+hwt(){ git -C "$hp" worktree add -q "$hp/.claude/worktrees/agent-$1" -b "worktree-agent-$1" 2>/dev/null; }
+python3 "$B" add --project $hp --task "h1 work" --agent tl-sonnet-low --owns h4/a >/dev/null   # id 1
+python3 "$B" add --project $hp --task "h2 work" --agent tl-sonnet-low --owns h4/b >/dev/null   # id 2
+python3 "$B" add --project $hp --task "h3 work" --agent tl-sonnet-low --owns h4/c >/dev/null   # id 3
+# #4: workers stopped (TaskStop + forget), rows requeued, worktrees kept with partial work
+python3 "$B" update --project $hp --id 1 --state running --worker h1 --branch worktree-agent-h1 >/dev/null
+hwt h1; echo partial > "$hp/.claude/worktrees/agent-h1/wip.txt"
+printf '%s  start     agent=teamlead:tl-sonnet-medium  id=h1\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $hp/.claude/teamlead/.state/events.log
+python3 "$B" forget h1 --project $hp >/dev/null 2>&1
+check "  setup: row 1 requeued by forget" "$(hjq 1 "t['state']")" queued
+check "no hold: turn 1 flags the kept worktree" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h1 — uncommitted changes' $T/out && ok "  and names it" || bad "  and names it"
+check "no hold: turn 2 flags it again (the flaw)" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'board.py hold' $T/out && ok "  the message names the way to acknowledge it" || bad "  the message names the way to acknowledge it"
+python3 "$B" hold 1 --reason "paused by the user" --project $hp >"$T/hout" 2>&1
+check "hold 1 (worktree resolved from the row's branch): exit 0" "$?" 0
+check "  the row records the hold" "$(hjq 1 "t['held']['reason']")" "paused by the user"
+check "  and the worktree path" "$(hjq 1 "t['held']['worktree']")" "$hp/.claude/worktrees/agent-h1"
+check "held: turn 1 is silent" "$(ev "$HGATE" "$H/gate.sh")" 0
+check "held: turn 2 is silent" "$(ev "$HGATE" "$H/gate.sh")" 0
+check "held: turn 3 is silent" "$(ev "$HGATE" "$H/gate.sh")" 0
+grep -q 'left work behind' $T/out && bad "  nothing about left-behind work" || ok "  nothing about left-behind work"
+python3 "$B" status --project $hp >"$T/hstat" 2>&1
+grep -q 'held.*agent-h1.*paused by the user' "$T/hstat" && ok "  board.py status still lists it, with the reason" || bad "  board.py status still lists it, with the reason (got: $(cat $T/hstat))"
+# a hold lapses when the worktree changes under it: someone worked there again
+echo more > "$hp/.claude/worktrees/agent-h1/more.txt"
+check "an edit in the held worktree lapses the hold: flagged again" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h1 — uncommitted changes.*hold on row 1 lapsed' $T/out && ok "  and says why" || bad "  and says why (got: $(grep agent-h1 $T/out))"
+python3 "$B" hold 1 --reason "paused by the user" --project $hp >/dev/null 2>&1
+check "  re-holding it silences it again" "$(ev "$HGATE" "$H/gate.sh")" 0
+git -C "$hp/.claude/worktrees/agent-h1" add -A; git -C "$hp/.claude/worktrees/agent-h1" commit -qm "more work"
+check "a commit in the held worktree lapses the hold" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q '1 commit(s) not in .*hold on row 1 lapsed' $T/out && ok "  and says so" || bad "  and says so (got: $(grep agent-h1 $T/out))"
+python3 "$B" hold 1 --project $hp >/dev/null 2>&1
+check "  re-held" "$(ev "$HGATE" "$H/gate.sh")" 0
+# re-dispatch: the row goes running under a new worker; the hold is gone, the worktree is flagged again
+python3 "$B" worker-start --id h1b --board 1 --branch worktree-agent-h1b --project $hp >/dev/null 2>&1
+check "re-dispatch drops the hold from the row" "$(hjq 1 "'held' in t")" False
+check "  and the old worktree is flagged again" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h1 —' $T/out && ok "  naming it" || bad "  naming it"
+python3 "$B" hold 1 --project $hp >"$T/hout" 2>&1
+check "  a running row cannot be held (its worker is out)" "$?" 1
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h1"; git -C "$hp" branch -D worktree-agent-h1 >/dev/null 2>&1
+python3 "$B" update --project $hp --id 1 --state merged >/dev/null 2>&1
+# release is explicit and immediate
+hwt h4r; echo wip > "$hp/.claude/worktrees/agent-h4r/w.txt"
+python3 "$B" update --project $hp --id 3 --state queued --worker h4r --branch worktree-agent-h4r >/dev/null
+python3 "$B" hold 3 --reason "r" --project $hp >/dev/null 2>&1
+check "setup: row 3 held, gate silent" "$(ev "$HGATE" "$H/gate.sh")" 0
+python3 "$B" release 3 --project $hp >/dev/null 2>&1
+check "release 3: flagged again" "$(ev "$HGATE" "$H/gate.sh")" 2
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h4r"; git -C "$hp" branch -D worktree-agent-h4r >/dev/null 2>&1
+# #9: a superseded commit kept as reference, row blocked, waiting on the user's OK to delete
+python3 "$B" update --project $hp --id 2 --state blocked --worker h2 --branch worktree-agent-h2 --owns "" --notes "superseded, kept as reference" >/dev/null 2>&1
+hwt h2; echo x > "$hp/.claude/worktrees/agent-h2/x.txt"
+git -C "$hp/.claude/worktrees/agent-h2" add -A; git -C "$hp/.claude/worktrees/agent-h2" commit -qm "superseded commit"
+check "#9: a blocked row's worktree with an unmerged commit is flagged (no hold yet)" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q '1 commit(s) not in' $T/out && ok "  as '1 commit(s) not in <branch>'" || bad "  as '1 commit(s) not in <branch>'"
+python3 "$B" hold 2 --reason "superseded; deleting the unmerged commit needs the user's OK" --project $hp >"$T/hout" 2>&1
+check "  hold works on a blocked row: exit 0" "$?" 0
+check "  the hold keeps the row blocked" "$(hjq 2 "t['state']")" blocked
+for i in 1 2 3; do check "  #9 held: turn $i is silent" "$(ev "$HGATE" "$H/gate.sh")" 0; done
+# the user said delete it -> the row is merged/removed; here: merged while the worktree is still there
+python3 "$B" update --project $hp --id 2 --state merged >/dev/null 2>&1
+check "  row merged while the worktree is still there: flagged again" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h2' $T/out && ok "  naming the worktree" || bad "  naming the worktree"
+check "  and the hold is gone from the row" "$(hjq 2 "'held' in t")" False
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h2"; git -C "$hp" branch -D worktree-agent-h2 >/dev/null 2>&1
 
 echo "== T76: a real return reaps the background tasks the worker left open =="
 t76d=$T/t76; mkdir -p "$t76d/tasks"

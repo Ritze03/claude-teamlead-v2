@@ -79,6 +79,16 @@ python3 <plugin-root>/scripts/board.py forget <agent-id> --project "$PWD"
 It appends a `cancel` event rather than editing history, and `board.py status`
 lists the stuck ids so you can see what you are closing.
 
+**Keeping a worktree on purpose** (paused work you will reuse, or an unmerged commit
+kept until the user says delete it): mark it with `board.py hold <row> --reason "…"
+--project "$PWD"` (row `queued`/`blocked`/`returned`; `release <row>` undoes it)
+instead of answering the gate with "deliberately skipping". A hold silences the
+gate for that worktree only until the row is re-dispatched or merged, or the
+worktree gets a new commit or edit — then the gate flags it again. A worker
+resumed with `SendMessage` can find its worktree gone (finished workers' worktrees
+may be auto-removed): check `git worktree list` first, else dispatch fresh and point
+the brief at the held path to read the partial work.
+
 A task marked `merged` is **verified against git**: if its branch still has commits
 not in `HEAD`, the gate says so. Do not mark something merged until it is.
 
