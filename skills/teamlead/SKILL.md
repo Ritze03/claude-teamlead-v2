@@ -108,6 +108,10 @@ nothing of that worker may be left behind:
    asked to leave running is the one exception: leave that one, remove nothing yet.
 3. Then `board_update` the row (`merged`, with notes on how it was solved).
 
+If the merge or the cleanup is refused by the permission layer (auto mode), follow
+*Merging and cleanup under auto mode* below: say the review evidence, then stop and
+offer the allow rule if it still refuses.
+
 **A row stuck at `running` because the worker paused on its own background job**
 (`events.log` shows `pause`, `board.py status` still lists the worker as working,
 no report ever came) is not a reason to wait: if the branch shows the work is done,
@@ -299,7 +303,7 @@ re-deriving your context is not.** Write briefs that are thorough, not short.
    you must act on its findings: record them in the row's `notes`, then move it to
    `merged` once you've acted on them.
 2. **Goal** — what done looks like.
-3. **Scope** — the `Owns` path, and what it must not touch.
+3. **Scope** — the `Owns` path, and what it must not touch. Never a merge, push or branch deletion: the worker commits and reports, you merge.
 4. **Inputs — the important one.** Everything from *your* context the worker would
    otherwise have to find out: scout findings, relevant file paths and line numbers,
    the conventions in play, the user's actual words where wording matters, prior
@@ -321,11 +325,76 @@ The cost asymmetry is the whole point: your context is expensive and already pai
 for. Spending it into a brief is how the cheap tier does the work correctly the
 first time.
 
+## Merging and cleanup under auto mode
+
+**Workers report; the lead merges.** A brief **never** tells a worker to merge,
+push, open or merge a PR, or delete a branch ("merge the PR yourself once checks
+pass" is exactly the sentence to leave out). The worker's job ends at a commit on its
+branch and a report; accepting and merging that branch is yours, after review. That
+is also what lets a reviewer, human or classifier, see a review gate sitting between
+the work and the merge.
+
+Under Claude Code's **auto permission mode** a classifier judges each shell command
+from the command text and the conversation alone, and may refuse a merge or a
+`worker-cleanup.sh` call as "Merge Without Review" even after a QC worker approved.
+So make the review visible, in the same turn, immediately before the merge:
+
+> Merging task 12 (branch `worktree-agent-ab12`): QC row 14 returned MERGE, the
+> user approved the plan on <date>.
+
+State the QC row id and its verdict (and, if the user told you to merge after QC,
+say so). Then run the merge. For a PR flow, put the same evidence in the PR comment
+or merge body.
+
+**Permission refusal → stop, tell the user, offer the rule; never route around it.**
+This is one rule for every lead action, not one per command. If a command is refused
+by the permission layer (an auto-mode classifier denial, a permission prompt that is
+declined, a `permissions.deny` rule), then:
+
+1. Stop that action. Do not retry it reworded, split, wrapped (`sh -c`, `git -C`,
+   `env`, a scratch script), moved to a worker, or replaced by a lesser command that
+   reaches the same effect (`branch -D` or `worktree remove --force` after `-d` was
+   refused, a squash merge after a merge was refused, a `forget` or `drop` to make the
+   gate stop asking).
+2. Say plainly what was refused and what is left undone (the row stays `returned`; the
+   Stop gate will keep asking, and that is correct).
+3. Offer the user the exact allow rules below, and ask. Add them only after a yes,
+   to the **project** `.claude/settings.json` under `permissions.allow` (merge into any
+   existing array, never overwrite the file). Never write settings from a hook or
+   without the yes. The user can equally say "yes, merge" in their next message, which
+   the classifier reads as explicit intent for that one action.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge *)",
+      "Bash(gh pr merge *)",
+      "Bash(bash */scripts/worker-cleanup.sh *)"
+    ]
+  }
+}
+```
+
+Offer only the lines the refusal actually needs. `Bash(...)` rules match the command
+text from its start, with `*` standing for any text (`Bash(x:*)` is the older
+spelling of `Bash(x *)`); narrow rules like these stay in effect in auto mode, while
+broad ones such as `Bash(*)` are suspended. Allow rules cover only that exact command
+form (`git -C <dir> merge` does not match `git merge *`), so write merges the way the
+rule reads. The full list and the reasoning are in `docs/permissions.md`.
+
+The same rule covers the other actions this skill prescribes: `git branch -d`/`-D` and
+`git worktree remove` (via `worker-cleanup.sh`), `board.py forget`/`clean`/`drop`,
+`gh issue create`, deleting state files, and any push. None of them gets a special
+workaround; a refusal always ends in "stop, tell the user, offer the rule".
+
 ## Hard boundaries
 
 - Never two workers editing the same file. Concurrent reads are fine.
 - Workers cannot spawn workers. All coordination is yours.
 - Never remove a worktree holding work without asking.
+- Never put a merge, push, PR merge or branch deletion in a worker's brief: workers report, you merge.
+- A refused command is never retried around: stop, tell the user, offer the allow rule (see *Merging and cleanup under auto mode*).
 
 ## When teamlead's own machinery misbehaves
 
