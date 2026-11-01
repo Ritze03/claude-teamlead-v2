@@ -31,10 +31,12 @@ impossible to break rather than merely discouraged:
 - **Outstanding** — dispatched workers that never returned? Blocked once.
 - **Reconcile** — the ledger says a worker returned but the board still says `running`?
   Blocked once. That gap is where work used to evaporate.
-- **Worktrees** — uncommitted or unmerged worker branches? Blocked once.
+- **Worktrees** — uncommitted or unmerged worker branches? Blocked once. Only `.claude/worktrees/agent-*` worktrees and ones whose branch a board row names are checked; a hand-made worktree with no row is ignored. A worktree you keep on purpose is marked with `board.py hold`.
 - **Board format** — an invented format silently breaks every check, so it is checked.
 - **Worker fence** — a worker can only write inside its own worktree. Claude Code already
-  refuses writes into the shared checkout; this closes everywhere else on disk.
+  refuses writes into the shared checkout; this closes everywhere else on disk. The lead can
+  authorise an out-of-project absolute path by putting it in the row's `owns` (`~` is expanded).
+  Bash writes are not checked by the fence, so the brief has to state the scope.
 - **Restore** — after `/clear` or a compaction, open state is re-injected automatically.
 - **Merged means merged** — a task marked merged whose branch still has unmerged commits is
   caught against git, not taken on trust.
@@ -252,6 +254,8 @@ than editing history.
 
 **A worker couldn't write somewhere.** Workers are fenced to their own worktree. That's
 deliberate: the refusal message tells them to report to the lead instead.
+
+**A tool call was refused by a permission prompt or auto mode.** The lead stops, tells you, and offers the allow rule; see [`docs/permissions.md`](docs/permissions.md).
 
 **I edited the plan file and nothing happened.** The watcher is armed at stage 2 of plan
 mode. If the session was restarted since, re-enter plan mode on that topic.

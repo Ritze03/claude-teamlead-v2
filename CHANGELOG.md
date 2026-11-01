@@ -4,6 +4,17 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.2.0 — 2026-11-01
+
+- Stop gate never tells the lead to remove the main checkout (GH#10). #76905a7
+- Stage-6 gate checks the plan's current phase and scope, not just "board all merged" (GH#6). #0f2b6a3
+- The phase cycle 5→6→7→5 is stated in the skill and help; the gate, `next:` and the statusline name the current phase (GH#8). `board.py` check_plan is phase-aware via a shared `plan_progress()`. #d1dcdd6 #4daf958
+- `board.py hold/release/held` marks a deliberately kept worktree; the gate names the row and prints a runnable hold command. Holds lapse on any state or worktree change (GH#4, GH#9). Check 3 ignores hand-made worktrees with no row; check 7 suggests `blocked` plus a note. #66b8c5f #1f96ce2
+- Worker fence: Edit/Write/MultiEdit/NotebookEdit honour absolute paths in the row's `owns`; Bash writes are deliberately not fenced, now stated (GH#7). #7babf8a
+- superdoc: workers fetch assets with Read/Write from a literal plugin root given in the brief, avoiding Claude Code's worktree guard on paths containing "Git" (GH#5). #db74482
+- Auto mode: merge/cleanup guidance, a general rule "permission refusal: stop, tell the user, offer the allow rule", and a new `docs/permissions.md` (GH#3). #602cec8
+- `board.py` CLI refuses a blank or valueless `--project` (it used to write to the real board) and refuses writes from agent worktrees; hooks pass `TL_HOOK=1`. #1bd140e
+
 ## 2.1.0 — 2026-10-28
 
 First version bump since 2.0.0. Claude Code caches installs by version, so earlier changes may not have reached you; update the plugin (`claude plugin update teamlead@teamlead`, then restart) to get everything below. The session-start line now reads `[teamlead v2.1.0] Active for this project. ...`.
