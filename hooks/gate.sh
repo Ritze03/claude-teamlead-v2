@@ -12,6 +12,7 @@
 #   4. plan footer  — during planning (stage <=4), the turn must end on the fixed line
 #   5. plan-lint    — stage 4: the implementation plan itself must pass lint
 #   6. stage 5->6   — every step of the current phase boarded + merged, header never bumped
+#                      (the message names the phase and what follows Stage 7, #8)
 #   7. returned     — tasks sitting in 'returned' instead of being triaged
 #
 # Rule learned the hard way, four times over: a check that fires on a correct
@@ -219,7 +220,8 @@ fi
 #   b. plan_scope_done: every I<n> step of the CURRENT scope has a board row and
 #      all its rows are merged.
 #
-# plan_scope_done <check|snap>. check prints "yes"/"no". The scope is the current
+# plan_scope_done <check|snap|info>. check prints "yes"/"no"; info prints the
+# phase's name, position and successor for the message (see plan-scope.py). The scope is the current
 # phase, or the whole table when it has no phase rows; a table with no I<n> step
 # at all has nothing to wait for, so "yes" (the old board-only behaviour). It
 # reads the table with board.py's own regexes (_PHASE_RE/_STEP_RE), the same ones
@@ -230,41 +232,10 @@ fi
 # would stay "current" and fire again. The current phase is the first one with a
 # step that is not accepted-and-still-merged, so a step reopened by a stage-6/7
 # failure is current again.
+# The parser lives in plan-scope.py so state.sh reads the same phase the gate does.
 plan_scope_done() {
-  python3 - "$BOARD_PY" "$TL_PROJECT" "$plan_file" "$TL_STATE/phase-accepted" "$1" <<'PYEOF' 2>/dev/null || echo yes
-import importlib.util, pathlib, sys
-bpy, proj, plan, accf, mode = sys.argv[1:6]
-spec = importlib.util.spec_from_file_location("board", bpy)
-b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
-states = {}
-for t in b.load(proj)["tasks"]:
-    if t.get("plan"):
-        states.setdefault(t["plan"], []).append(t["state"])
-merged = {i for i, st in states.items() if all(x == "merged" for x in st)}
-acc_path = pathlib.Path(accf)
-try:
-    accepted = set(acc_path.read_text().split())
-except OSError:
-    accepted = set()
-if mode == "snap":
-    acc_path.write_text(" ".join(sorted(accepted | merged)) + "\n")
-    sys.exit(0)
-groups, cur = [], None
-for line in pathlib.Path(plan).read_text(errors="replace").splitlines():
-    if b._PHASE_RE.match(line):
-        cur = []; groups.append(cur); continue
-    m = b._STEP_RE.match(line)
-    if m:
-        if cur is None:
-            cur = []; groups.append(cur)
-        cur.append(m.group(2))
-groups = [g for g in groups if g]
-if not groups:
-    print("yes"); sys.exit(0)
-live = accepted & merged
-scope = next((g for g in groups if any(i not in live for i in g)), groups[-1])
-print("yes" if all(i in merged for i in scope) else "no")
-PYEOF
+  python3 "${CLAUDE_PLUGIN_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}/hooks/plan-scope.py" \
+    "$BOARD_PY" "$TL_PROJECT" "$plan_file" "$TL_STATE/phase-accepted" "$1" 2>/dev/null || echo yes
 }
 
 if { [ "$plan_stage" = "6" ] || [ "$plan_stage" = "7" ]; } && [ -f "$TL_STATE/board.json" ]; then
@@ -277,7 +248,25 @@ if [ "$plan_stage" = "5" ] && [ -f "$TL_STATE/board.json" ]; then
   done
   ntasks=$(python3 -c "import json;print(len(json.load(open('$TL_STATE/board.json')).get('tasks',[])))" 2>/dev/null) || ntasks=0
   if [ "$still_open" -eq 0 ] && [ "${ntasks:-0}" -gt 0 ] && [ "$(plan_scope_done check)" = "yes" ]; then
-    problems+=$'\n'"- every step of the current scope is boarded and merged and the plan is at stage 5 — set the header to Stage 6 and run the 'verified by: agent' criteria"
+    # Name the scope. "Stage 6" read as "the whole plan is done" is how a correct
+    # gate got overridden as a false positive (#8): each phase loops 5 -> 6 -> 7.
+    IFS='|' read -r ph_total ph_idx ph_label ph_next ph_steps < <(plan_scope_done info 5)
+    if [ "${ph_total:-0}" -gt 0 ] 2>/dev/null; then
+      scope="phase $ph_label (of $ph_total, $ph_steps)"
+      if [ -n "$ph_next" ]; then
+        after="This is the normal phase cycle, not the end of the plan: phase $ph_next comes after Stage 7 (Stage 7 → Stage 5 for phase $ph_next; no \"Go\" needed)."
+      else
+        after="Phase $ph_label is the last phase: after Stage 7 the plan is complete."
+      fi
+      crit="phase $ph_label's"
+      hdr="> **Stage 6** — verifying phase $ph_label of $ph_total"
+    else
+      scope="the whole plan (no phase rows: the table is one phase)"
+      after="After Stage 7 the plan is complete."
+      crit="the plan's"
+      hdr="> **Stage 6** — verifying the whole plan"
+    fi
+    problems+=$'\n'"- every step of $scope is boarded and merged and the plan is at stage 5 — set the header to Stage 6 ($hdr) and run $crit 'verified by: agent' criteria. $after If this gate still looks wrong, re-read it against the plan's phase structure first; if it really is wrong, report it as a plugin bug — do not override it silently."
   fi
 fi
 

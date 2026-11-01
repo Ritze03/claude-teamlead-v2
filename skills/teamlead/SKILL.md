@@ -408,7 +408,8 @@ never read the plugin's source to work out a command.**
 | Gate refuses to end the turn | A task is sitting in `returned` | Act on it and move it to `merged` (or `blocked`) |
 | Gate says `task N branch X is behind <main> — rebase before merging` | Someone merged since that worker branched; merging as-is would land on a stale base | Rebase the worktree onto HEAD before merging — dispatch the worker to do it (`SendMessage` if it is still out, a fresh worker otherwise), never rebase it yourself |
 | Gate flags something you believe is fine | It blocks once, never traps you | Say plainly what you are skipping and why, then continue |
-| Gate fires on the same wrong thing repeatedly | That is a bug in the check, not in you | Say so to the user — a check that fires on a correct state is worse than no check |
+| Gate fires on the same wrong thing repeatedly | Either a bug in the check, or your own model of the plan is off — a gate that reads as plan-wide is often scoped to one phase | **First** re-read the message against the plan's phase structure (which phase, which stage, what comes after Stage 7). Only if it still contradicts the plan, say so to the user and report it as a 🐞 plugin bug — a check that fires on a correct state is worse than no check. Never override it silently, and never call it a false positive before that re-read |
+| Gate says "set the header to Stage 6" but the plan is not finished | It is not claiming the plan is finished: it names a phase (`phase A of 2`) whose every step is merged. Each phase runs Stage 5 → 6 → 7 and then goes back to Stage 5 for the next one | Set the header to Stage 6 for that phase, verify its agent criteria, and carry on — phase B comes after Stage 7 |
 | A board write is refused | Two unfinished tasks would own overlapping paths | Narrow the scopes or sequence the tasks; the refusal names both |
 | Gate refuses: plan header moved Stage N → M | The header was bumped past one stage (or 3→4 / 4→5 without a Go), usually by a script write that bypassed the fence | Set the header back to the stage the gate names, then advance one stage at a time |
 | A board write is refused with "workers report, the lead records" | A worker tried the CLI; only the lead writes | Do the write yourself, from the lead |
@@ -661,8 +662,17 @@ PLAN MODE
            /teamlead plan continue — a fresh context builds cheaper)
   Stage 6  I run every 'verified by: agent' criterion for real and tick it
   Stage 7  You check the 'verified by: user' criteria; when you're happy I say it's done (I archive only when you ask)
+  Phases: a plan with phase rows runs Stages 5-7 once PER PHASE, not once overall:
+           Stage 5 build phase N -> Stage 6 verify phase N's agent criteria ->
+           Stage 7 you check phase N -> back to Stage 5 for phase N+1 ... and after
+           the last phase, Stage 7 ends the plan. The header names the phase
+           ("Stage 6 - verifying phase A of 2"); with no phase rows the whole plan
+           is one phase. Stage 7 -> 5 for the next phase is a normal move, mine to
+           make, no "Go" needed.
   "Go" always advances exactly one stage — it is recorded, and the header cannot
   move without it. I never decide the plan is finished.
+  A Stop-gate message that looks wrong: I re-read it against the plan's phase
+  structure first, and report it as a plugin bug rather than override it silently.
 
 WHAT I WILL NOT DO
   - implement it myself when it should go to a worker
