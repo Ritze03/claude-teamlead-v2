@@ -4,6 +4,11 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.2.2 — 2026-11-01
+
+- superdoc: the Step 1 detection snippet takes a `DOC=` variable instead of hard-coding `superdoc/`, so a user-chosen doc folder is detected correctly.
+- brainstorm: saves to `<doc root>/brainstorm/` (default `superdoc/`, or the folder the CLAUDE.md `superdoc:start` block `@`-refs) instead of always `superdoc/brainstorm/`.
+
 ## 2.2.1 — 2026-11-01
 
 - superdoc: the doc folder defaults to `superdoc/`, but an explicit plain-text user request for another folder wins and is passed to every worker brief; removed the contradictory "always, no alternative" and "docs/ only" wording.

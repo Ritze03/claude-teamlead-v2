@@ -90,8 +90,9 @@ into); both work, and partial answers are fine.
    question from all rounds. Task: confirm the summary actually satisfies each
    answer and is internally consistent; list gaps or unaddressed answers.
 2. Gaps → relay in **free text**, ask whether to resolve or proceed.
-3. On the go-ahead, **save** to `superdoc/brainstorm/<topic-slug>.md` — ask before
-   creating the folder. The file records topic, A/I, model, lenses, every round
+3. On the go-ahead, **save** to `<doc root>/brainstorm/<topic-slug>.md` — ask before
+   creating the folder. Doc root is `superdoc/` unless the `@`-refs in CLAUDE.md's
+   `superdoc:start` block point at another folder (`@docs-agent/meta/…` → `docs-agent/`). The file records topic, A/I, model, lenses, every round
    summary, all Q&A, and the final plan.
 4. Then **offer to execute**: translate the plan into `.claude/teamlead/board.md`
    and run it through normal teamlead dispatch.
