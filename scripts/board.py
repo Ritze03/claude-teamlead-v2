@@ -127,12 +127,16 @@ def _git_ok(project, *args) -> bool | None:
 
 def _worktree_branches(proj) -> dict:
     """`git worktree list --porcelain` parsed once into {'refs/heads/<name>':
-    <path>} — D7 needs this per check_git call, not per row."""
+    <path>} — D7 needs this per check_git call, not per row. The first entry
+    is always the main checkout: it is left out, because `git worktree remove`
+    refuses it, so a finding pointing at it could never be cleared."""
     out = _git(proj, "worktree", "list", "--porcelain") or ""
-    branches, path = {}, None
+    branches, path, first = {}, None, True
     for line in out.splitlines():
         if line.startswith("worktree "):
             path = line[len("worktree "):]
+            if first:
+                path, first = None, False
         elif line.startswith("branch ") and path:
             branches[line[len("branch "):]] = path
     return branches
