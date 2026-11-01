@@ -10,8 +10,22 @@
 # still write plan files and the board.
 #
 # Claude Code's own worktree isolation already refuses writes into the shared
-# checkout; this closes the rest (anywhere else on disk). Bash is not parsed —
-# this catches the file tools, the brief covers the rest.
+# checkout; this closes the rest (anywhere else on disk).
+#
+# Allowed, in the order checked: the worker's own cwd; this session's scratchpad;
+# the project root (non-git project, or a git worker that is NOT in a linked
+# worktree — it may have inherited a subdirectory cwd); and any ABSOLUTE (or ~)
+# path in the `owns` of its own board row. That last one is the sanctioned
+# exception (#7): if the lead boards an out-of-project dir as the task's write
+# scope, the worker may write there. The row is found by the `worker` id that
+# record.sh stores on it (PostToolUse(Agent), from the brief's `board: N`).
+# Relative owns entries are inside the worktree already and grant nothing here.
+#
+# Bash is NOT fenced, deliberately (#7). A write target cannot be reliably read out
+# of arbitrary shell (cd, variables, quoting, scripts that write on their own), so a
+# heuristic would refuse harmless commands and still miss real ones, and the fence
+# would claim a guarantee it cannot keep. The refusal message therefore says it
+# plainly: Bash is no way round, and the exception is `owns`.
 set -uo pipefail
 in=$(cat)
 j() { jq -r "$1 // empty" <<<"$in" 2>/dev/null; }
@@ -43,6 +57,44 @@ else
     /tmp/claude-*/*)          exit 0 ;;
   esac
 fi
+# --- slow path: only reached when the cheap rules above did not allow the write ---
+proj_env="${CLAUDE_PROJECT_DIR:-$cwd}"
+# Project root a non-worktree worker may write anywhere under. A linked worktree
+# (git-dir != git-common-dir) gets none: the main checkout stays off limits.
+anchor=""
+if top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
+  gd=$(git -C "$cwd" rev-parse --absolute-git-dir 2>/dev/null)
+  cd_=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null)
+  case "$cd_" in /*) ;; *) cd_="$cwd/$cd_" ;; esac
+  [ "$(realpath -m "$gd")" = "$(realpath -m "$cd_")" ] && anchor=$(realpath -m "$top")
+else
+  pe=$(realpath -m "$proj_env")
+  case "$root" in "$pe"|"$pe"/*) anchor="$pe" ;; esac     # non-git: cwd inside the project dir
+fi
+if [ -n "$anchor" ] && [ "$anchor" != / ]; then
+  case "$target" in "$anchor"/*) exit 0 ;; esac
+fi
+
+# Absolute entries of this worker's own board row(s). The board lives in the MAIN
+# checkout, so resolve that from a linked worktree the way lib.sh does.
+aid=$(j .agent_id); bp="$proj_env"
+if common=$(git -C "$bp" rev-parse --git-common-dir 2>/dev/null); then
+  case "$common" in /*) ;; *) common="$bp/$common" ;; esac
+  bp=$(cd "$(dirname "$common")" 2>/dev/null && pwd) || bp="$proj_env"
+fi
+board="$bp/.claude/teamlead/.state/board.json"
+if [ -f "$board" ]; then
+  while IFS= read -r o; do
+    case "$o" in "~") o="$HOME" ;; "~/"*) o="$HOME/${o#\~/}" ;; esac
+    case "$o" in /*) ;; *) continue ;; esac               # relative: inside the worktree already
+    o=$(realpath -m "$o"); [ "$o" != / ] || continue       # never a blank cheque
+    case "$o" in
+      *[\*\?\[]*) case "$target" in $o) exit 0 ;; esac ;;  # glob entry
+      *)          case "$target" in "$o"|"$o"/*) exit 0 ;; esac ;;
+    esac
+  done < <(jq -r --arg a "$aid" '.tasks[]? | select(.worker == $a and .state != "merged") | .owns[]?' "$board" 2>/dev/null)
+fi
+
 jq -n --arg t "$target" --arg r "$root" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
-  permissionDecisionReason:("Worker fence: you may only write inside your own worktree (" + $r + "). Refused: " + $t + ". If the task genuinely needs this, stop and report it to the lead instead.")}}'
+  permissionDecisionReason:("Worker fence: you may only write inside your own worktree (" + $r + "). Refused: " + $t + ". Bash writes are not checked, but the same rule applies: do not route around this with cp, tee, a script or any other shell write. If the task genuinely needs this path, stop and report it to the lead: the lead can board it as an absolute path in the task'"'"'s owns, and then it is yours to write.")}}'
 exit 0
