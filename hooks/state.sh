@@ -106,14 +106,35 @@ if [ -f "$d/.state/active-plan" ]; then
         *) echo "  watcher: off (stages 5-6)" ;;
       esac
 
+      # Which phase is this stage about? Same parser the Stop gate uses, so the two
+      # cannot disagree. A plan with phases loops 5 -> 6 -> 7 once per phase, and a
+      # `next:` that reads as plan-global is how the stage-6 gate got overridden (#8).
+      ph_total=0; ph_idx=0; ph_label=""; ph_next=""; ph_steps=""
+      case "$stage" in
+        5|6|7)
+          IFS='|' read -r ph_total ph_idx ph_label ph_next ph_steps < <(python3 "$(dirname "$0")/plan-scope.py" \
+            "$(dirname "$0")/../scripts/board.py" "$proj" "$pf" "$d/.state/phase-accepted" info "$stage" 2>/dev/null)
+          ;;
+      esac
+      if [ "${ph_total:-0}" -gt 0 ] 2>/dev/null; then
+        scope="phase $ph_label of $ph_total"
+        echo "  phase: phase $ph_label of $ph_total ($ph_steps) — each phase runs Stage 5 → 6 → 7, then back to Stage 5 for the next one"
+        if [ -n "$ph_next" ]; then
+          after7="back to Stage 5 for phase $ph_next (your own move, no \"Go\" needed — Stage 7 → 5 is the normal cycle, not a step backwards; do not tell them the whole plan is done)"
+        else
+          after7="plan complete (phase $ph_label is the last phase) — tell them it is done and that it can be archived; run plan-archive.sh only if they ask"
+        fi
+      else
+        scope="the whole plan"; after7="plan complete — tell them it is done and that it can be archived; run plan-archive.sh only if they ask"
+      fi
       case "$stage" in
         1) next="settle the topic and create the plan file" ;;
         2) next="show the path table, start the watcher, dispatch the scout" ;;
         3) next='answer the open questions with the user; end every turn with: Type "Go" if you want me to plan the implementation.' ;;
         4) next='wait for "Go"; end every turn with: Type "Go" if you want me to start implementing.' ;;
-        5) next="translate the current phase's wave table onto the board (board_add with plan: I<n>) and dispatch; when every step of the current phase (the whole table, without phases) is boarded and merged, set the header to Stage 6" ;;
-        6) next="run every 'verified by: agent' criterion for real, tick it with the command and its result, then set the header to Stage 7" ;;
-        7) next="start the watcher, hand the 'verified by: user' criteria to the user and wait (their ticks are their report); when they confirm, tell them it is done and that it can be archived; run plan-archive.sh only if they ask" ;;
+        5) next="build $scope: translate its wave table onto the board (board_add with plan: I<n>) and dispatch; when every step of $scope is boarded and merged, set the header to Stage 6 (verifying $scope); after Stage 7: $after7" ;;
+        6) next="verify $scope: run every 'verified by: agent' criterion for $scope for real, tick it with the command and its result, then set the header to Stage 7 (no \"Go\" needed)" ;;
+        7) next="user-test $scope: start the watcher, hand the 'verified by: user' criteria of $scope to the user and wait (their ticks are their report); when they confirm: $after7" ;;
         *) next="" ;;
       esac
       if [ "$go_recorded" = 1 ]; then

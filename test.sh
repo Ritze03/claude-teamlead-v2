@@ -1693,6 +1693,27 @@ check "phased: accepted step reopened: exit 0 while it is open" "$(g6run)" 0
 g6set 1 merged
 check "phased: accepted step re-merged, B merged: exit 2" "$(g6run)" 2
 g6reset
+# #8: the message must name its scope, so "Stage 6" is not read as "the whole plan is done"
+g6add I1; g6add I2; g6set 1 merged; g6set 2 merged
+g6run >/dev/null
+grep -q 'phase A of 2' "$T/g6out" && ok "#8 phased: message names 'phase A of 2'" || bad "#8 phased: message names 'phase A of 2'"
+grep -qi 'phase B comes after Stage 7' "$T/g6out" && ok "  and says phase B comes after Stage 7" || bad "  says phase B comes after Stage 7"
+grep -q 'verifying phase A of 2' "$T/g6out" && ok "  and gives the header body to write" || bad "  gives the header body to write"
+sed -i 's/Stage 5/Stage 6/' $g6f; g6run >/dev/null
+sed -i 's/Stage 6/Stage 7/' $g6f; g6run >/dev/null
+sed -i 's/Stage 7/Stage 5/' $g6f
+g6add I3; g6set 3 merged
+g6run >/dev/null
+grep -q 'phase B of 2' "$T/g6out" && ok "#8 last phase: message names 'phase B of 2'" || bad "#8 last phase: names 'phase B of 2'"
+grep -qi 'last phase' "$T/g6out" && ok "  and calls it the last phase" || bad "  calls it the last phase"
+grep -qi 'plan is complete' "$T/g6out" && ok "  and says the plan is complete after Stage 7" || bad "  says the plan is complete after Stage 7"
+g6reset
+printf "$G6HEAD"'| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n' > $g6f
+g6add I1; g6set 1 merged
+g6run >/dev/null
+grep -qi 'whole plan' "$T/g6out" && ok "#8 unphased: message says it covers the whole plan" || bad "#8 unphased: says whole plan"
+grep -qi 'plan is complete' "$T/g6out" && ok "  and that Stage 7 completes it" || bad "  Stage 7 completes it"
+g6reset
 
 echo "== board.py check_plan: the wave table's CURRENT phase must be on the board (D22) =="
 cpp=$T/cplan; mkdir -p $cpp/.claude/teamlead/plan $cpp/.claude/teamlead/.state
@@ -1776,6 +1797,37 @@ printf '# T\n\n> **Stage 7** — x\n' > $stf
 stout=$("$H/state.sh" "$stp")
 grep -q 'watcher: NOT running — restart it:' <<<"$stout" && ok "stage 7: missing watcher is flagged (user ticks need it)" || bad "stage 7 watcher flagged"
 grep -q '^  next:' <<<"$stout" && ok "  and still has a next: line" || bad "  next: line"
+
+echo "== state.sh / skill / help: the phase cycle names its scope (#8) =="
+# phased plan A = I1,I2   B = I3 (same fixture shape as the #6 gate block)
+printf "$G6HEAD"'| — | **A** | **First** | | | |\n| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n| 1 | I2 | b — **D1** | `tl-sonnet-low` | src/I2 | — |\n| — | **B** | **Second** | | | |\n| 2 | I3 | c — **D1** | `tl-sonnet-low` | src/I3 | — |\n' > $g6f
+g6reset; g6add I1; g6add I2; g6set 1 merged; g6set 2 merged
+st8(){ "$H/state.sh" "$g6" | grep '^  next:'; }
+st8phase(){ "$H/state.sh" "$g6" | grep '^  phase:'; }
+grep -q 'phase A of 2' <<<"$(st8)" && ok "stage 5: next: names phase A of 2" || bad "stage 5: next: names phase A of 2"
+grep -q 'phase A of 2' <<<"$(st8phase)" && ok "  and a phase: line says so" || bad "  phase: line"
+sed -i 's/Stage 5/Stage 6/' $g6f; g6run >/dev/null
+grep -q 'verify phase A of 2' <<<"$(st8)" && ok "stage 6: next: says verify phase A of 2" || bad "stage 6: next: says verify phase A of 2"
+sed -i 's/Stage 6/Stage 7/' $g6f; g6run >/dev/null
+grep -q 'back to Stage 5 for phase B' <<<"$(st8)" && ok "stage 7 (phase A accepted, B next): next: says back to Stage 5 for phase B" || bad "stage 7: next: says back to Stage 5 for phase B"
+grep -q 'phase A of 2' <<<"$(st8phase)" && ok "  and the phase: line still says phase A (the one under test)" || bad "  phase: line at stage 7 is still phase A"
+grep -qi 'no "Go"' <<<"$(st8)" && ok "  and that 7 -> 5 needs no Go" || bad "  7 -> 5 needs no Go"
+sed -i 's/Stage 7/Stage 5/' $g6f; g6add I3; g6set 3 merged
+sed -i 's/Stage 5/Stage 7/' $g6f; g6run >/dev/null
+grep -q 'plan complete' <<<"$(st8)" && ok "stage 7 on the last phase: next: says plan complete" || bad "stage 7 last phase: plan complete"
+grep -q 'phase B of 2' <<<"$(st8phase)" && ok "  and the phase: line says phase B of 2" || bad "  phase: line says phase B of 2"
+printf "$G6HEAD"'| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n' > $g6f
+g6reset; g6add I1; g6set 1 merged
+grep -qi 'whole plan' <<<"$(st8)" && ok "unphased stage 5: next: says whole plan" || bad "unphased stage 5: whole plan"
+grep -q '^  phase:' <<<"$("$H/state.sh" "$g6")" && bad "unphased: no phase: line expected" || ok "  unphased prints no phase: line"
+g6reset
+LOOPTXT="back to Stage 5 for phase N+1"
+HELPBLK=$(awk '/^## Help text/,/^## Project setup/' "$SK")
+grep -q "$LOOPTXT" <<<"$HELPBLK" && ok "help text states the phase loop" || bad "help text states the phase loop"
+grep -q "$LOOPTXT" "$PS2" && ok "plan skill states the phase loop" || bad "plan skill states the phase loop"
+grep -q 'Stage 7 → Stage 5' "$PS2" && ok "  and says 7 -> 5 is a legal move" || bad "  says 7 -> 5 is a legal move"
+grep -q "against the plan's phase structure" "$PS2" && ok "plan skill: a gate that seems wrong is re-read against the phases first" || bad "plan skill: re-read gate against phases"
+grep -q "against the plan's phase structure" "$SK" && ok "lead skill carries the same rule" || bad "lead skill carries the same rule"
 
 echo "== restore.sh: flags a plan left mid-flight after /clear =="
 : > $stp/.claude/teamlead/.state/active

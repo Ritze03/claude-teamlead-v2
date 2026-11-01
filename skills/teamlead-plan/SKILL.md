@@ -31,12 +31,43 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **2 Create and show** | Create the near-empty plan — the template's sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
-| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` of plan-step rows (`plan:`) until this header is set; rows without `plan:` (scouts, unrelated work) are allowed earlier. | Every task merged, board empty |
-| **6 Agent-Testing** | Run every `verified by: agent` criterion for real and tick it. Always set the header to 6 once; **none to run? say so and move to 7 yourself**. | They all pass, or there are none |
-| **7 User-Testing** | Hand the `verified by: user` criteria over and **wait** — with the watcher on, so their ticks reach you. What they find goes back on the board and you set the header back to 5 on your own call. | The user says it is good |
+| **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` of plan-step rows (`plan:`) until this header is set; rows without `plan:` (scouts, unrelated work) are allowed earlier. | Every task of the **current phase** merged, board empty (no phase rows: the whole plan is one phase) |
+| **6 Agent-Testing** | Run every `verified by: agent` criterion **of this phase** for real and tick it. Always set the header to 6 once per phase; **none to run? say so and move to 7 yourself**. | They all pass, or there are none |
+| **7 User-Testing** | Hand this phase's `verified by: user` criteria over and **wait** — with the watcher on, so their ticks reach you. What they find goes back on the board and you set the header back to 5 on your own call; when they pass the phase, you go back to 5 for the next one. After the **last** phase, this stage ends the plan. | The user says it is good |
 
 Plan mode runs to the end of **7**, not to the handoff. The plan is not finished
 when the code is written; it is finished when it has been checked.
+
+### The phase cycle — stages 5 → 6 → 7 run once per phase
+
+Stages 5, 6 and 7 are a loop over the plan's phases, not a straight line through the
+whole plan:
+
+> Stage 5 build phase N → Stage 6 verify phase N's agent criteria → Stage 7 user
+> checks phase N → back to Stage 5 for phase N+1 … → after the last phase, Stage 7
+> ends the plan.
+
+- **No phase rows** in the wave table: the whole plan is one phase, so the loop runs
+  once — the same words apply with "the whole plan" for "phase N".
+- **Stage 7 → Stage 5 is a legal move and your own call** — it is the normal way into
+  the next phase, not a step backwards and not a failure. It needs no "Go": only
+  3 → 4 and 4 → 5 do (`plan-fence.sh` guards forward moves only), and the 7 → 5 move
+  for phase N+1 happens once the user has passed phase N.
+- **Name the phase in the header's body line** at every stage, as *phase X of N*:
+  `> **Stage 5** — building phase B of 3 (I9–I14)`,
+  `> **Stage 6** — verifying phase B of 3`,
+  `> **Stage 7** — user-testing phase B of 3`.
+- **The hooks name it too.** The state block prints a `phase:` line and a `next:` that
+  says what follows Stage 7 ("back to Stage 5 for phase B" or "plan complete"); the
+  Stop gate's "set the header to Stage 6" message names the phase it is about and
+  says phase B comes after Stage 7. A "Stage 6" from the gate means *this phase is
+  built*, never *the whole plan is built*.
+- **A gate that seems wrong: re-read it against the plan's phase structure first** —
+  which phase is it about, which stage, what comes after Stage 7. Only if it still
+  contradicts the plan, report it to the user as a 🐞 plugin bug. Never override it
+  silently, and never call it a false positive on the strength of your own model of
+  the plan: the one time that happened (a lead built phase A of two, read "Stage 6"
+  as "the plan is done", and overrode the gate three times) the gate was right.
 
 ### Order inside the first turn
 
@@ -525,10 +556,11 @@ Waves keep numbering across the whole table; they do not restart per phase.
 above the criteria it covers. `plan-lint` ignores phase rows entirely in its
 dependency and `Owns` checks — they carry nothing to validate.
 
-With phases, stages 5→6→7 run **per phase**: phase A's tasks merge, get
-agent-tested, get user-tested, and only then does the header return to stage 5
-for phase B. Say which phase in the header's body line —
-`> **Stage 5** — building phase B (I9–I14) · started <date>` — so the status
+With phases, stages 5→6→7 run **per phase** (*The phase cycle*, above): phase A's
+tasks merge, get agent-tested, get user-tested, and only then does the header
+return to stage 5 for phase B (Stage 7 → Stage 5, back to Stage 5 for phase N+1,
+no "Go"). Say which phase in the header's body line —
+`> **Stage 5** — building phase B of 3 (I9–I14) · started <date>` — so the status
 line and a resumed session both know where you are. `board.py check` only
 requires the *current* phase's `I<n>` rows on the board — it finds the current
 phase by which one already has a step there, so nothing complains that phase C
@@ -539,8 +571,9 @@ context between phases*.
 
 ## Stage 6 — Agent-Testing
 
-When the board is empty and every implementation step has merged, set the header to
-`> **Stage 6**` — **always, at least once; stage 6 is never skipped** (`plan-fence.sh`
+When the board is empty and every implementation step **of the current phase** has
+merged (of the whole plan, when it has no phases), set the header to
+`> **Stage 6** — verifying phase X of N` — **always, at least once; stage 6 is never skipped** (`plan-fence.sh`
 refuses a 5 → 7 jump) — and work the `verified by: agent` list. With phases, this
 is the current phase's criteria:
 
@@ -579,15 +612,19 @@ archiving comes only after they have confirmed (see below).
 briefly, tick nothing yourself. An unticked box they left with a note, a new
 criterion, or a `## Notes from me` line describing a problem is a finding: board it
 and set the header back to 5. Once every `user` box is ticked, that is them
-confirming stage 7 — tell them everything is done and offer archiving (below);
-still never archive on your own.
+confirming stage 7 **for this phase**. If another phase follows, say the phase
+passed and set the header back to `> **Stage 5**` for it (Stage 7 → Stage 5, your
+own call, no "Go") — do not say the plan is done. After the **last** phase, tell
+them everything is done and offer archiving (below); still never archive on your
+own.
 
 Whatever they find goes back on the board, and **you set the header back to
 `> **Stage 5**` yourself — you are explicitly allowed to, and must not ask "shall I
 go back to building?"** Moving backwards is always open to you (`plan-fence.sh`
 only guards forward moves). It is not closing stage 7: only the user ends it as
-done. A plan can cycle 5 → 6 → 7 → 5 as many times as it takes; that is the mode
-working, not the mode failing. An interactive plan where the user iterates in
+done. A plan can cycle 5 → 6 → 7 → 5 as many times as it takes — once per phase, and again
+whenever a stage-7 finding reopens work; that is the mode working, not the mode
+failing. An interactive plan where the user iterates in
 stage 7 — try, change, try again — is a normal use of it.
 
 If a plan has no `user` criteria at all, stage 7 is still theirs: say the agent
@@ -637,7 +674,9 @@ boundary.
 
 ## Retiring a finished plan
 
-Once the user closes out stage 7, tell them everything is done and that the plan can be
+Once the user closes out stage 7 **of the last phase** (with phases, an earlier phase
+passing stage 7 goes back to Stage 5 for the next one, it does not retire the plan),
+tell them everything is done and that the plan can be
 archived — say "archive it" and I will, or they can run the command below. **Never archive
 on your own**: their confirming the stage-7 checks is not a request to archive. Run
 `plan-archive.sh` only when they explicitly ask. Archive, never delete: a plan is the record of *why* the code looks the
@@ -772,9 +811,9 @@ memory; the plan file and the board are the whole handoff (D14):
 | Stage | Action |
 |:----:|---|
 | 3 or 4, with a recorded Go | The user already said Go — write the implementation plan (3) or start implementing (4). |
-| 5 | Put **all of the current phase's** wave rows on the board — when the table has no phase rows, the whole table counts as one phase — (`board_add`, `plan: I<n>`, `blocked_by` from `After`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
-| 6 | Run the `verified by: agent` criteria for real. |
-| 7 | Hand the `verified by: user` criteria back to the user. |
+| 5 | Build the current phase: put **all of its** wave rows on the board — when the table has no phase rows, the whole table counts as one phase — (`board_add`, `plan: I<n>`, `blocked_by` from `After`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
+| 6 | Run the current phase's `verified by: agent` criteria for real (the `phase:` line names it). |
+| 7 | Hand the current phase's `verified by: user` criteria back to the user; once they pass it, `next:` says whether it is back to Stage 5 for the next phase or plan complete. |
 
 If the state block shows the watcher **NOT running** and the stage is 2–4 or 7,
 restart it first — see *The watcher follows who has control*.
