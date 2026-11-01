@@ -860,6 +860,108 @@ check "  the real board.json is unchanged" "$after_bj" "$before_bj"
 check "list without --project from inside the project still works" \
   "$(cd $d4p && env -u CLAUDE_PROJECT_DIR python3 "$B" list >/dev/null 2>&1; echo $?)" 0
 
+echo "== worker CLI writes: an agent worktree may not write its project's board; blank --project is refused =="
+# The incident: a worker in .claude/worktrees/agent-* ran board.py with --project "" (an
+# empty mktemp) and wrote the lead's real board. CLAUDE_AGENT_ID is NOT set in a worker's
+# Bash, so the worker is recognised by where it runs: cwd in an agent-<id> linked worktree
+# of the very project whose board it would write.
+wkm=$T/wk/main; mkdir -p $wkm $T/wk/scratch
+(cd $wkm && git init -q && git config user.email t@t.t && git config user.name t \
+  && git commit -qm init --allow-empty && mkdir -p .claude/worktrees \
+  && git worktree add -q -b worktree-agent-wk .claude/worktrees/agent-wk \
+  && git worktree add -q -b feature-lead .claude/worktrees/feature-lead)
+wkw=$wkm/.claude/worktrees/agent-wk; wkl=$wkm/.claude/worktrees/feature-lead
+wkd=$wkm/.claude/teamlead/.state
+python3 "$B" add --project $wkm --task "lead row" --agent tl-sonnet-low --owns wk/a >/dev/null    # id 1
+python3 "$B" add --project $wkm --task "second row" --agent tl-sonnet-low --owns wk/b >/dev/null  # id 2
+wksum(){ cat $wkd/board.json $wkm/.claude/teamlead/board.md $wkd/events.log 2>/dev/null | cksum; }
+# run as a worker's Bash would: no CLAUDE_AGENT_ID, no hook marker
+wkrun(){ (cd "$1" && shift && env -u CLAUDE_AGENT_ID -u TL_HOOK "$@"); }
+wk0=$(wksum)
+
+for pv in "" "  "; do
+  check "worker worktree: add --project '$pv' (CLAUDE_PROJECT_DIR=main): refused" \
+    "$(wkrun $wkw env CLAUDE_PROJECT_DIR=$wkm python3 "$B" add --project "$pv" --task "stale-base work" --agent tl-sonnet-low --owns src/x >"$T/wkout" 2>&1; echo $?)" 1
+  grep -q 'non-empty' "$T/wkout" && ok "  says --project needs a value" || bad "  says --project needs a value: $(cat $T/wkout)"
+done
+E=""
+check "worker worktree: add --project \$EMPTY (unquoted, the word vanishes): refused" \
+  "$(wkrun $wkw python3 "$B" add --project $E --task u --agent tl-sonnet-low --owns src/w >"$T/wkout" 2>&1; echo $?)" 1
+check "worker worktree: add ... --project (valueless, last): refused" \
+  "$(wkrun $wkw python3 "$B" add --task t --agent tl-sonnet-low --owns src/z --project >"$T/wkout" 2>&1; echo $?)" 1
+check "  no literal true/ dir (nor a lock) created in the worktree" \
+  "$([ -e $wkw/true ] && echo yes; find $wkw -name board.lock -not -path '*/.git/*' | grep -c .)" "0"
+check "  the project's real board was not touched" "$(wksum)" "$wk0"
+check "blank --project on a read-only command is refused too" \
+  "$(python3 "$B" list --project "" >"$T/wkout" 2>&1; echo $?)" 1
+check "a --project that is not a directory is refused for a write (no true/.claude/... conjured)" \
+  "$(cd $T/wk/scratch && python3 "$B" add --project nosuchdir --task t --agent tl-sonnet-low >"$T/wkout" 2>&1; echo $?; [ -e nosuchdir ] && echo created)" 1
+
+# Every mutating command, run from the worker's worktree against the project it belongs to.
+for c in "add --task t --agent tl-sonnet-low --owns wk/z" "update --id 1 --notes x" "remove 2" \
+         "forget" "clean" "drop" "drop --dry-run" "hold 1" "release 1" "render" \
+         "worker-start --id w9" "worker-stop --id w9"; do
+  out=$(wkrun $wkw python3 "$B" $c --project $wkm 2>&1); rc=$?
+  check "worker worktree: '$c' refused" "$rc" 1
+  grep -q 'worker worktree' <<<"$out" && ok "  says why" || bad "  says why: $out"
+done
+check "  the project's real board, board.md and ledger were not touched" "$(wksum)" "$wk0"
+check "worker worktree, from a subdirectory: add refused too" \
+  "$(mkdir -p $wkw/sub; wkrun $wkw/sub python3 "$B" add --project $wkm --task t --agent tl-sonnet-low --owns wk/z >/dev/null 2>&1; echo $?)" 1
+check "worker worktree, CLAUDE_PROJECT_DIR=main and no --project: add refused" \
+  "$(wkrun $wkw env CLAUDE_PROJECT_DIR=$wkm python3 "$B" add --task t --agent tl-sonnet-low --owns wk/z >/dev/null 2>&1; echo $?)" 1
+for c in list status check held ledger; do
+  check "worker worktree: read-only '$c' still works" \
+    "$(wkrun $wkw python3 "$B" $c --project $wkm >/dev/null 2>&1; echo $?)" 0
+done
+check "a worker may use board.py on a scratch project of its own (a different repo)" \
+  "$(wkrun $wkw python3 "$B" add --project $T/wk/scratch --task t --agent tl-sonnet-low --owns s/a >/dev/null 2>&1; echo $?)" 0
+
+check "the lead's own CLI from the main checkout: add works" \
+  "$(wkrun $wkm python3 "$B" add --project $wkm --task "lead add" --agent tl-sonnet-low --owns wk/c >/dev/null 2>&1; echo $?)" 0
+check "the lead from its own (non-agent) linked worktree: add works" \
+  "$(wkrun $wkl python3 "$B" add --project $wkm --task "lead add 2" --agent tl-sonnet-low --owns wk/d >/dev/null 2>&1; echo $?)" 0
+check "the lead's remove/clean/render from the main checkout work" \
+  "$(wkrun $wkm python3 "$B" remove 4 --project $wkm >/dev/null 2>&1; echo $?; wkrun $wkm python3 "$B" clean --project $wkm >/dev/null 2>&1; echo $?; wkrun $wkm python3 "$B" render --project $wkm >/dev/null 2>&1; echo $?)" "0
+0
+0"
+
+echo "== worker CLI writes: the hook path stays open (TL_HOOK) =="
+check "TL_HOOK=1 worker-start from a worker's cwd: allowed" \
+  "$(cd $wkw && env -u CLAUDE_AGENT_ID TL_HOOK=1 python3 "$B" worker-start --id w9 --project $wkm >/dev/null 2>&1; echo $?)" 0
+check "TL_HOOK=1 worker-stop from a worker's cwd: allowed" \
+  "$(cd $wkw && env -u CLAUDE_AGENT_ID TL_HOOK=1 python3 "$B" worker-stop --id w9 --project $wkm >/dev/null 2>&1; echo $?)" 0
+for c in "add --task t --agent tl-sonnet-low --owns wk/z" "update --id 1 --notes x" "remove 3" "clean" "drop" "hold 1"; do
+  check "TL_HOOK=1 does not open '$c' to a worker" \
+    "$(cd $wkw && env -u CLAUDE_AGENT_ID TL_HOOK=1 python3 "$B" $c --project $wkm >/dev/null 2>&1; echo $?)" 1
+done
+# The real hooks, fired with cwd inside the worker's worktree: dispatch (PostToolUse/Agent),
+# the session-start sweep (render + forget), and the worker's return (SubagentStop).
+: > $wkd/active
+wkhook(){ (cd $wkw && echo "$1" | env -u CLAUDE_AGENT_ID -u TL_HOOK -u CLAUDE_PROJECT_DIR "$2" >"$T/wkhout" 2>&1; echo $?); }
+wkrow(){ python3 -c "import json;d=json.load(open('$wkd/board.json'));t=[x for x in d['tasks'] if x['id']==$1][0];print(t['state']+','+str(t['worker']))"; }
+WPT='{"hook_event_name":"PostToolUse","cwd":"'$wkw'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"w","prompt":"Brief.\nboard: 1\nGo.","isolation":"worktree"},"tool_response":{"agentId":"wk1"}}'
+check "record.sh PostToolUse(Agent) with a worker-worktree cwd: exit 0" "$(wkhook "$WPT" "$H/record.sh")" 0
+check "  worker-start went through: row 1 running/wk1" "$(wkrow 1)" "running,wk1"
+check "record.sh SubagentStart with a worker-worktree cwd: exit 0 (ledger: wk1 outstanding)" \
+  "$(wkhook '{"hook_event_name":"SubagentStart","cwd":"'$wkw'","agent_type":"teamlead:tl-sonnet-high","agent_id":"wk1","session_id":"s-old"}' "$H/record.sh")" 0
+sleep 1
+check "restore.sh (SessionStart) with a worker-worktree cwd: exit 0" \
+  "$(wkhook '{"hook_event_name":"SessionStart","source":"startup","session_id":"s-new","cwd":"'$wkw'"}' "$H/restore.sh")" 0
+grep -q 'Closed out 1 worker(s) from a previous session: wk1' "$T/wkhout" \
+  && ok "  its forget sweep went through" || bad "  its forget sweep went through: $(cat $T/wkhout)"
+check "  row 1 requeued by the sweep" "$(wkrow 1 | cut -d, -f1)" "queued"
+WPT2='{"hook_event_name":"PostToolUse","cwd":"'$wkw'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-high","description":"w2","prompt":"Brief.\nboard: 2\nGo."},"tool_response":{"agentId":"wk2"}}'
+wkhook "$WPT2" "$H/record.sh" >/dev/null
+check "  row 2 running/wk2" "$(wkrow 2)" "running,wk2"
+check "record.sh SubagentStop with a worker-worktree cwd: exit 0" \
+  "$(wkhook '{"hook_event_name":"SubagentStop","cwd":"'$wkw'","agent_type":"teamlead:tl-sonnet-high","agent_id":"wk2","last_assistant_message":"done"}' "$H/record.sh")" 0
+check "  worker-stop went through: row 2 returned" "$(wkrow 2)" "returned,wk2"
+check "  no hook board call was refused" "$(grep -c 'board-refused' $wkd/events.log)" 0
+check "gate.sh (Stop) with a worker-worktree cwd: reads the board fine" \
+  "$(wkhook '{"hook_event_name":"Stop","cwd":"'$wkw'","stop_hook_active":false}' "$H/gate.sh" >/dev/null; grep -c 'refused' $T/wkhout)" 0
+rm -f $wkd/active
+
 echo "== D4 (I7): remove =="
 rmp=$T/rm; mkdir -p $rmp
 python3 "$B" add --project $rmp --task "queued one" --agent tl-sonnet-low --owns rm/a >/dev/null       # id 1
