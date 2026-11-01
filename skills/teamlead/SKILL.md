@@ -60,10 +60,14 @@ tools:
 `superdoc:start` block points at, find the pages that bear on each task
 *first* — they can change the split, `owns`, or the wording. You already know what
 exists: glance at `superdoc/architecture/overview.md` (the hub — "where to look
-for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`;
-read only the pages that matter for this task. Can't tell which do? Name the
-candidates in the brief or have a scout cover them — never skip. No
-doc folder → nothing to do. This is scoping, not doing the work.
+for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`
+to find them, then **read the pages that matter yourself** — before *any* dispatch
+whose worker will touch (write or change) something. Not a glance: you can't give
+proper instructions from pages you haven't read. The brief names those pages and
+passes on the constraints and conventions that matter. Only when you can't tell
+which pages matter may a scout cover the docs — the writing dispatch then waits for
+that scout. Never skip. No doc folder → nothing to do. This is scoping, not doing
+the work.
 
 **When work is cancelled, close out its workers.** A killed or abandoned agent
 never emits a stop event, so the ledger keeps counting it as working until a long
@@ -675,8 +679,8 @@ PLAN MODE
   Stage 3  I scout first, then ask. Answer in chat, or type into the file and save
            (I'm watching it, and I'll pick up your edit)
   Stage 4  "Go" -> I write the acceptance criteria and the implementation plan, then STOP
-  Stage 5  "Go" -> I put the plan on the board and build it (tip: /clear first, then
-           /teamlead plan continue — a fresh context builds cheaper)
+  Stage 5  "Go" -> I put the plan on the board and build it (after that Go I'll offer
+           /clear + /teamlead plan continue — a fresh context builds cheaper)
   Stage 6  I run every 'verified by: agent' criterion for real and tick it
   Stage 7  You check the 'verified by: user' criteria; when you're happy I say it's done (I archive only when you ask)
   Phases: a plan with phase rows runs Stages 5-7 once PER PHASE, not once overall:
