@@ -56,13 +56,14 @@ tools:
 | `board_update` | Move a task's state, set its branch, or record **how it was solved**. |
 
 **Check the docs before you board and dispatch.** If the project has `superdoc/`
-(agent-facing) or `docs/` (user-facing), find the pages that bear on each task
+(agent-facing) or `docs/` (user-facing), or a doc folder CLAUDE.md's
+`superdoc:start` block points at, find the pages that bear on each task
 *first* — they can change the split, `owns`, or the wording. You already know what
 exists: glance at `superdoc/architecture/overview.md` (the hub — "where to look
 for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`;
 read only the pages that matter for this task. Can't tell which do? Name the
 candidates in the brief or have a scout cover them — never skip. No
-`superdoc/`/`docs/` → nothing to do. This is scoping, not doing the work.
+doc folder → nothing to do. This is scoping, not doing the work.
 
 **When work is cancelled, close out its workers.** A killed or abandoned agent
 never emits a stop event, so the ledger keeps counting it as working until a long

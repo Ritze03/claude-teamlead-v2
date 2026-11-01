@@ -4,6 +4,10 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.2.3 — 2026-11-01
+
+- plan: the after-`/clear` doc re-read covers `superdoc/`, `docs/` and the folder CLAUDE.md's `superdoc:start` block points at; the lead's pre-dispatch doc check names that folder too.
+
 ## 2.2.2 — 2026-11-01
 
 - superdoc: the Step 1 detection snippet takes a `DOC=` variable instead of hard-coding `superdoc/`, so a user-chosen doc folder is detected correctly.

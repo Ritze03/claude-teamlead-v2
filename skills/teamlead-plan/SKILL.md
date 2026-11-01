@@ -666,8 +666,9 @@ with fresh context and everything it needs is already in the plan file. A
 recommendation, not a requirement; if they would rather carry on, carry on.
 
 **After a `/clear`** the plan file is the source of truth, not whatever you half
-remember. Read the whole file, `## Handoff` first; run `board_list`; read
-`superdoc/` if the plan relies on it; then do the handoff's next step. When the
+remember. Read the whole file, `## Handoff` first; run `board_list`; read the
+project docs if the plan relies on them (`superdoc/`, `docs/`, or the folder
+CLAUDE.md's `superdoc:start` block points at); then do the handoff's next step. When the
 handoff is stale or the board disagrees with it, say so and trust the board. Once
 the next phase is boarded, the handoff has been used — overwrite it at the next
 boundary.
