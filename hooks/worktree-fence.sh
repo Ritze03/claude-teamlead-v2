@@ -110,5 +110,5 @@ if [ -f "$board" ]; then
 fi
 
 jq -n --arg t "$target" --arg r "$root" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
-  permissionDecisionReason:("Worker fence: you may only write inside your own worktree (" + $r + "). Refused: " + $t + ". Bash writes are not checked, but the same rule applies: do not route around this with cp, tee, a script or any other shell write. If the task genuinely needs this path, stop and report it to the lead: the lead can board it as an absolute path in the task'"'"'s owns, and then it is yours to write.")}}'
+  permissionDecisionReason:("Worker fence: you may only write inside your own worktree (" + $r + "). Refused: " + $t + ". Bash writes are not checked, but the same rule applies: do not route around this with cp, tee, a script or any other shell write. If the task genuinely needs this path, ask the lead for it with a SCOPE REQUEST: SendMessage to \"main\" with the lines `SCOPE REQUEST: <path or glob>`, `why: <one line>`, `row: <N>` (keep working on anything else until it answers `granted`), or, if you are blocked, end your turn with a hand-back whose report starts with that block. The lead can add it to the row'"'"'s owns, and then it is yours to write.")}}'
 exit 0
