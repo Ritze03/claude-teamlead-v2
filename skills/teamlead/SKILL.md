@@ -138,6 +138,11 @@ its child, so `src/` collides with `src/router/`. The tools refuse such a write
 outright, so this cannot be violated, only attempted. A refusal means your split is
 wrong: narrow the scopes or sequence the tasks.
 
+An absolute path in `owns` (`~` is expanded) is how you authorise a worker to write
+outside the project. The exception only applies once the worker is linked to its row,
+which happens at dispatch for a background dispatch with `board: N` on its own line in
+the brief. Bash writes are not fenced, so the brief must state the scope.
+
 When you merge a task, set `notes` to **how it was solved**, not what was asked.
 That is the part worth having in three weeks, and it is rendered into the board's
 "How it was solved" section.
