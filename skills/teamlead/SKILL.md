@@ -63,7 +63,7 @@ exists: glance at `superdoc/architecture/overview.md` (the hub — "where to loo
 for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`;
 read only the pages that matter for this task. Can't tell which do? Name the
 candidates in the brief or have a scout cover them — never skip. No
-`superdoc/`/`docs/` → nothing to do. This is scoping, not doing the work.
+doc folder → nothing to do. This is scoping, not doing the work.
 
 **When work is cancelled, close out its workers.** A killed or abandoned agent
 never emits a stop event, so the ledger keeps counting it as working until a long
