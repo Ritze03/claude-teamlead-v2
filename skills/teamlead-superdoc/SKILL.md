@@ -5,11 +5,18 @@ description: Use for /teamlead superdoc, /superdoc, or "init superdoc". Sets up,
 
 # Superdoc mode
 
-**`superdoc/` at the repo root. Always. No alternative, no detection, no asking.**
+**Doc folder: `superdoc/` at the repo root by default. Never ask, never detect.** If the
+user explicitly asks in plain text for another folder, location, or layout, that wins:
+do what they asked, and put that folder in every dispatch brief as the doc root (the
+playbook substitutes it everywhere). Absent such a request, every brief just says
+`superdoc/`.
 
-That is the agent's knowledge base; `docs/` stays entirely user-facing. Fixing the
-location is what removes the doc-root machinery v1 carried everywhere — you never
-substitute a folder name, and every dispatch brief just says `superdoc/`.
+That is the agent's knowledge base; `docs/` stays user-facing unless the user said otherwise.
+
+**Privacy: superdoc files are committed and often public.** Every worker brief must say:
+repo-relative paths only, and no personal or system information (usernames, emails,
+hostnames, absolute host paths, secrets, the author's local setup). Playbook Part 4a has
+the full rule; audit mode greps for leaks.
 
 **You orchestrate; you do not read, inventory, or write docs yourself.** Every unit
 of real work goes to a worker. Stay inside the target project.
@@ -93,7 +100,7 @@ genuinely architectural rationale → Opus. The feature-page boundary is blurry 
 Workers emit: `architecture/overview.md` hub, `meta/TERMINOLOGY.md`,
 `ui/STYLING-GUIDE.md` if there's UI, `features/*.md` per real capability with inline
 **Why:** notes, `claude-instructions/documentation.md` verbatim, `README.md` ToC,
-and dated design-spec docs for big decisions — all under `superdoc/`. Wire a thin
+and dated design-spec docs for big decisions — all under the doc root. Wire a thin
 `CLAUDE.md` via the guarded markers, `@`-force-loading only TERMINOLOGY and
 `claude-instructions/*`.
 
@@ -124,7 +131,8 @@ state. Two problems killed it. `.claude/` is gitignored in many repos, so the
 knowledge would die at the next clone — silently. And feature pages carry inline
 **Why:** notes that a human occasionally wants; buried under `.claude/` nobody
 browsing the repo finds them. At the root it is committed by default and stays
-discoverable, while `docs/` vs `superdoc/` still does the intended work.
+discoverable, while `docs/` vs `superdoc/` still does the intended work. (That is why it
+is the default; a user who asks for a different folder still gets it.)
 
 **Do not also copy it into `.claude/`.** Agents do not find superdoc by location —
 they find it because `CLAUDE.md` force-loads the mandatory set, and that works from

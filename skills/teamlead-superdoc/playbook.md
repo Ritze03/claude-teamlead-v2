@@ -17,12 +17,11 @@ file is in the main checkout, so it is missing there. If the brief gave no plugi
 stop and ask the lead. Every path that starts with `superdoc/` or `CLAUDE.md` is
 relative to the target repo root, i.e. your cwd.
 
-**`superdoc/` — the doc-root folder for this run.** The dispatching brief tells you the
-value; it is **`superdoc/` by default (the recommended choice)**, or **`docs/`** if the
-user picked that instead. Wherever this playbook writes `superdoc/`, substitute the
-folder you were given — every path, skeleton, and `CLAUDE.md` `@`-ref. The folder name
-is the *only* thing that varies; the structure inside it, the `superdoc:` marker, and
-every rule below are identical for both.
+**`superdoc/` — the doc-root folder for this run.** The dispatching brief names it. The
+default is `superdoc/`; if the brief names another folder (the user asked for one),
+substitute it wherever this playbook writes `superdoc/` — every path, skeleton, and
+`CLAUDE.md` `@`-ref. The structure inside it, the `superdoc:` marker, and every rule
+below are unchanged.
 
 This file is doc-writing knowledge only — how to shape, write, and verify the
 `superdoc/` tree. It does not restate orchestration rules; those live in the
@@ -352,6 +351,19 @@ choice — code shows *what*, rarely *why this way and not the obvious alternati
   asked, write it down right then. A design choice that lives only in a chat message
   is gone the moment the context window rolls; the doc is where it survives.
 
+### Part 4a — Privacy: nothing personal or system-specific
+
+Superdoc files are committed and often public. Treat every page as published.
+
+- **Repo-relative paths only.** Never an absolute host path (`/home/<user>/...`,
+  `/Users/...`, `C:\Users\...`).
+- **Never write:** usernames, real names, emails, hostnames, IPs, the author's machine or
+  OS specifics, local tool setup, secrets, tokens, API keys, `.env` values, or names of
+  private projects unrelated to this repo.
+- **Setup instructions are generic.** Say "your plugin root", `$HOME`, `<your-token>`,
+  not the author's actual values.
+- If a source you are reading contains such a value, describe it generically; do not copy it.
+
 ## Part 5 — CLAUDE.md wiring
 
 Wrap the merged block in guarded markers so a re-run can find and replace it instead
@@ -494,6 +506,8 @@ re-check.
       don't guess.
 - [ ] The `superdoc:vN` marker in `CLAUDE.md` matches this playbook's version exactly
       (Part 6).
+- [ ] No personal or system information in any page: no absolute host paths, usernames,
+      emails, hostnames, IPs, secrets (Part 4a) — grep for it.
 
 ## Part 9 — AUDIT (report-only)
 
@@ -510,6 +524,9 @@ instead of creating. **Do not write to any file in this mode.**
 - Flag any `@`-ref outside the Part 5 allowed set, and any `@`-ref that's broken.
 - Re-check Part 0: if `superdoc/` never grew past scaffolding, say so and propose
   collapsing it back into `CLAUDE.md`.
+- **Privacy scan (Part 4a):** grep the doc tree and the `CLAUDE.md` docs block for leaks
+  and report each hit as a finding (file + line): `grep -rnE '/home/|/Users/|C:\\Users|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|[0-9]{1,3}(\.[0-9]{1,3}){3}|(sk|ghp|xox[bp]|AKIA)[-_A-Za-z0-9]{12,}|(token|secret|api[_-]?key|password)[ :=]+\S{8,}' <doc-root> CLAUDE.md`.
+  Hits are candidates; read each and drop false positives (example placeholders are fine).
 
 Report every finding as a concrete, project-specific item (file + line + what's wrong),
 not a generic checklist recap.
