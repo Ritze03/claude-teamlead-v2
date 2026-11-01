@@ -679,6 +679,12 @@ grep -q 'does not suggest a file, it \*pastes\* it' "$PB" && ok "  explains @ pa
 grep -q 'every turn of every' "$PB" && ok "  names the per-turn cost" || bad "  names the per-turn cost"
 grep -q 'permanent tax' "$SD" && ok "  the lead is told to hold the line at QC" || bad "  lead told to hold the line"
 
+echo "== superdoc workers copy assets via Read/Write, not Bash on a plugin-root path (#5) =="
+! grep -qF '$(cat .claude/teamlead/.state/plugin-root)' "$PB" && ok "playbook: no worktree-relative plugin-root lookup" || bad "playbook: worker told to cat the state file (missing in a worktree)"
+! grep -qE '^cp |^PR=' "$PB" && ok "playbook: no Bash cp of plugin assets" || bad "playbook: still has a Bash cp/PR= for plugin assets"
+grep -q 'Read tool' "$PB" && grep -q 'Write tool' "$PB" && ok "playbook: assets via Read + Write" || bad "playbook: assets via Read + Write"
+grep -q 'literal' "$SD" && grep -q 'Read tool' "$SD" && ok "  dispatcher puts the literal root in the brief" || bad "  dispatcher puts the literal root in the brief"
+
 echo "== the skill is self-sufficient for its own tooling =="
 SKC="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
 for c in "board.py render" "board.py check" "board.py forget" "board.py status"; do

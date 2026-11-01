@@ -259,6 +259,14 @@ mode. If the session was restarted since, re-enter plan mode on that topic.
 **`CLAUDE_PLUGIN_ROOT` is empty in a shell.** It isn't set in the agent's shell, only in
 hooks. The absolute path is in `.claude/teamlead/.state/plugin-root`.
 
+**A worker's Bash is refused with "names git in a form too complex to verify".** That is
+Claude Code's guard for worktree-isolated agents, not this plugin. It refuses write-capable
+Bash (`cp`, `>`) that names an absolute path with `Git` in a segment, such as a plugin
+root under `~/GitHubProjects/`, and any `git -C <main checkout>` or `cd <main checkout>`
+followed by git. Read-only commands (`cat`, `ls`) on such paths still run. Workers use the
+Read and Write tools for plugin files and report to the lead for anything needing the main
+checkout. Worktrees have no `.claude/teamlead/.state/`, so briefs carry the literal plugin root.
+
 ## License
 
 MIT
