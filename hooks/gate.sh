@@ -98,6 +98,22 @@ import json,sys
 try:
     for p,h in json.load(sys.stdin).items(): print(p,h['row'],h['lapsed'] or '',sep='\t')
 except Exception: pass" 2>/dev/null)
+  # Board rows by branch and by worker id, merged rows first so an open row wins when
+  # several name the same worktree. Used to scope this check and to name the row to hold.
+  declare -A row_by_branch=() row_by_worker=() row_state=()
+  while IFS=$'\t' read -r rid_ rst_ rbr_ rwk_; do
+    [ -n "$rid_" ] || continue
+    row_state[$rid_]=$rst_
+    [ -n "$rbr_" ] && row_by_branch[$rbr_]=$rid_
+    [ -n "$rwk_" ] && row_by_worker[$rwk_]=$rid_
+  done < <(python3 -c "
+import json,sys
+try:
+    ts = json.load(open('$TL_STATE/board.json'))['tasks']
+    for t in sorted(ts, key=lambda t: t['state'] != 'merged'):
+        print(t['id'], t['state'], t.get('branch') or '', t.get('worker') or '', sep='\t')
+except Exception: pass" 2>/dev/null)
+  hold_rows=" "
   while read -r w; do
     [ -n "$w" ] || continue
     [ "$w" = "$TL_PROJECT" ] && continue
@@ -105,14 +121,38 @@ except Exception: pass" 2>/dev/null)
     wid=$(basename "$w"); wid=${wid#agent-}
     case " $out_ids " in *" $wid "*) continue ;; esac
     [ -n "${held_row[$w]:-}" ] && [ -z "${held_lapsed[$w]:-}" ] && continue
+    # Scope: the plugin's own worktrees only. A worker's is always
+    # .claude/worktrees/agent-<id>; anything else belongs to the plugin only when a
+    # board row names its branch or holds it. A worktree the user made by hand for
+    # their own branch has no row and cannot be held, so flagging it fired every turn
+    # on a correct state (#9 class).
+    wbr=$(git -C "$w" rev-parse --abbrev-ref HEAD 2>/dev/null) || wbr=""
+    wrow="${row_by_worker[$wid]:-}"
+    [ -n "$wbr" ] && [ -n "${row_by_branch[$wbr]:-}" ] && wrow="${row_by_branch[$wbr]}"
+    case "$w" in
+      */.claude/worktrees/agent-*) ;;
+      *) [ -n "$wrow" ] || [ -n "${held_row[$w]:-}" ] || continue ;;
+    esac
     note=""
     [ -n "$(git -C "$w" status --porcelain 2>/dev/null)" ] && note="uncommitted changes"
     n=$(git -C "$w" rev-list --count "$main..HEAD" 2>/dev/null) || n=0
     [ "${n:-0}" -gt 0 ] && note="${note:+$note, }$n commit(s) not in $main"
-    [ -n "$note" ] && [ -n "${held_row[$w]:-}" ] && note+=" (hold on row ${held_row[$w]} lapsed: ${held_lapsed[$w]})"
-    [ -n "$note" ] && dirty+="  $w — $note"$'\n'
+    [ -n "$note" ] || continue
+    if [ -n "${held_row[$w]:-}" ]; then
+      note+=" (hold on row ${held_row[$w]} lapsed: ${held_lapsed[$w]})"
+    elif [ -z "$wrow" ]; then
+      note+=" (no board row)"
+    elif [ "${row_state[$wrow]:-}" = merged ]; then
+      note+=" (board row $wrow, merged)"
+    else
+      note+=" (board row $wrow)"
+      case "$hold_rows" in *" $wrow "*) ;; *) hold_rows+="$wrow " ;; esac
+    fi
+    dirty+="  $w — $note"$'\n'
   done < <(git -C "$TL_PROJECT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
-  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"${dirty}  Kept on purpose (paused work, a commit awaiting the user's decision)? Say so once: board.py hold <row> --reason \"…\" --project \"\$PWD\" — it stops this firing until the row or the worktree changes."
+  # One holdable row among the findings: print the command ready to run.
+  hrow_arg="<row>"; [ "$(wc -w <<<"$hold_rows")" = 1 ] && hrow_arg=${hold_rows// /}
+  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"${dirty}  Kept on purpose (paused work, a commit awaiting the user's decision)? Acknowledge it once, instead of answering this gate every turn: python3 $BOARD_PY hold $hrow_arg --reason \"…\" --project \"\$PWD\" (use the board row shown above; it must be queued, blocked or returned). It stays quiet until the row is re-dispatched or merged or the worktree gets a new commit or edit. Not kept? Merge it, or remove the worktree (removing one with unmerged commits needs the user's OK)."
 fi
 
 # Plan mode. The header line `> **Stage N** —…` in the active plan file is the one
@@ -286,7 +326,7 @@ fi
 # 7. Tasks stuck in 'returned' — the triage step got skipped.
 if [ -f "$TL_STATE/board.json" ]; then
   nret=$(tl_state_count returned)
-  [ "$nret" -gt 0 ] && problems+=$'\n'"- $nret task(s) are in 'returned' — check what came back and move each to 'merged' (with notes on how it was solved) or back to 'queued'"
+  [ "$nret" -gt 0 ] && problems+=$'\n'"- $nret task(s) are in 'returned' — check what came back and move each to 'merged' (with notes on how it was solved) or back to 'queued'. Waiting on the user's decision instead? Set it to 'blocked' with a note saying what you are waiting for (blocked rows are not flagged here); if it keeps a worktree, board.py hold it too"
 fi
 
 [ -z "$problems" ] && exit 0
