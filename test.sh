@@ -2424,6 +2424,36 @@ d2ev "$D2STOP" >/dev/null
 grep -qF 'no "Go" is recorded' "$T/d2out" && bad "T66: 3->4 on the next Stop, Go still live: accepted" || ok "T66: 3->4 on the next Stop, Go still live: accepted"
 check "T66:   plan-stage now starts with '4'" "$(cut -d' ' -f1 $d2p/.claude/teamlead/.state/plan-stage)" 4
 
+echo "== gate.sh check 4b: no /clear offer while still asking for the second Go =="
+OFFER='To build this on a fresh context: `/clear`, then `/teamlead plan continue`.'
+d4msg(){ jq -nc --arg m "$1" '{"hook_event_name":"Stop","cwd":"'$d2p'","stop_hook_active":false,"last_assistant_message":$m}'; }
+d2write 4
+printf '4 %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $d2p/.claude/teamlead/.state/plan-stage
+check "stage 4, message offers /teamlead plan continue: exit 2" \
+  "$(d2ev "$(d4msg "plan written.
+
+$OFFER
+Or say \"here\".
+
+Type \"Go\" if you want me to start implementing.")")" 2
+grep -qF 'offers /clear' "$T/d2out" && grep -qF 'only after the user' "$T/d2out" && ok "  says to print it only after the user's Go" || bad "  says to print it only after the user's Go (got: $(cat $T/d2out))"
+check "stage 4, footer only: exit 0" "$(d2ev "$(d4msg 'plan written.
+
+Type "Go" if you want me to start implementing.')")" 0
+check "stage 4, no last_assistant_message: exit 0" "$(d2ev "$D2STOP")" 0
+# Go typed, header bumped to 5 in the reply: the offer is now legitimate.
+d2write 5
+printf '4 2020-01-01T00:00:00Z\n' > $d2p/.claude/teamlead/.state/plan-stage
+printf '4 %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $d2p/.claude/teamlead/.state/plan-go
+check "stage 5 with the Go recorded, offer printed: exit 0" "$(d2ev "$(d4msg "$OFFER
+Or say \"here\" to continue in this session.")")" 0
+d2write 7
+printf '7 2020-01-01T00:00:00Z\n' > $d2p/.claude/teamlead/.state/plan-stage
+check "stage 7, phase-boundary /clear advice mentioning plan continue: exit 0" \
+  "$(d2ev "$(d4msg 'phase done. Optionally /clear, then /teamlead plan continue.')")" 0
+grep -qF 'never at the end of' "$PS2" && ok "skill: offer is for the second-Go reply, never stage 4" || bad "skill: offer is for the second-Go reply, never stage 4"
+grep -qF 'No Go recorded for the implementation plan yet' "$PS2" && ok "skill: plan continue at stage 4 without a Go says so plainly" || bad "skill: plan continue at stage 4 without a Go says so plainly"
+
 echo "== F5: a hook fired from inside a worktree resolves to the main checkout (I2) =="
 f5p=$T/f5proj; mkdir -p $f5p
 git -C $f5p init -q 2>/dev/null; git -C $f5p config user.email t@t.t; git -C $f5p config user.name t
