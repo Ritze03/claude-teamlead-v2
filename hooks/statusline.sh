@@ -96,6 +96,7 @@ seg=$(c $TEAL '⚑ teamlead')
 # pointer and nothing used to clear it, so a stale one would pin the indicator on
 # forever — drop it here when it dangles or the plan has reached handoff.
 ap="$d/.state/active-plan"
+pr=$(cat "$d/.state/plugin-root" 2>/dev/null)
 if [ -f "$ap" ]; then
   pf=$(cat "$ap" 2>/dev/null)
   if [ -n "$pf" ] && [ -f "$pf" ]; then
@@ -121,6 +122,24 @@ if [ -f "$ap" ]; then
       # "Planning" only reads right for the first four; after that the plan is
       # being executed and checked, and the label should say so.
       [ "$stage" -le 4 ] && what="$em Planning" || what="$em Plan"
+      # A plan with phases loops 5 -> 6 -> 7 once per phase, so name the phase being
+      # worked ("stage 5/7 building phase B of 3"). plan-scope.py is the same parser
+      # the Stop gate and state.sh use. Only for stages 5-7 and only when the plan has
+      # phase rows (one grep), so the common case spawns nothing; this whole block
+      # runs in the detached refresh, never in the foreground print.
+      sr="${pr:-$(dirname "${BASH_SOURCE[0]}")/..}"
+      if [ "$stage" -ge 5 ] && [ -f "$sr/hooks/plan-scope.py" ] \
+         && grep -qE '^\|[[:space:]]*(—|-)[[:space:]]*\|[[:space:]]*\*\*' "$pf" 2>/dev/null; then
+        IFS='|' read -r ph_total ph_idx ph_label _ < <(python3 "$sr/hooks/plan-scope.py" \
+          "$sr/scripts/board.py" "$root" "$pf" "$d/.state/phase-accepted" info "$stage" 2>/dev/null)
+        if [ "${ph_total:-0}" -gt 0 ] 2>/dev/null; then
+          case "$stage" in
+            5) desc="building phase $ph_label of $ph_total" ;;
+            6) desc="verifying phase $ph_label of $ph_total" ;;
+            7) desc="your turn to test phase $ph_label of $ph_total" ;;
+          esac
+        fi
+      fi
       seg+=" $(c $PLUM "$what: $(basename "$pf" .md) · stage $stage/7 $desc")"
       # 👀 = your edits will actually be picked up right now. The watcher stops
       # while the agent holds control, so its absence is real information.
@@ -145,7 +164,6 @@ if [ -f "$ap" ]; then
 fi
 
 # --- board + workers ---------------------------------------------------------
-pr=$(cat "$d/.state/plugin-root" 2>/dev/null)
 if [ -n "$pr" ] && [ -f "$pr/scripts/board.py" ]; then
   read -r open running returned blocked out < <(
     python3 - "$pr" "$root" <<'PY' 2>/dev/null

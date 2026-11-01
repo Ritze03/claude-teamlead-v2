@@ -234,6 +234,88 @@ _PHASE_RE = re.compile(r"^\|\s*(?:—|-)\s*\|\s*\*\*")
 _STAGE_RE = re.compile(r">\s*\*\*Stage\s+(\d+)\*\*", re.I)
 
 
+def plan_merged(db: dict) -> set[str]:
+    """Plan refs whose every board row is merged. A ref with no row is not here."""
+    states: dict[str, list[str]] = {}
+    for t in db["tasks"]:
+        if t.get("plan"):
+            states.setdefault(t["plan"], []).append(t["state"])
+    return {i for i, st in states.items() if all(x == "merged" for x in st)}
+
+
+def read_accepted(path) -> set[str]:
+    """The steps recorded in .state/phase-accepted (see plan_progress)."""
+    try:
+        return set(pathlib.Path(path).read_text().split())
+    except OSError:
+        return set()
+
+
+def plan_progress(db: dict, project=None, plan_text: str = "", accepted_path=None,
+                  stage: int | str = 5) -> dict:
+    """Where is the plan? THE one place that reads the wave table into phases and
+    decides which phase is current; gate.sh and state.sh (through hooks/plan-scope.py)
+    and check_plan all call it, so they cannot disagree (#6, #8, and the check_plan
+    follow-up that inferred the phase from the board alone).
+
+    Returns a dict:
+      phased    True when the table has phase rows
+      groups    [{"label", "steps"}] in table order. A phase's label is its row's
+                label; a table without phase rows is ONE group with label ""
+      names     the label of each group, the 1-based number when it has none
+      waves     {wave number: [steps]} for the wave-by-wave unphased check_plan
+      boarded   plan refs that have at least one board row
+      merged    plan refs whose every row is merged (plan_merged)
+      accepted  steps in .state/phase-accepted (written by plan-scope.py snap while
+                the header sits at stage 6/7), default <project>/.state/phase-accepted
+      current   index of the CURRENT group: the first one holding a step that is not
+                both accepted and still merged (a step reopened by a stage-6/7 failure
+                makes its phase current again); the last group when all are done
+      under_test  index of the last fully merged group, None when there is none: the
+                phase the stage-6/7 header is about, since once it is accepted
+                `current` has already moved to the next phase
+      scope     the group the caller should care about at `stage`: under_test at
+                stage 6/7 (when there is one), else current. None without any steps
+    """
+    groups: list[dict] = []
+    waves: dict[int, list[str]] = {}
+    cur = None
+    phased = False
+    for line in plan_text.splitlines():
+        if _PHASE_RE.match(line):
+            phased = True
+            cells = [c.strip() for c in line.split("|")]
+            cur = {"label": cells[2].strip("* ") if len(cells) > 2 else "", "steps": []}
+            groups.append(cur)
+            continue
+        m = _STEP_RE.match(line)
+        if m:
+            if cur is None:
+                cur = {"label": "", "steps": []}
+                groups.append(cur)
+            cur["steps"].append(m.group(2))
+            waves.setdefault(int(m.group(1)), []).append(m.group(2))
+    groups = [g for g in groups if g["steps"]]
+    merged = plan_merged(db)
+    if accepted_path is None:
+        accepted_path = root(project) / ".state" / "phase-accepted"
+    accepted = read_accepted(accepted_path)
+    out = {"phased": phased, "groups": groups, "waves": waves,
+           "names": [g["label"] or str(n + 1) for n, g in enumerate(groups)],
+           "boarded": {t["plan"] for t in db["tasks"] if t.get("plan")},
+           "merged": merged, "accepted": accepted,
+           "current": None, "under_test": None, "scope": None}
+    if not groups:
+        return out
+    live = accepted & merged
+    cur_i = next((n for n, g in enumerate(groups) if any(i not in live for i in g["steps"])),
+                 len(groups) - 1)
+    done = [n for n, g in enumerate(groups) if all(i in merged for i in g["steps"])]
+    out["current"], out["under_test"] = cur_i, (done[-1] if done else None)
+    out["scope"] = out["under_test"] if str(stage) in ("6", "7") and done else cur_i
+    return out
+
+
 def check_plan(db: dict, project=None) -> list[str]:
     """The wave table and the board can drift apart: a step gets planned but the
     lead forgets to board_add it. Below stage 5 the board is legitimately empty
@@ -241,8 +323,10 @@ def check_plan(db: dict, project=None) -> list[str]:
 
     The plan is built one phase (or, absent phase rows, one wave) at a time, so
     only the CURRENT group's steps are expected on the board. With phase rows,
-    the current group is the phase that already has at least one step there
-    (falling back to the first phase when none does). Without phase rows, the
+    the current group comes from plan_progress: the first phase with a step that
+    is not both accepted and still merged (the phase under test at stage 6/7),
+    and each message names it ("phase B: plan step I3 has no board task ...").
+    Without phase rows, the
     current group is the lowest wave that has a step on the board and isn't
     fully merged yet; if no wave qualifies (nothing boarded, or every boarded
     wave is already fully merged), it falls back to the lowest wave that has
@@ -263,35 +347,21 @@ def check_plan(db: dict, project=None) -> list[str]:
     if not m or int(m.group(1)) < 5:
         return []
 
-    has_phases = any(_PHASE_RE.match(line) for line in text.splitlines())
-    on_board = {t["plan"] for t in db["tasks"] if t.get("plan")}
+    p = plan_progress(db, project, text, stage=m.group(1))
+    on_board = p["boarded"]
 
-    if has_phases:
-        groups: list[list[str]] = []
-        current: list[str] | None = None
-        for line in text.splitlines():
-            if _PHASE_RE.match(line):
-                current = []
-                groups.append(current)
-                continue
-            sm = _STEP_RE.match(line)
-            if sm:
-                if current is None:
-                    current = []
-                    groups.append(current)
-                current.append(sm.group(2))
-        if not groups:
+    if p["phased"]:
+        # The CURRENT phase, by merge + acceptance (not "the first phase that has a row
+        # on the board": an accepted phase keeps its merged rows there). At stage 6/7 it
+        # is the phase under test, which is fully boarded by definition.
+        if p["scope"] is None:
             return []
-        target = next((g for g in groups if any(i in on_board for i in g)), groups[0])
-        return [f"plan step {i} has no board task — copy it from the wave table "
-                f"(board_add with plan: {i})" for i in target if i not in on_board]
+        name, steps = p["names"][p["scope"]], p["groups"][p["scope"]]["steps"]
+        return [f"phase {name}: plan step {i} has no board task — copy it from the wave "
+                f"table (board_add with plan: {i})" for i in steps if i not in on_board]
 
     # No phase rows: group by wave number instead.
-    waves: dict[int, list[str]] = {}
-    for line in text.splitlines():
-        sm = _STEP_RE.match(line)
-        if sm:
-            waves.setdefault(int(sm.group(1)), []).append(sm.group(2))
+    waves = p["waves"]
     if not waves:
         return []
 

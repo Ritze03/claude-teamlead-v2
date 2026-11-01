@@ -1692,7 +1692,10 @@ grep -q 'Stage 6' "$T/g6out" && ok "  demands Stage 6 for the finished phase" ||
 sed -i 's/Stage 5/Stage 6/' $g6f; g6run >/dev/null
 sed -i 's/Stage 6/Stage 7/' $g6f; g6run >/dev/null
 sed -i 's/Stage 7/Stage 5/' $g6f
-check "phased: back at stage 5 after A was accepted, B unboarded: exit 0" "$(g6run)" 0
+# (the Stage 6 gate stays quiet. check_plan now asks for B's steps by phase name, so the gate does
+# exit 2 here with that nudge: it used to say nothing, which was the "first phase on the board" flaw)
+check "phased: back at stage 5 after A was accepted, B unboarded: no Stage 6 demand" "$(g6s6)" quiet
+check "  but check_plan asks to board phase B" "$(grep -c 'phase B: plan step I3 has no board task' "$T/g6out")" 1
 g6add I3
 check "phased: B boarded, not merged: exit 0" "$(g6run)" 0
 g6set 3 merged
@@ -1751,6 +1754,46 @@ python3 "$B" add --project $cpp --task "do" --agent tl-sonnet-low --owns src/a -
 python3 "$B" status --project $cpp > "$T/cpstatus" 2>&1
 grep -q 'I2 has no board task' "$T/cpstatus" && ok "  'status' prints the same problem text" || bad "  status prints the problem"
 
+echo "== board.py check_plan: the CURRENT phase follows merge + acceptance, not 'first phase on the board' =="
+# Same class as #6 (inferring plan progress from the board alone): phase A merged AND accepted, its rows
+# still on the board, B not boarded (or only partly). Fixture: A = I1,I2   B = I3,I4
+cpq=$T/cplanq; mkdir -p $cpq/.claude/teamlead/plan $cpq/.claude/teamlead/.state
+git -C $cpq init -q; git -C $cpq config user.email t@t.t; git -C $cpq config user.name t
+echo a > $cpq/a.txt; git -C $cpq add -A >/dev/null; git -C $cpq commit -qm init >/dev/null
+cqf=$cpq/.claude/teamlead/plan/topic.md
+echo "$cqf" > $cpq/.claude/teamlead/.state/active-plan
+printf '# T\n\n> **Stage 5** — x\n\n## Implementation plan\n\n| Wave | ID | Task | Agent | Owns | After |\n|:----:|:--:|---|---|---|---|\n| — | **A** | **First** | | | |\n| 1 | I1 | do — **D1** | `tl-sonnet-low` | src/a | — |\n| 2 | I2 | do2 — **D1** | `tl-sonnet-low` | src/b | — |\n| — | **B** | **Second** | | | |\n| 3 | I3 | do3 — **D1** | `tl-sonnet-low` | src/c | — |\n| 4 | I4 | do4 — **D1** | `tl-sonnet-low` | src/d | — |\n' > $cqf
+cqchk(){ python3 "$B" check --project $cpq >"$T/cqout" 2>&1; echo $?; }
+cqadd(){ python3 "$B" add --project $cpq --task "t$1" --agent tl-sonnet-low --owns src/$1 --plan $1 >/dev/null; }
+cqid(){ python3 -c "import json;print([t['id'] for t in json.load(open('$cpq/.claude/teamlead/.state/board.json'))['tasks'] if t['plan']=='$1'][0])"; }
+cqset(){ python3 "$B" update --project $cpq --id "$(cqid $1)" --state "$2" >/dev/null; }
+cqadd I1; cqadd I2; cqset I1 merged; cqset I2 merged
+check "A merged, not yet accepted, B unboarded: still phase A (all boarded), clean" "$(cqchk)" 0
+echo "I1 I2" > $cpq/.claude/teamlead/.state/phase-accepted
+check "A merged and accepted, B unboarded: check fails" "$(cqchk)" 1
+grep -q 'phase B: plan step I3 has no board task' "$T/cqout" && ok "  names phase B and I3" || bad "  names phase B and I3"
+grep -q 'phase B: plan step I4 has no board task' "$T/cqout" && ok "  and I4, each line carrying the phase" || bad "  and I4, each line carrying the phase"
+grep -q 'I1\|I2' "$T/cqout" && bad "  should not name A's steps" || ok "  does not name A's steps"
+cqadd I3
+check "B partly boarded (I3 only): check still fails" "$(cqchk)" 1
+grep -q 'phase B: plan step I4 has no board task' "$T/cqout" && ok "  names the missing B step I4" || bad "  names the missing B step I4"
+grep -q 'I3 has no board task' "$T/cqout" && bad "  I3 is boarded, not named" || ok "  I3 not named"
+cqadd I4
+check "B fully boarded: clean" "$(cqchk)" 0
+# stage 6/7 is about the phase UNDER TEST: never ask for the next phase's steps then
+rm -f $cpq/.claude/teamlead/.state/board.json; cqadd I1; cqadd I2; cqset I1 merged; cqset I2 merged
+sed -i 's/Stage 5/Stage 6/' $cqf
+check "stage 6, A accepted, B unboarded: A is under test, nothing to board yet" "$(cqchk)" 0
+sed -i 's/Stage 6/Stage 7/' $cqf
+check "stage 7, same: still clean" "$(cqchk)" 0
+sed -i 's/Stage 7/Stage 5/' $cqf
+# a reopened accepted step makes its phase current again (and it is on the board, so clean)
+cqset I2 queued
+check "accepted step reopened, B unboarded: phase A is current again, all boarded: clean" "$(cqchk)" 0
+rm -f $cpq/.claude/teamlead/.state/board.json $cpq/.claude/teamlead/.state/phase-accepted
+check "phased, nothing boarded, nothing accepted: asks for phase A" "$(cqchk)" 1
+grep -q 'phase A: plan step I1 has no board task' "$T/cqout" && ok "  'phase A: plan step I1 …'" || bad "  'phase A: plan step I1 …'"
+
 echo "== board.py check_plan: an unphased wave table groups by WAVE, never fully-merged (D22 follow-up) =="
 wcp=$T/wcplan; mkdir -p $wcp/.claude/teamlead/plan $wcp/.claude/teamlead/.state
 git -C $wcp init -q; git -C $wcp config user.email t@t.t; git -C $wcp config user.name t
@@ -1774,6 +1817,7 @@ check "wave 1 fully merged, wave 2 untouched: falls back to the lowest un-boarde
 grep -q 'I1' "$T/wcout" && bad "  should not name I1 (merged)" || ok "  does not name I1 (merged)"
 grep -q 'I2' "$T/wcout" && bad "  should not name I2 (merged)" || ok "  does not name I2 (merged)"
 grep -q 'I3 has no board task' "$T/wcout" && ok "  names I3 (next wave)" || bad "  names I3 (next wave)"
+grep -qi 'phase' "$T/wcout" && bad "  unphased message carries no phase prefix" || ok "  unphased message carries no phase prefix"
 grep -q 'I4' "$T/wcout" && bad "  should not name I4 (a later wave)" || ok "  does not name I4 (a later wave)"
 python3 "$B" add --project $wcp --task "do3" --agent tl-sonnet-low --owns src/c --plan I3 >/dev/null
 check "wave 1 merged, wave 2 (I3) boarded and not merged: clean" "$(wcchk)" 0
@@ -2101,6 +2145,21 @@ grep -q '📄 Planning:' <<<"$out" && ok "'Stage 2' header: 📄 Planning" || ba
 printf '# T\n\n> **Stage 7** — x\n' > $slipf
 out=$(printf '{"cwd":"%s"}' "$slip" | bash "$H/statusline.sh")
 grep -q '🙋' <<<"$out" && ok "'Stage 7' header: 🙋" || bad "'Stage 7' header: 🙋 ($out)"
+# a plan with phases names the phase in the stage description (same parser as the gate)
+printf "$G6HEAD"'| — | **A** | **First** | | | |\n| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n| — | **B** | **Second** | | | |\n| 2 | I2 | b — **D1** | `tl-sonnet-low` | src/I2 | — |\n| — | **C** | **Third** | | | |\n| 3 | I3 | c — **D1** | `tl-sonnet-low` | src/I3 | — |\n' > $slipf
+sli(){ printf '{"cwd":"%s"}' "$slip" | bash "$H/statusline.sh"; }
+grep -q 'stage 5/7 building phase A of 3' <<<"$(sli)" && ok "phased, stage 5, nothing merged: 'building phase A of 3'" || bad "phased stage 5: building phase A of 3 ($(sli))"
+python3 "$B" add --project $slip --task t1 --agent tl-sonnet-low --owns src/I1 --plan I1 >/dev/null
+python3 "$B" update --project $slip --id 1 --state merged >/dev/null
+echo "I1" > $slip/.claude/teamlead/.state/phase-accepted
+grep -q 'stage 5/7 building phase B of 3' <<<"$(sli)" && ok "  A merged and accepted: 'building phase B of 3'" || bad "  building phase B of 3 ($(sli))"
+rm -f $slip/.claude/teamlead/.state/phase-accepted; sed -i 's/Stage 5/Stage 6/' $slipf
+grep -q 'stage 6/7 verifying phase A of 3' <<<"$(sli)" && ok "  stage 6: 'verifying phase A of 3' (the phase under test)" || bad "  verifying phase A of 3 ($(sli))"
+sed -i 's/Stage 6/Stage 7/' $slipf
+grep -q 'stage 7/7 your turn to test phase A of 3' <<<"$(sli)" && ok "  stage 7: 'your turn to test phase A of 3'" || bad "  your turn to test phase A of 3 ($(sli))"
+printf "$G6HEAD"'| 1 | I1 | a — **D1** | `tl-sonnet-low` | src/I1 | — |\n' > $slipf
+grep -q 'stage 5/7 building it' <<<"$(sli)" && ok "  a plan without phase rows keeps 'building it'" || bad "  unphased keeps 'building it' ($(sli))"
+rm -f $slip/.claude/teamlead/.state/board.json
 
 echo "== plan-archive.sh --abandon (I12): closes out the ledger =="
 abp=$T/aband; mkdir -p $abp/.claude/teamlead/{plan,.state/snap}

@@ -277,8 +277,8 @@ fi
 # phase's name, position and successor for the message (see plan-scope.py). The scope is the current
 # phase, or the whole table when it has no phase rows; a table with no I<n> step
 # at all has nothing to wait for, so "yes" (the old board-only behaviour). It
-# reads the table with board.py's own regexes (_PHASE_RE/_STEP_RE), the same ones
-# check_plan uses, not a second parser.
+# calls board.py's plan_progress(), the same function check_plan (check 1b) and the
+# statusline use, not a second parser.
 # .state/phase-accepted holds the steps that already went through stage 6/7 (snap
 # records them while the header sits at 6 or 7). Without it a finished, accepted
 # phase — merged rows still on the board, header back at 5 for the next phase —
