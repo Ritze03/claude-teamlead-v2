@@ -2944,6 +2944,13 @@ ev "$(T76STOP tw79 $T/t76-ret2.jsonl 'done')" "$H/record.sh" >/dev/null
 check "  a real return does reap it" "$(t76up $p_tkg)" down
 kill $T76PIDS 2>/dev/null; kill -9 $T76PIDS 2>/dev/null; wait 2>/dev/null
 
+echo "== SKILL.md: auto-mode merge/cleanup guidance (#3) =="
+grep -q '^## Merging and cleanup under auto mode' "$SK" && ok "  section present" || bad "  section present"
+grep -q 'Permission refusal → stop, tell the user, offer the rule; never route around it' "$SK" && ok "  general refusal rule" || bad "  general refusal rule"
+grep -q 'Bash(bash \*/scripts/worker-cleanup.sh \*)' "$SK" && ok "  names the worker-cleanup allow rule" || bad "  names the worker-cleanup allow rule"
+grep -q 'tells a worker to merge' <(tr '\n' ' ' < "$SK" | sed 's/  */ /g') && ok "  briefs never tell a worker to merge" || bad "  briefs never tell a worker to merge"
+[ -f "$CLAUDE_PLUGIN_ROOT/docs/permissions.md" ] && ok "  docs/permissions.md exists" || bad "  docs/permissions.md exists"
+
 echo "== worker-cleanup.sh: leftover processes, worktree, branch =="
 WC="$CLAUDE_PLUGIN_ROOT/scripts/worker-cleanup.sh"
 wm="$T/wc"; mkdir -p "$wm"

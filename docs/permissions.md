@@ -1,0 +1,82 @@
+# Permissions under auto mode
+
+Teamlead's flow is worker, then QC row, then the lead merges. Claude Code's **auto
+permission mode** puts a classifier in front of every shell command, and the
+classifier sees only the command text and the conversation, not the board. It can
+therefore refuse a perfectly reviewed merge as `[Merge Without Review]`
+([#3](https://github.com/Ritze03/claude-teamlead-v2/issues/3)). The plugin does not
+control that classifier and its answers are not deterministic. What it does:
+
+- the lead states the review evidence (QC row id + verdict) in the turn right before the merge;
+- a brief never tells a worker to merge, push or delete a branch (a dispatch whose brief
+  said "merge the PR yourself" was itself refused); workers commit and report;
+- on any refusal the lead stops, tells you, and offers the rule below. It adds it only
+  after your yes, and never writes settings from a hook.
+
+## The allow rules
+
+Put them in the project's `.claude/settings.json` (shared) or `.claude/settings.local.json`
+(yours only), under `permissions.allow`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge *)",
+      "Bash(gh pr merge *)",
+      "Bash(bash */scripts/worker-cleanup.sh *)"
+    ]
+  }
+}
+```
+
+| Rule | Covers | Add it when |
+|---|---|---|
+| `Bash(git merge *)` | the lead merging an accepted worker branch | a `git merge` is refused |
+| `Bash(gh pr merge *)` | merging a PR after QC (only if your flow uses PRs) | a `gh pr merge` is refused |
+| `Bash(bash */scripts/worker-cleanup.sh *)` | worker cleanup: `git worktree remove` + `git branch -d`, never `--force` | the cleanup call is refused |
+
+Add only what a refusal actually needs. Everything else the plugin prescribes
+(`board.py forget`/`clean`/`drop`, `gh issue create`, deleting state files, a push) has
+no rule here: if one is ever refused, the lead asks you before anything is allowed.
+
+## Syntax (Claude Code docs, "Configure permissions")
+
+- Rules are `Tool(specifier)`; Bash rules match the command text, `*` is a wildcard.
+  A trailing ` *` also matches the bare command (`Bash(ls *)` matches `ls`).
+- `Bash(x:*)` is an older equivalent of `Bash(x *)`; the `:*` form is recognised only
+  at the end of a pattern.
+- Put the `*` after the subcommand. A `*` in the middle works for paths, as in
+  `*/scripts/worker-cleanup.sh`, but Claude Code warns about a `*` before the subcommand.
+- Rules are checked deny, then ask, then allow; the first match wins. A deny or ask rule
+  beats any allow rule.
+- A rule matches the command as written: `git -C <dir> merge` does not match
+  `Bash(git merge *)`, and `a && b` needs both halves allowed.
+- In auto mode, **narrow** allow rules are resolved before the classifier and stay in
+  effect; broad ones that grant arbitrary execution (`Bash(*)`, wildcarded interpreters)
+  are suspended. `autoMode.classifyAllShell: true` suspends all Bash allow rules.
+- `autoMode` settings (environment, allow, soft_deny) are **not** read from the project's
+  `.claude/settings.json`; only from `~/.claude/settings.json`, managed settings or
+  `--settings`. `permissions.allow` is read from project settings.
+- You can also clear a single refusal by saying so in your next message ("yes, merge it");
+  or open `/permissions` → Recently denied and press `r` to retry.
+
+Sources: https://code.claude.com/docs/en/permissions (Wildcard patterns, Compound
+commands) and https://code.claude.com/docs/en/auto-mode-config (Where the classifier
+reads configuration, Route all shell commands through the classifier, Review denials).
+
+## Which lead actions can a permission layer refuse?
+
+| Action the lead is told to run | Refusable | Recovery |
+|---|---|---|
+| merge a worker branch into the checked-out branch | yes | the general rule: stop, tell the user, offer `Bash(git merge *)` |
+| `gh pr merge` | yes (the skill has no PR flow of its own) | same |
+| `worker-cleanup.sh` (worktree remove, `branch -d`) | yes | same; the script's own refusals (dirty tree, unmerged branch) are separate, exit 1, and are fixed rather than forced |
+| `git branch -D`, `git worktree remove --force` | yes | never prescribed; a refused `-d` is not escalated to `-D` |
+| `git push` | yes | never prescribed |
+| `gh issue create` | yes | already user-gated; a refusal falls under the general rule |
+| `board.py forget` / `clean` / `drop` | possible | `drop` already asks first; a refusal falls under the general rule |
+| deleting state files | possible | never prescribed by hand; scripts do it |
+
+The single rule: **permission refusal → stop, tell the user, offer the allow rule, never
+route around it.**
