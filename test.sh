@@ -685,6 +685,13 @@ grep -q 'Privacy scan' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md
 
 grep -q 'docs/.*superdoc:start' <(grep -A3 'After a `/clear`' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" | tr '\n' ' ') && ok "plan: after-/clear reads docs/ and the superdoc:start folder" || bad "plan: after-/clear doc folders"
 
+PSK="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
+grep -q 'Read the docs, too' "$PSK" && grep -A6 'Read the docs, too' "$PSK" | tr '\n' ' ' | grep -q 'superdoc:start' && ok "plan: the stage-4 audit reads the project docs" || bad "plan: stage-4 audit docs"
+grep -q 'project docs\*\* for the areas the plan touches' "$PSK" && ok "  stage 3 scouting covers the docs" || bad "  stage 3 scouting docs"
+TLS="$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md"
+grep -A12 'Check the docs before you board and dispatch' "$TLS" | tr '\n' ' ' | grep -q 'read the pages that matter yourself.*touch.*writing dispatch then waits' && ok "teamlead: docs read by the lead before a writing dispatch" || bad "teamlead: docs read before writing dispatch"
+grep -q "after that Go I'll offer" "$TLS" && ok "  help text: the /clear offer comes after the Go" || bad "  help text /clear offer"
+
 echo "== the @-budget rule keeps its reasoning =="
 PB="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md"
 grep -q 'nothing else, ever' "$PB" && ok "the exact set is still mandated" || bad "the exact set is still mandated"

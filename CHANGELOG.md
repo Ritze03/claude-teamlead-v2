@@ -7,6 +7,7 @@ Versioning: every push that changes what users get bumps `.claude-plugin/plugin.
 ## 2.2.4 — 2026-11-01
 
 - plan: the "/clear, then /teamlead plan continue" offer is printed only in the reply to the second Go, once the header is Stage 5 — never at the end of stage 4 while asking for the Go (a /clear there lost the unrecorded Go and `plan continue` refused). The Stop gate blocks the offer at stage 4; `plan continue` at stage 4 without a Go says "No Go recorded ... say Go to start building".
+- plan + teamlead: reading the project docs is now a requirement, not a hint. Plan stage 3 scouting covers the docs for the areas the plan touches; the stage-4 context audit has the lead read the relevant pages before writing `## Done when` and the wave table. The teamlead reads the relevant doc pages itself before any dispatch whose worker will touch something, names them in the brief and passes on the constraints (a scout covers the docs only when the lead can't tell which matter, and the writing dispatch waits for it). The help text says the `/clear` offer comes after the Go.
 
 ## 2.2.3 — 2026-11-01
 
