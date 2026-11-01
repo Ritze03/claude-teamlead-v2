@@ -16,16 +16,27 @@ of real work goes to a worker. Stay inside the target project.
 
 ## Worker knowledge base
 
-Workers don't inherit this skill, so every dispatched superdoc worker must read,
-by **absolute path**:
+Workers don't inherit this skill, so every dispatched superdoc worker must read the
+playbook and copy the assets from the plugin root, which you give it as a **literal
+absolute path in its brief**:
 
 ```
-$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/playbook.md
+<plugin-root>/skills/teamlead-superdoc/playbook.md
+<plugin-root>/skills/teamlead-superdoc/assets/   (documentation.md, version-policy-*.md)
 ```
 
-Assets to copy verbatim live in `$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/assets/`.
+`CLAUDE_PLUGIN_ROOT` is **not** set in your shell; resolve the path once with
+`cat .claude/teamlead/.state/plugin-root` and paste the real path into every brief.
+Do **not** tell a worker to run `$(cat .claude/teamlead/.state/plugin-root)` itself:
+workers run in a git worktree, and that state file lives in the main checkout's
+`.claude/`, so in the worktree it is missing and the path collapses to `/skills/...`.
 
-`CLAUDE_PLUGIN_ROOT` is **not** set in your shell; that state file holds the absolute path.
+Tell workers to fetch the playbook and assets with the **Read tool** and write copies
+with the **Write tool**, not Bash `cp`. Claude Code's worktree guard refuses Bash
+commands that write and name a host path with `Git` in a segment (for example
+`.../GitHubProjects/...`): "names git in a form too complex to verify" (issue #5).
+Read and Write are not guarded.
+
 Resolve it once with Bash and put the real path in every worker brief.
 
 **Top of every run:** if `superdoc/claude-instructions/documentation-version-policy.md`
