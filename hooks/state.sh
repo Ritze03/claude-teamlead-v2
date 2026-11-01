@@ -131,7 +131,7 @@ if [ -f "$d/.state/active-plan" ]; then
         1) next="settle the topic and create the plan file" ;;
         2) next="show the path table, start the watcher, dispatch the scout" ;;
         3) next='answer the open questions with the user; end every turn with: Type "Go" if you want me to plan the implementation.' ;;
-        4) next='wait for "Go"; end every turn with: Type "Go" if you want me to start implementing.' ;;
+        4) next='wait for "Go"; end every turn with: Type "Go" if you want me to start implementing. Do not offer /clear or `/teamlead plan continue` yet — only once the Go is recorded and the header is Stage 5' ;;
         5) next="build $scope: translate its wave table onto the board (board_add with plan: I<n>) and dispatch; when every step of $scope is boarded and merged, set the header to Stage 6 (verifying $scope); after Stage 7: $after7" ;;
         6) next="verify $scope: run every 'verified by: agent' criterion for $scope for real, tick it with the command and its result, then set the header to Stage 7 (no \"Go\" needed)" ;;
         7) next="user-test $scope: start the watcher, hand the 'verified by: user' criteria of $scope to the user and wait (their ticks are their report); when they confirm: $after7" ;;

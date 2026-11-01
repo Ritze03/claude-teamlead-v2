@@ -4,6 +4,10 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.2.4 — 2026-11-01
+
+- plan: the "/clear, then /teamlead plan continue" offer is printed only in the reply to the second Go, once the header is Stage 5 — never at the end of stage 4 while asking for the Go (a /clear there lost the unrecorded Go and `plan continue` refused). The Stop gate blocks the offer at stage 4; `plan continue` at stage 4 without a Go says "No Go recorded ... say Go to start building".
+
 ## 2.2.3 — 2026-11-01
 
 - plan: the after-`/clear` doc re-read covers `superdoc/`, `docs/` and the folder CLAUDE.md's `superdoc:start` block points at; the lead's pre-dispatch doc check names that folder too.

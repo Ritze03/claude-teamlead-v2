@@ -30,7 +30,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
 | **2 Create and show** | Create the near-empty plan — the template's sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout, then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
-| **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. | The user says "Go" |
+| **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below). Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. Ask for the Go with the fixed footer and nothing else: **no `/clear` or `/teamlead plan continue` offer yet** (see *The second Go*). | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` of plan-step rows (`plan:`) until this header is set; rows without `plan:` (scouts, unrelated work) are allowed earlier. | Every task of the **current phase** merged, board empty (no phase rows: the whole plan is one phase) |
 | **6 Agent-Testing** | Run every `verified by: agent` criterion **of this phase** for real and tick it. Always set the header to 6 once per phase; **none to run? say so and move to 7 yourself**. | They all pass, or there are none |
 | **7 User-Testing** | Hand this phase's `verified by: user` criteria over and **wait** — with the watcher on, so their ticks reach you. What they find goes back on the board and you set the header back to 5 on your own call; when they pass the phase, you go back to 5 for the next one. After the **last** phase, this stage ends the plan. | The user says it is good |
@@ -784,7 +784,12 @@ departed from the plan loses the interesting part.
 
 The second "Go" (stage 4 → 5) is also D14's handoff point: building is cheaper
 in a small context, and the plan file plus the board were designed to be the
-whole handoff. In this order:
+whole handoff. The offer is made **in the reply to
+that Go, once it is recorded and the header says Stage 5 — never at the end of
+stage 4 while you are still asking for the Go.** Until the Go is recorded, a
+`/clear` loses it and `/teamlead plan continue` refuses at stage 4, so the user
+would have to type Go again. At stage 4 you print the plan, the footer, and
+nothing about clearing. In this order:
 
 1. Set the header to `> **Stage 5**`.
 2. Print, **byte-exact**, on its own paragraph:
@@ -812,6 +817,7 @@ memory; the plan file and the board are the whole handoff (D14):
 | Stage | Action |
 |:----:|---|
 | 3 or 4, with a recorded Go | The user already said Go — write the implementation plan (3) or start implementing (4). |
+| 4, no recorded Go | Do not start. Say plainly: "No Go recorded for the implementation plan yet — say Go to start building." End on the stage-4 footer; print no `/clear` offer until the Go is in. |
 | 5 | Build the current phase: put **all of its** wave rows on the board — when the table has no phase rows, the whole table counts as one phase — (`board_add`, `plan: I<n>`, `blocked_by` from `After`) if they are not there yet — `board.py check` names any that are missing — then dispatch. |
 | 6 | Run the current phase's `verified by: agent` criteria for real (the `phase:` line names it). |
 | 7 | Hand the current phase's `verified by: user` criteria back to the user; once they pass it, `next:` says whether it is back to Stage 5 for the next phase or plan complete. |

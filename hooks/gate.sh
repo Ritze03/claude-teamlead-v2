@@ -10,6 +10,7 @@
 #   3b. plan-stage  — header stage vs. last-accepted (D2): catches a plan-file
 #                      write that bypassed plan-fence.sh entirely (F1)
 #   4. plan footer  — during planning (stage <=4), the turn must end on the fixed line
+#   4b. no /clear offer — stage 4: the fresh-context offer waits for the recorded Go
 #   5. plan-lint    — stage 4: the implementation plan itself must pass lint
 #   6. stage 5->6   — every step of the current phase boarded + merged, header never bumped
 #                      (the message names the phase and what follows Stage 7, #8)
@@ -252,6 +253,15 @@ PYEOF
       problems+=$'\n'"- plan is at stage $plan_stage: end the turn with the fixed line: $footer"
   fi
   # transcript_path absent/unreadable: skip silently, nothing to check against.
+fi
+
+# 4b. No /clear offer while still asking for the Go. The fresh-context offer
+# (`/teamlead plan continue`) belongs to the reply to the second Go, after the Go is
+# recorded and the header is Stage 5. Printed at stage 4 it sends the user through
+# /clear and into a `plan continue` that sees no Go and refuses. Stage 4 only: at 5+
+# the offer and phase-boundary /clear advice are legitimate; 1-3 are left alone.
+if [ "$plan_stage" = "4" ] && tl_json .last_assistant_message | grep -qF '/teamlead plan continue'; then
+  problems+=$'\n'"- plan is at stage 4 and your message offers /clear or \`/teamlead plan continue\` — remove it. Ask for the Go with the fixed footer only; print the fresh-context offer only after the user's Go, once the header is Stage 5 (a /clear before then loses the Go)."
 fi
 
 # 5. plan-lint itself, once there is an implementation plan to lint.
