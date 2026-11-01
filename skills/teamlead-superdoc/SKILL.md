@@ -46,7 +46,7 @@ Read and Write are not guarded.
 
 Resolve it once with Bash and put the real path in every worker brief.
 
-**Top of every run:** if `superdoc/claude-instructions/documentation-version-policy.md`
+**Top of every run:** if `<doc root>/claude-instructions/documentation-version-policy.md`
 exists, have it read **first** — the version policy governs the whole run.
 
 ## Step 1 — Detect state (run this yourself, no worker)
@@ -54,12 +54,13 @@ exists, have it read **first** — the version policy governs the whole run.
 **Run this with Bash as your first action.** Do not skip it and do not delegate it:
 
 ```bash
-test -d superdoc && echo "superdoc: present" || echo "superdoc: absent"
+DOC=superdoc   # change only if the user named another folder (no trailing slash)
+test -d "$DOC" && echo "superdoc: present" || echo "superdoc: absent"
 test -f CLAUDE.md && grep -q 'superdoc:start' CLAUDE.md && echo "CLAUDE.md: wired" || echo "CLAUDE.md: not wired"
-git check-ignore -q superdoc 2>/dev/null && echo "⚠ GITIGNORED — superdoc must be committed or the knowledge dies at the next clone" || echo "git: superdoc is tracked"
+git check-ignore -q "$DOC" 2>/dev/null && echo "⚠ GITIGNORED — superdoc must be committed or the knowledge dies at the next clone" || echo "git: superdoc is tracked"
 # A dangling @-ref loads NOTHING and says nothing about it — the docs look wired
 # while the agent silently gets none of them.
-grep -oE '@superdoc/[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | while read -r f; do
+grep -oE "@$DOC/"'[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | while read -r f; do
   test -f "$f" || echo "⚠ CLAUDE.md force-loads $f — that file does not exist"
 done
 ```

@@ -676,6 +676,10 @@ echo "== superdoc: default folder yields to an explicit user request; privacy ru
 grep -q 'explicitly asks in plain text for another folder' "$SD" && ok "SKILL: an explicit user folder request wins" || bad "SKILL: user folder request"
 ! grep -q 'Always. No alternative' "$SD" && ok "  no 'always, no alternative' left" || bad "  stale 'always' wording"
 grep -q 'Privacy' "$SD" && ok "  SKILL tells the lead to put privacy in briefs" || bad "  SKILL privacy line"
+grep -q '^DOC=superdoc' "$SD" && grep -q 'test -d "\$DOC"' "$SD" && ok "  Step 1 detection snippet uses \$DOC" || bad "  Step 1 detection snippet uses \$DOC"
+! grep -q 'test -d superdoc' "$SD" && ! grep -q "grep -oE '@superdoc/" "$SD" && ok "  Step 1 snippet no longer hard-codes superdoc/" || bad "  Step 1 snippet still hard-codes superdoc/"
+BR="$CLAUDE_PLUGIN_ROOT/skills/teamlead-brainstorm/SKILL.md"
+grep -q '<doc root>/brainstorm/' "$BR" && ! grep -q 'save\*\* to `superdoc/brainstorm' "$BR" && ok "  brainstorm saves under the doc root" || bad "  brainstorm saves under the doc root"
 grep -q 'Part 4a — Privacy' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md" && ok "playbook: privacy rule" || bad "playbook: privacy rule"
 grep -q 'Privacy scan' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md" && ok "  audit greps for leaks" || bad "  audit privacy scan"
 
