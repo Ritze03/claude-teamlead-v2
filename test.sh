@@ -1127,6 +1127,70 @@ check "worker: own session's scratchpad allowed" \
 check "worker: another session's scratchpad denied" \
   "$(fence '{"cwd":"/wt",'"$W"',"session_id":"S1","tool_input":{"file_path":"/tmp/claude-1000/x/S2/scratchpad/a"}}')" deny
 
+echo "== worker fence: owns exception for out-of-project targets, Bash decision (#7) =="
+# Non-git project P, an out-of-project dir O, and a board row owning O by absolute path.
+FP="$T/fp/proj"; FO="$T/fp/outside"; FX="$T/fp/other"; mkdir -p "$FP/.claude/teamlead/.state" "$FO" "$FX"
+ln -s "$FX" "$FP/linkout"; ln -s "$FX" "$FO/linkx"
+fboard(){ printf '{"next_id":9,"tasks":[%s]}' "$1" > "$FP/.claude/teamlead/.state/board.json"; }
+frow(){ printf '{"id":%s,"state":"%s","worker":"%s","owns":%s}' "$1" "$2" "$3" "$4"; }
+fencep(){ out=$(echo "$1" | CLAUDE_PROJECT_DIR="$FP" "$F"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
+fe(){ jq -nc --arg c "$FP" --arg f "$1" --arg a "${2:-w1}" '{cwd:$c,agent_id:$a,agent_type:"tl-sonnet-low",tool_name:"Edit",tool_input:{file_path:$f}}'; }
+fboard ""
+check "no board row: out-of-project Edit refused"        "$(fencep "$(fe "$FO/x")")" deny
+fboard "$(frow 1 running w1 "[\"$FO\"]")"
+check "owns (absolute dir): Edit in it allowed"          "$(fencep "$(fe "$FO/sub/x")")" allow
+check "owns: the owned dir itself"                       "$(fencep "$(fe "$FO")")" allow
+check "owns: a sibling with the same prefix is refused"  "$(fencep "$(fe "${FO}2/x")")" deny
+check "owns: .. out of the owned dir is refused"         "$(fencep "$(fe "$FO/../other/x")")" deny
+check "owns: symlink inside owns pointing out is refused" "$(fencep "$(fe "$FO/linkx/x")")" deny
+check "owns: another worker's row is not honoured"       "$(fencep "$(fe "$FO/x" w2)")" deny
+check "owns: still inside the project too"               "$(fencep "$(fe "$FP/src/x")")" allow
+fboard "$(frow 1 running w1 "[\"$FO/\"]")"
+check "owns: trailing slash"                             "$(fencep "$(fe "$FO/x")")" allow
+fboard "$(frow 1 merged w1 "[\"$FO\"]")"
+check "owns: a merged row grants nothing"                "$(fencep "$(fe "$FO/x")")" deny
+fboard "$(frow 1 returned w1 "[\"$FO\"]")"
+check "owns: a returned row (retry) still counts"        "$(fencep "$(fe "$FO/x")")" allow
+fboard "$(frow 1 running w1 "[\"outside\"]")"
+check "owns: a relative entry grants nothing outside"    "$(fencep "$(fe "$FO/x")")" deny
+fboard "$(frow 1 running w1 "[\"/\"]")"
+check "owns: / is ignored, not a blank cheque"           "$(fencep "$(fe "$FO/x")")" deny
+fboard "$(frow 1 running w1 "[\"~/.tlfence-test\"]")"
+check "owns: ~ expands to \$HOME"                        "$(fencep "$(fe "$HOME/.tlfence-test/x")")" allow
+check "owns: ~ does not widen to the rest of \$HOME"     "$(fencep "$(fe "$HOME/.other/x")")" deny
+fboard "$(frow 1 running w1 "[\"$FO/*.conf\"]")"
+check "owns: a glob entry matches"                       "$(fencep "$(fe "$FO/a.conf")")" allow
+check "owns: a glob entry does not match other names"    "$(fencep "$(fe "$FO/a.txt")")" deny
+fboard "$(frow 1 running w1 "[\"$FO\"]")"
+check "owns: MultiEdit is covered"  "$(fencep "$(fe "$FO/x" | jq -c '.tool_name="MultiEdit"')")" allow
+check "owns: NotebookEdit is covered" "$(fencep "$(fe "$FO/x" | jq -c --arg p "$FO/n.ipynb" '.tool_input={notebook_path:$p}|.tool_name="NotebookEdit"')")" allow
+check "NotebookEdit outside owns refused" "$(fencep "$(fe "$FO/x" | jq -c --arg p "$FX/n.ipynb" '.tool_input={notebook_path:$p}|.tool_name="NotebookEdit"')")" deny
+check "symlink inside the project pointing out is refused" "$(fencep "$(fe "$FP/linkout/x")")" deny
+fboard ""
+check "non-git project: project dir is writable from a subdir cwd" \
+  "$(fencep "$(fe "$FP/src/x" | jq -c --arg c "$FP/sub" '.cwd=$c')")" allow
+# Bash is not fenced (decision recorded in worktree-fence.sh): the hook is only registered for
+# the file tools, and an unfenced tool must never be refused if it does reach the hook.
+check "Bash write outside is not fenced (documented, not parsed)" \
+  "$(fencep "$(jq -nc --arg c "$FP" '{cwd:$c,agent_id:"w1",agent_type:"tl-sonnet-low",tool_name:"Bash",tool_input:{command:"cp a /nowhere/x"}}')")" allow
+check "hooks.json registers the fence on the file tools only" \
+  "$(jq -r '[.hooks.PreToolUse[]|select(any(.hooks[];.command|test("worktree-fence")))|.matcher]|join(",")' "$CLAUDE_PLUGIN_ROOT/hooks/hooks.json")" "Edit|Write|MultiEdit|NotebookEdit"
+fmsg=$(fe "$FO/x" | CLAUDE_PROJECT_DIR="$FP" "$F" | jq -r .hookSpecificOutput.permissionDecisionReason)
+case "$fmsg" in *owns*Bash*|*Bash*owns*) ok "refusal names the owns exception and that Bash is no way round" ;; *) bad "refusal names the owns exception and that Bash is no way round (got: $fmsg)" ;; esac
+# git project: a worker that inherited a subdirectory cwd is anchored to the project, a linked
+# worktree worker is not allowed into the main checkout.
+FG="$T/fg"; mkdir -p "$FG/src" "$FG/sub"; git -C "$FG" init -q; git -C "$FG" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m i
+git -C "$FG" worktree add -q "$FG/.claude/worktrees/agent-x" -b wt-x 2>/dev/null
+ge(){ jq -nc --arg c "$1" --arg f "$2" '{cwd:$c,agent_id:"w1",agent_type:"tl-sonnet-low",tool_name:"Write",tool_input:{file_path:$f}}'; }
+fenceg(){ out=$(echo "$1" | CLAUDE_PROJECT_DIR="$FG" "$F"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
+check "git: subdir cwd, write elsewhere in the project allowed" "$(fenceg "$(ge "$FG/sub" "$FG/build/tmp/x.sh")")" allow
+check "git: subdir cwd, outside the project still refused"       "$(fenceg "$(ge "$FG/sub" "$FO/x")")" deny
+check "git: linked-worktree worker may not write the main checkout" "$(fenceg "$(ge "$FG/.claude/worktrees/agent-x" "$FG/src/x")")" deny
+check "git: linked-worktree worker writes its own worktree"         "$(fenceg "$(ge "$FG/.claude/worktrees/agent-x" "$FG/.claude/worktrees/agent-x/src/x")")" allow
+mkdir -p "$FG/.claude/teamlead/.state"
+printf '{"next_id":2,"tasks":[{"id":1,"state":"running","worker":"w1","owns":["%s"]}]}' "$FO" > "$FG/.claude/teamlead/.state/board.json"
+check "git: worktree worker finds its row in the MAIN checkout's board" "$(fenceg "$(ge "$FG/.claude/worktrees/agent-x" "$FO/x")")" allow
+
 echo "== plan-lint stage awareness =="
 mkplan(){ cat > "$T/pl.md" <<PEOF
 # T
