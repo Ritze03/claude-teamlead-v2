@@ -11,7 +11,7 @@
 #                      write that bypassed plan-fence.sh entirely (F1)
 #   4. plan footer  — during planning (stage <=4), the turn must end on the fixed line
 #   5. plan-lint    — stage 4: the implementation plan itself must pass lint
-#   6. stage 5->6   — every board task merged but the plan header was never bumped
+#   6. stage 5->6   — every step of the current phase boarded + merged, header never bumped
 #   7. returned     — tasks sitting in 'returned' instead of being triaged
 #
 # Rule learned the hard way, four times over: a check that fires on a correct
@@ -209,18 +209,75 @@ if [ "$plan_stage" = "4" ]; then
 fi
 
 # 6. Everything merged but the header never bumped — the plan would sit "done"
-# with nobody told to run acceptance. tl_state_count's by_state never carries
-# 'merged' (summary() in board.py drops merged tasks as no longer "open"), so
-# zero-across-the-open-states plus at least one task on the board is exactly
-# "every task present is merged".
+# with nobody told to run acceptance. The board alone cannot say "done": the lead
+# boards one wave/phase at a time, so it is legitimately all-merged between waves
+# while later I<n> steps have no row yet (#6). Two conditions, both required:
+#   a. nothing open on the board — tl_state_count's by_state never carries
+#      'merged' (summary() in board.py drops merged tasks as no longer "open"), so
+#      zero-across-the-open-states plus at least one task is "every task present
+#      is merged";
+#   b. plan_scope_done: every I<n> step of the CURRENT scope has a board row and
+#      all its rows are merged.
+#
+# plan_scope_done <check|snap>. check prints "yes"/"no". The scope is the current
+# phase, or the whole table when it has no phase rows; a table with no I<n> step
+# at all has nothing to wait for, so "yes" (the old board-only behaviour). It
+# reads the table with board.py's own regexes (_PHASE_RE/_STEP_RE), the same ones
+# check_plan uses, not a second parser.
+# .state/phase-accepted holds the steps that already went through stage 6/7 (snap
+# records them while the header sits at 6 or 7). Without it a finished, accepted
+# phase — merged rows still on the board, header back at 5 for the next phase —
+# would stay "current" and fire again. The current phase is the first one with a
+# step that is not accepted-and-still-merged, so a step reopened by a stage-6/7
+# failure is current again.
+plan_scope_done() {
+  python3 - "$BOARD_PY" "$TL_PROJECT" "$plan_file" "$TL_STATE/phase-accepted" "$1" <<'PYEOF' 2>/dev/null || echo yes
+import importlib.util, pathlib, sys
+bpy, proj, plan, accf, mode = sys.argv[1:6]
+spec = importlib.util.spec_from_file_location("board", bpy)
+b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+states = {}
+for t in b.load(proj)["tasks"]:
+    if t.get("plan"):
+        states.setdefault(t["plan"], []).append(t["state"])
+merged = {i for i, st in states.items() if all(x == "merged" for x in st)}
+acc_path = pathlib.Path(accf)
+try:
+    accepted = set(acc_path.read_text().split())
+except OSError:
+    accepted = set()
+if mode == "snap":
+    acc_path.write_text(" ".join(sorted(accepted | merged)) + "\n")
+    sys.exit(0)
+groups, cur = [], None
+for line in pathlib.Path(plan).read_text(errors="replace").splitlines():
+    if b._PHASE_RE.match(line):
+        cur = []; groups.append(cur); continue
+    m = b._STEP_RE.match(line)
+    if m:
+        if cur is None:
+            cur = []; groups.append(cur)
+        cur.append(m.group(2))
+groups = [g for g in groups if g]
+if not groups:
+    print("yes"); sys.exit(0)
+live = accepted & merged
+scope = next((g for g in groups if any(i not in live for i in g)), groups[-1])
+print("yes" if all(i in merged for i in scope) else "no")
+PYEOF
+}
+
+if { [ "$plan_stage" = "6" ] || [ "$plan_stage" = "7" ]; } && [ -f "$TL_STATE/board.json" ]; then
+  plan_scope_done snap >/dev/null
+fi
 if [ "$plan_stage" = "5" ] && [ -f "$TL_STATE/board.json" ]; then
   still_open=0
   for s in queued running returned blocked; do
     still_open=$(( still_open + $(tl_state_count "$s") ))
   done
   ntasks=$(python3 -c "import json;print(len(json.load(open('$TL_STATE/board.json')).get('tasks',[])))" 2>/dev/null) || ntasks=0
-  if [ "$still_open" -eq 0 ] && [ "${ntasks:-0}" -gt 0 ]; then
-    problems+=$'\n'"- every board task is merged and the plan is at stage 5 — set the header to Stage 6 and run the 'verified by: agent' criteria"
+  if [ "$still_open" -eq 0 ] && [ "${ntasks:-0}" -gt 0 ] && [ "$(plan_scope_done check)" = "yes" ]; then
+    problems+=$'\n'"- every step of the current scope is boarded and merged and the plan is at stage 5 — set the header to Stage 6 and run the 'verified by: agent' criteria"
   fi
 fi
 

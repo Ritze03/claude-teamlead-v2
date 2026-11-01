@@ -111,7 +111,7 @@ if [ -f "$d/.state/active-plan" ]; then
         2) next="show the path table, start the watcher, dispatch the scout" ;;
         3) next='answer the open questions with the user; end every turn with: Type "Go" if you want me to plan the implementation.' ;;
         4) next='wait for "Go"; end every turn with: Type "Go" if you want me to start implementing.' ;;
-        5) next="translate the current phase's wave table onto the board (board_add with plan: I<n>) and dispatch; when every task is merged, set the header to Stage 6" ;;
+        5) next="translate the current phase's wave table onto the board (board_add with plan: I<n>) and dispatch; when every step of the current phase (the whole table, without phases) is boarded and merged, set the header to Stage 6" ;;
         6) next="run every 'verified by: agent' criterion for real, tick it with the command and its result, then set the header to Stage 7" ;;
         7) next="start the watcher, hand the 'verified by: user' criteria to the user and wait (their ticks are their report); when they confirm, tell them it is done and that it can be archived; run plan-archive.sh only if they ask" ;;
         *) next="" ;;
