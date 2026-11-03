@@ -1347,6 +1347,29 @@ for ag in "$CLAUDE_PLUGIN_ROOT"/agents/tl-*.md; do
 done
 grep -q '^\*\*Scope requests\.\*\*' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" && ok "  teamlead skill: Scope requests paragraph" || bad "  teamlead skill: Scope requests paragraph"
 
+echo "== worker scratch: .tl-scratch/ rule in every agent, lead rule, git exclude =="
+for ag in "$CLAUDE_PLUGIN_ROOT"/agents/tl-*.md; do
+  grep -q '`\.tl-scratch/`' "$ag" && grep -q 'never use the session scratchpad' "$ag" && grep -q 'never create a symlink out of the worktree' "$ag" \
+    && grep -q 'TMPDIR. at `\.tl-scratch/tmp`' "$ag" && grep -q 'you never commit it' "$ag" \
+    && ok "  $(basename "$ag"): .tl-scratch rule" || bad "  $(basename "$ag"): .tl-scratch rule"
+done
+grep -q 'Never point a worker at files in your own session scratchpad' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" \
+  && grep -q 'says where outputs go: `\.tl-scratch/`' "$CLAUDE_PLUGIN_ROOT/skills/teamlead/SKILL.md" \
+  && ok "  teamlead skill: no scratchpad for workers" || bad "  teamlead skill: no scratchpad for workers"
+tsx="$T/tsx"; mkdir -p "$tsx/.claude/teamlead/.state"; : > "$tsx/.claude/teamlead/.state/active"
+git -C "$tsx" init -q
+tsxs='{"hook_event_name":"SubagentStart","cwd":"'$tsx'","agent_type":"teamlead:tl-sonnet-high","agent_id":"tsx1"}'
+check "SubagentStart record.sh: exit 0" "$(ev "$tsxs" "$H/record.sh")" 0
+ev "$tsxs" "$H/record.sh" >/dev/null
+check "  .tl-scratch/ in info/exclude exactly once after two starts" "$(grep -cxF '.tl-scratch/' "$tsx/.git/info/exclude")" 1
+echo x > "$tsx/f"; mkdir -p "$tsx/.tl-scratch"; echo x > "$tsx/.tl-scratch/o.log"
+check "  git ignores .tl-scratch/" "$(git -C "$tsx" status --porcelain -uall | grep -c tl-scratch)" 0
+tsxw="$T/tsxw"; git -C "$tsx" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m i
+git -C "$tsx" worktree add -q "$tsxw" >/dev/null 2>&1; mkdir -p "$tsxw/.tl-scratch"; echo x > "$tsxw/.tl-scratch/o.log"
+check "  ... and in a linked worktree" "$(git -C "$tsxw" status --porcelain -uall | grep -c tl-scratch)" 0
+tsxn="$T/tsxn"; mkdir -p "$tsxn/.claude/teamlead/.state"; : > "$tsxn/.claude/teamlead/.state/active"
+check "non-git project: hook still exits 0, no exclude written" "$(ev "$(sed "s|$tsx|$tsxn|" <<<"$tsxs")" "$H/record.sh")" 0
+
 echo "== plan-lint stage awareness =="
 mkplan(){ cat > "$T/pl.md" <<PEOF
 # T

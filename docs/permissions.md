@@ -47,6 +47,19 @@ allow rule: the worker fence answers Claude Code's prompt with an allow for exac
 paths (the hooks docs: a hook allow skips the prompt, but deny and ask rules are still
 evaluated). Bash writes are not covered: a `Bash(...)` rule is still needed for those.
 
+## A prompt that mentions the scratchpad or a symlink
+
+A prompt like "`…/.claude/worktrees/agent-…/target/x/out.log` resolves through a symlink
+to `/tmp/claude-1000/…/scratchpad/…`, which is outside the allowed working directories"
+means a worker touched the lead's session scratchpad (Claude Code tells every agent to
+"use the scratchpad for temporary files"). A worker's Bash or Read there, directly or
+through a symlink, is outside its allowed directories, so every access prompts and a
+background worker blocks until you click. Since 2.3.1 workers keep scratch files, logs and
+test output in `.tl-scratch/` inside their own worktree (the plugin adds it to
+`.git/info/exclude`, so it is never committed), the lead never points a worker at its own
+scratchpad, and `/tmp` (RAM) is not used for large outputs. If you still see this prompt,
+a brief or an older agent version sent the worker there: deny it and tell the lead.
+
 ## Syntax (Claude Code docs, "Configure permissions")
 
 - Rules are `Tool(specifier)`; Bash rules match the command text, `*` is a wildcard.

@@ -98,3 +98,19 @@ tl_event() {
 
 # Block the turn with a message (Stop/PreToolUse deny both read stderr).
 tl_block() { printf '%s\n' "$*" >&2; exit 2; }
+
+# Worker scratch lives in <worktree>/.tl-scratch/ and must never be committed.
+# info/exclude sits in the git COMMON dir, so one line in the main checkout covers
+# every linked worktree, and nothing tracked (.gitignore) changes. Idempotent, and
+# silent on any failure: a missing git, a non-repo project or a read-only .git
+# must never fail the hook that calls it.
+tl_ensure_scratch_exclude() {
+  local common ex
+  common=$(git -C "$TL_PROJECT" rev-parse --git-common-dir 2>/dev/null) || return 0
+  case "$common" in /*) ;; *) common="$TL_PROJECT/$common" ;; esac
+  ex="$common/info/exclude"
+  grep -qxF ".tl-scratch/" "$ex" 2>/dev/null && return 0
+  mkdir -p "$common/info" 2>/dev/null || return 0
+  printf '%s\n' ".tl-scratch/" >> "$ex" 2>/dev/null || true
+  return 0
+}

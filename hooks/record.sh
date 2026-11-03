@@ -273,6 +273,9 @@ case "$ev" in
     case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
     sfx=""; sid=$(tl_json .session_id); [ -n "$sid" ] && sfx="  session=$sid"
     tl_event "start     agent=$at  id=$(tl_json .agent_id)$sfx"
+    # Workers keep scratch in <worktree>/.tl-scratch/ — keep it out of git for every
+    # linked worktree (one line in the common dir's info/exclude; idempotent, silent).
+    tl_ensure_scratch_exclude
     # D12: the resume path — a fresh dispatch's row is already 'running' (or
     # has no worker yet) via PostToolUse, so this is a harmless no-op then.
     tl_board_call "$(tl_json .agent_id)" "" worker-start --id "$(tl_json .agent_id)"

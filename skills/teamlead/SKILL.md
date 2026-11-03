@@ -353,6 +353,13 @@ re-deriving your context is not.** Write briefs that are thorough, not short.
    the specifics you will need (paths, values, diffs, exact error text).
 6. **Self-check** — the concrete command or criteria to verify before returning.
 
+**Never point a worker at files in your own session scratchpad** (`/tmp/claude-*/…/scratchpad`):
+a worker cannot read them without a permission prompt, and a background worker blocks
+on it. Tooling or a rig a worker needs gets copied into the project (committed, or an
+untracked, git-excluded folder), or the worker builds it in its own `.tl-scratch/`. The
+brief says where outputs go: `.tl-scratch/` in the worker's worktree (git-excluded by
+the plugin; workers never commit it). `/tmp` is RAM, so large outputs never go there.
+
 When a task touches something external or tricky, a brief may suggest a quick web
 search (WebSearch / WebFetch), and you can run one yourself before writing a brief
 if you're unsure of a fact. Optional, not a brief field.
