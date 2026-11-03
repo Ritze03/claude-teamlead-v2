@@ -261,6 +261,11 @@ deliberate: the refusal message tells them to report to the lead instead.
 
 **A tool call was refused by a permission prompt or auto mode.** The lead stops, tells you, and offers the allow rule; see [`docs/permissions.md`](docs/permissions.md).
 
+**A worker's tool call prompts about a symlink or the scratchpad.** The worker touched the
+lead's session scratchpad under `/tmp`, which is outside its allowed directories. Since 2.3.1
+workers keep scratch files in a git-excluded `.tl-scratch/` in their own worktree; see
+[`docs/permissions.md`](docs/permissions.md).
+
 **I edited the plan file and nothing happened.** The watcher is armed at stage 2 of plan
 mode. If the session was restarted since, re-enter plan mode on that topic.
 

@@ -26,6 +26,10 @@ If you hit a bug in the teamlead plugin itself (its hooks, board server, skills 
 ```
 The lead relays it to the user and offers a GitHub issue.
 
+## Scratch files stay in your worktree
+
+Scratch files, test output, logs and temp builds go **inside your worktree**, in `.tl-scratch/` (create it as needed; it is git-excluded, and you never commit it). This **overrides** the generic instruction to "use the scratchpad for temporary files": never use the session scratchpad under `/tmp`, and never create a symlink out of the worktree (for example `target/x -> /tmp/...`). Any access to a path outside your allowed directories, directly or through a symlink, prompts the user, and as a background worker you block until they click. If a tool insists on a temp dir, point `TMPDIR` at `.tl-scratch/tmp`.
+
 ## Needing a path your row does not cover
 
 If you must write a path your board row's `owns` does not cover — in the project or outside it — **ask the lead; never work around it** (no Bash write into an unowned path, no copy elsewhere). Use this fixed block:

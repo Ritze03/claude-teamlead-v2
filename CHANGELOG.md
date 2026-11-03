@@ -4,6 +4,13 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.3.1 — 2026-11-03
+
+- workers: scratch files, test output, logs and temp builds go in `.tl-scratch/` inside the worker's own worktree, never in the session scratchpad under `/tmp` and never through a symlink out of the worktree (all six `agents/tl-*.md`, explicitly overriding Claude Code's generic "use the scratchpad" instruction; `TMPDIR` goes to `.tl-scratch/tmp`). A worker touching the lead's scratchpad is outside its allowed directories, so every access prompted the user and blocked the background worker. `/tmp` is RAM, too.
+- record.sh (SubagentStart): appends `.tl-scratch/` once to `<git common dir>/info/exclude`, which covers the main checkout and every linked worktree; idempotent, silent on failure (`tl_ensure_scratch_exclude` in `lib.sh`).
+- teamlead skill: the lead never points a worker at files in its own scratchpad; shared tooling is copied into the project (committed, or untracked and git-excluded) or built by the worker in `.tl-scratch/`, and the brief says outputs go to `.tl-scratch/`.
+- docs: `docs/permissions.md` and the README troubleshooting explain the symlink/scratchpad prompt. The worktree fence's session-scratchpad write exception is unchanged (file tools only; the prompts came from Bash and Read, which the fence cannot see).
+
 ## 2.3.0 — 2026-11-01
 
 - worktree-fence: a write that matches an absolute (or `~`) entry of the worker's own row's `owns` outside its worktree now also answers Claude Code's permission prompt with a `permissionDecision: "allow"` ("teamlead: path is in board row N's owns"), which a background worker could never answer itself. Per the hooks docs deny/ask rules still apply. In-worktree, scratchpad and project-root passes stay silent, and a relative `owns` entry never opens the main checkout.
