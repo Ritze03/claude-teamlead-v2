@@ -245,9 +245,15 @@ All of it acts only in a project whose `CLAUDE.md` carries `superdoc:start`; an 
   they could not be installed, and fast-forward merges (git runs no hook for those). Best
   effort: it reads shell text, so an unusual command can slip past it.
 - **Stop check** (`gate.sh`): after a merge, the doc files it touched are linted once and the
-  findings shown to you. Warnings are yours to fix or leave; errors mean a leak got past the
-  commit hooks: repair it now and do not push.
-- **Audit reminder** at session start when the last recorded audit is over 50 commits old.
+  findings shown to you. Warnings (any line of a touched file) are yours to fix or leave;
+  errors are reported only for lines added in the merge, so old debt near a typo fix is not
+  re-reported. An error means a leak got past the commit hooks: repair it now and do not push.
+- **Audit reminder** at session start when the last recorded audit is over 50 non-merge
+  commits old.
+
+The installation of the native hooks, the Stop check and the audit reminder run only while
+teamlead is active in the project (they are skipped otherwise). Stubs already installed keep
+working after teamlead stops, and the Bash guard needs no active teamlead.
 
 What this cannot cover: `git commit --no-verify` outside Claude (a terminal), a clone that has
 never had a session (no hooks installed yet), a project where the hooks could not be installed
