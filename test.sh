@@ -709,7 +709,7 @@ grep -q 'entries are pointers: none over about 300 characters' "$PB" && ok "Part
 grep -q '\*\*TERMINOLOGY.md size\*\* (the specific case' "$PB" && ok "Part 9 audit: oversized-entry bullet" || bad "Part 9 audit: oversized-entry bullet"
 grep -q 'never delete information that exists nowhere else' "$PB" && ok "Part 10: trim moves detail to the page first" || bad "Part 10: trim wording"
 PBN=$(tr '\n' ' ' < "$PB" | sed 's/  */ /g'); SDN=$(tr '\n' ' ' < "$SD" | sed 's/  */ /g')
-printf '%s' "$PBN" | grep -q 'v2 → v3' && printf '%s' "$PBN" | grep -q 'leave the entries' && ok "Part 6: upgrade adds the rule, never rewrites entries" || bad "Part 6: upgrade sentence"
+printf '%s' "$PBN" | grep -q 'v2 → v3' && printf '%s' "$PBN" | grep -q 'The upgrade step itself rewrites no entries' && printf '%s' "$PBN" | grep -q 'trimmed by the repair phase that follows it' && ok "Part 6: upgrade step rewrites no entries, the repair phase trims them" || bad "Part 6: upgrade sentence"
 printf '%s' "$PBN" | grep -q 'the dispatcher applies the upgrade automatically (SKILL.md Step 1b)' && printf '%s' "$PBN" | grep -q 'apply each version.s step in order' && printf '%s' "$PBN" | grep -q 'never a regeneration; existing files are not rebuilt from the skeletons' && ok "Part 6: upgrade is automatic, in order, incremental" || bad "Part 6: automatic upgrade wording"
 printf '%s' "$PBN" | grep -q 'the newest contract is assumed to be the best available' && ok "Part 6: has its *Why:* (newest assumed best)" || bad "Part 6: upgrade *Why:*"
 printf '%s' "$PBN" | grep -q 'an older marker here means it failed: still report it' && ok "Part 9: older marker at audit time = failed upgrade, still reported" || bad "Part 9: marker bullet"
@@ -723,15 +723,94 @@ printf '%s' "$STEP1B" | grep -q 'not rebuilt from skeletons' && printf '%s' "$ST
 printf '%s' "$STEP1B" | grep -q 'marker `none`.*not an upgrade.*hand-written' && ok "SKILL Step 1b: no marker = hand-written docs, not an upgrade" || bad "SKILL Step 1b: no-marker guard"
 printf '%s' "$STEP1B" | grep -q '^\*Why:\*\|\*Why:\* the newest contract is assumed to be the best available' && ok "SKILL Step 1b: has its *Why:*" || bad "SKILL Step 1b: *Why:*"
 printf '%s' "$SDN" | grep -q 'Present → \*\*Step 1b\*\* (automatic upgrade check), then \*\*HEALTH-CHECK\*\*' && ok "SKILL Step 1: routing runs the upgrade check before the health check" || bad "SKILL Step 1: routing line"
-printf '%s' "$SDN" | grep -q 'Never auto-fix audit findings\*\* (the upgrade in Step 1b is not a repair' && ok "SKILL Step 4: never-auto-fix covers audit findings, not the upgrade" || bad "SKILL Step 4: never-auto-fix scope"
+printf '%s' "$SDN" | grep -q 'Step 4 — REPAIR (automatic, after the audit)' && printf '%s' "$SDN" | grep -q 'Runs right after Step 3.s audit, in the same run, without offering or asking' && printf '%s' "$SDN" | grep -q 'Only if the user literally asks for a report only' && ok "SKILL Step 4: automatic after the audit, report-only only on a literal ask" || bad "SKILL Step 4: automatic repair wording"
 printf '%s' "$SDN" | grep -q 'the Step 1b upgrade has already run before it' && printf '%s' "$SDN" | grep -q 'upgrade failed: report it as a finding' && ok "SKILL Step 3: audit report-only, older marker = failed upgrade" || bad "SKILL Step 3: upgrade wording"
 # No offer / ask-first wording about upgrades may remain (a cleanup offer is fine).
 stale=$(printf '%s\n%s\n' "$PBN" "$SDN" | grep -oiE 'offer(s|ed|ing)? (the |a )?(version |contract )?upgrade|upgrade offer|never apply it unasked|unasked|accepted upgrade|upgrade is offered|offers? a version upgrade' | grep -vi '^$' | head -5)
 check "no offer/unasked wording about upgrades in SKILL.md or the playbook" "$stale" ""
-printf '%s' "$SDN" | grep -q 'offer the cleanup to the user; it then runs as Step 4 REPAIR' && ok "  cleanup offer sentence is still there (stays a REPAIR)" || bad "  cleanup offer sentence"
-check "playbook line 3 names contract v3" "$(sed -n 3p "$PB")" '`superdoc: v3`'
-check "Part 6 marker example matches line 3" "$(grep -o '<!-- superdoc:start v[0-9]* -->' "$PB" | sort -u)" "<!-- superdoc:start v3 -->"
-check "Part 6 compare sentence names v3" "$(tr '\n' ' ' < "$PB" | grep -o 'the `superdoc: v[0-9]*` on line 3')" 'the `superdoc: v3` on line 3'
+stale2=$(printf '%s\n%s\n' "$PBN" "$SDN" | grep -oiE 'offer the cleanup|Never auto-fix|only on explicit ask|REPAIR the user asks for|only when the user asks|stays a REPAIR' | head -5)
+check "no 'offer the cleanup' / 'Never auto-fix' / ask-first repair wording left" "$stale2" ""
+check "playbook line 3 names contract v4" "$(sed -n 3p "$PB")" '`superdoc: v4`'
+check "Part 6 marker example matches line 3" "$(grep -o '<!-- superdoc:start v[0-9]* -->' "$PB" | sort -u)" "<!-- superdoc:start v4 -->"
+check "Part 6 compare sentence names v4" "$(tr '\n' ' ' < "$PB" | grep -o 'the `superdoc: v[0-9]*` on line 3')" 'the `superdoc: v4` on line 3'
+check "Part 6: there are exactly two marker examples (Part 5 and Part 6), both v4" "$(grep -c '<!-- superdoc:start v4 -->' "$PB")" "2"
+printf '%s' "$PBN" | grep -q '\*\*v2 → v3:\*\*' && printf '%s' "$PBN" | grep -q '\*\*v3 → v4:\*\* re-install `superdoc/claude-instructions/documentation.md` verbatim from the assets (Part 7, Read + Write tools)' && printf '%s' "$PBN" | grep -q 'Nothing else changes in the project' && ok "Part 6: keeps the v2 → v3 step and has the v3 → v4 step (re-install documentation.md)" || bad "Part 6: v3 → v4 step"
+printf '%s' "$STEP1B" | grep -q 'v3 → v4: re-installed documentation.md' && ok "SKILL Step 1b: example one-liner is the v3 → v4 upgrade" || bad "SKILL Step 1b: example line"
+
+echo "== superdoc: anonymized docs (contract v4) =="
+DOCM="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/assets/documentation.md"
+DOCN=$(tr '\n' ' ' < "$DOCM" | sed 's/  */ /g')
+printf '%s' "$DOCN" | grep -q '## Write docs anonymized' && printf '%s' "$DOCN" | grep -q 'like a filed bug report' && printf '%s' "$DOCN" | grep -q 'hostnames or machine names' && printf '%s' "$DOCN" | grep -q 'MAC addresses or serials' && printf '%s' "$DOCN" | grep -q '`<client>`, `<server>`, `<host>`, `\$HOME`' && printf '%s' "$DOCN" | grep -q 'as software concepts are fine' && ok "documentation.md: carries the anonymize rule" || bad "documentation.md: anonymize rule"
+awk '/^## /{h=$0} /Write docs anonymized/{a=NR} /^## Update after you change/{u=NR} END{exit !(a&&u)}' "$DOCM" && ok "  anonymize section sits beside 'Update after you change' (own ## heading)" || bad "  anonymize section heading placement"
+[ "$(wc -c < "$DOCM")" -lt 6144 ] && ok "  documentation.md stays small (force-loaded): $(wc -c < "$DOCM")B < 6 KB" || bad "  documentation.md grew past 6 KB ($(wc -c < "$DOCM")B)"
+P4A=$(awk '/^### Part 4a/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$P4A" | grep -q 'like a filed bug report' && printf '%s' "$P4A" | grep -q 'machine names' && printf '%s' "$P4A" | grep -q 'client/server machines or network' && printf '%s' "$P4A" | grep -q 'MAC addresses' && printf '%s' "$P4A" | grep -q 'Logs, command output' && printf '%s' "$P4A" | grep -q 'Repo-relative paths only' && ok "playbook Part 4a: client/server and machine names, network, MAC/serials, logs; old bullets kept" || bad "playbook Part 4a wording"
+printf '%s' "$SDN" | grep -q 'like a filed bug report' && printf '%s' "$SDN" | grep -q 'hostnames or machine names' && printf '%s' "$SDN" | grep -q "client/server machines or network" && ok "SKILL brief line: same terms" || bad "SKILL brief line terms"
+grep -q 'client/server names of the user.s own machines or' "$PB" && ok "Part 8 box names client/server and machine names" || bad "Part 8 privacy box"
+# Identity-values pass: run the real Part 9 command against fixtures with INVENTED identity values.
+IDCMD=$(grep -o 'for v in "\$(hostname.*; done' "$PB" | head -1)
+[ -n "$IDCMD" ] && ok "Part 9: identity-values command is a single line" || bad "Part 9: identity-values command missing"
+idd=$T/idscan; mkdir -p $idd/superdoc $idd/home
+printf '[user]\n\tname = Tester Persona\n' > $idd/home/gitconfig       # no user.email on purpose: empty values must be skipped
+printf '# Net\n\nrun ssh admin@TestHost-01 to reach it\n' > $idd/superdoc/leaky-host.md
+printf '# Who\n\nwritten by tester persona\n' > $idd/superdoc/leaky-name.md
+printf '# Login\n\nsession of testuser-77\n' > $idd/superdoc/leaky-user.md
+printf '# Clean\n\nA client talks to a server over HTTP.\n' > $idd/superdoc/clean.md
+printf '# Project\n\nSee superdoc/clean.md\n' > $idd/CLAUDE.md
+idrun() { ( cd $idd && hostname() { echo testhost-01; } && export USER=testuser-77 GIT_CONFIG_GLOBAL=$idd/home/gitconfig GIT_CONFIG_NOSYSTEM=1 && eval "$(printf '%s' "$IDCMD" | sed 's#<doc-root>#superdoc#')" ); }
+check "identity grep flags exactly the three leaky docs (hostname, user, git name; case-insensitive), by file:line" "$(idrun | sort | tr '\n' '|')" "superdoc/leaky-host.md:3|superdoc/leaky-name.md:3|superdoc/leaky-user.md:3|"
+check "  output never contains an identity value" "$(idrun | grep -ci 'testhost-01\|testuser-77\|tester persona')" "0"
+check "  a clean doc is not flagged (an empty git email is skipped, not matched everywhere)" "$(idrun | grep -c 'clean.md')" "0"
+check "  CLAUDE.md is scanned too" "$(printf 'ref testhost-01\n' >> $idd/CLAUDE.md; idrun | grep -c '^CLAUDE.md:')" "1"
+PRV=$(tr '\n' ' ' < "$PB" | sed 's/  */ /g')
+printf '%s' "$PRV" | grep -q '\*\*Identity values of this machine\*\*' && printf '%s' "$PRV" | grep -q 'case-insensitive, fixed strings, empty values skipped' && printf '%s' "$PRV" | grep -q 'A short or generic value' && printf '%s' "$PRV" | grep -q '\*\*Judgement pass:\*\*' && printf '%s' "$PRV" | grep -q 'never quoting the value' && ok "Part 9: identity pass, false-positive note, judgement pass, no quoting" || bad "Part 9: privacy second pass wording"
+grep -q "grep -rnE '/home/|/Users/" "$PB" && ok "  Part 9: the original path/email/IP/token regex is kept" || bad "  Part 9: original regex missing"
+printf '%s' "$PRV" | grep -q '\*\*Privacy leak\*\* (a Part 9 finding): replace the value with a placeholder' && printf '%s' "$PRV" | grep -q 'Rewriting history or force-pushing is the user.s decision, never done automatically' && ok "Part 10: leak -> placeholder automatically, history rewrite stays the user's" || bad "Part 10: privacy leak bullet"
+# Repo hygiene: no real identity values may live in this repo's tracked skill files.
+hyg=0
+for rv in "$(hostname 2>/dev/null)" "$(git config user.email 2>/dev/null)"; do
+  if [ "${#rv}" -ge 5 ] && grep -rqiF -e "$rv" "$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc" "$CLAUDE_PLUGIN_ROOT/CHANGELOG.md"; then hyg=1; fi
+done
+check "repo hygiene: superdoc skill files and CHANGELOG carry no real hostname or git email of the runner" "$hyg" "0"
+
+echo "== superdoc: audit-then-fix, agents own the docs (contract v4) =="
+printf '%s' "$SDN" | grep -q 'Superdoc is for agents, not the user' && printf '%s' "$SDN" | grep -q 'never ask the user what is right for the docs or whether they would like a change' && ok "SKILL: ownership statement" || bad "SKILL: ownership statement"
+printf '%s' "$PBN" | grep -q 'owned by agents; the user never has to read or touch them' && ok "playbook intro: ownership statement" || bad "playbook intro: ownership statement"
+printf '%s' "$DOCN" | grep -q 'written for agents and owned by agents; the user never has to read or touch them' && printf '%s' "$DOCN" | grep -q 'never ask the user what is right for the docs' && ok "documentation.md: ownership statement" || bad "documentation.md: ownership statement"
+printf '%s' "$SDN" | grep -q 'Only three things go to the user' && printf '%s' "$SDN" | grep -q 'rewriting git history or force-pushing over a leak that is already committed' && printf '%s' "$SDN" | grep -q 'no marker, which is hand-written docs someone else owns' && printf '%s' "$SDN" | grep -q 'facts only the user knows' && ok "SKILL: the three exceptions are named (history rewrite, no-marker docs, user-only facts)" || bad "SKILL: exceptions"
+printf '%s' "$PBN" | grep -q 'Only three things go to the user' && ok "playbook intro: names the same three exceptions" || bad "playbook intro: exceptions"
+STEP3=$(awk '/^## Step 3/{f=1;next} /^## /{f=0} f' "$SD" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$STEP3" | grep -q 'The audit phase is read-only' && printf '%s' "$STEP3" | grep -q 'in the same run, go straight to Step 4: dispatch the repairs' && printf '%s' "$STEP3" | grep -q 'No offer, no question' && printf '%s' "$STEP3" | grep -q 'privacy leaks first' && ok "SKILL Step 3: read-only audit, then repairs dispatched automatically, leaks first" || bad "SKILL Step 3: audit-then-fix wording"
+printf '%s' "$STEP3" | grep -q '^.*\*Why:\* the user said "agents should know that the superdoc is for THEM' && ok "SKILL Step 3: has its *Why:* (the user's reasoning)" || bad "SKILL Step 3: *Why:*"
+printf '%s' "$STEP3" | grep -q 'in git history and whether it was pushed' && ok "SKILL Step 3: history exception is reported to the user" || bad "SKILL Step 3: history report"
+printf '%s' "$SDN" | grep -q 'Never rewrite git history or force-push' && printf '%s' "$SDN" | grep -q 'move to the linked page first' && ok "SKILL Step 4: history untouched, move-before-trim kept" || bad "SKILL Step 4: history/trim"
+printf '%s' "$PRV" | grep -q 'Runs automatically right after the audit, in the same run, with no offer and no question' && printf '%s' "$PRV" | grep -q 'The named items are the audit.s findings' && ok "Part 10: runs automatically on the audit's findings" || bad "Part 10: automatic scope"
+printf '%s' "$PRV" | grep -q 'never delete information that exists nowhere else' && printf '%s' "$PRV" | grep -q 'confirm it really holds the content' && ok "Part 10: move-before-trim unchanged" || bad "Part 10: move-before-trim"
+printf '%s' "$PRV" | grep -q 'leave a single greppable `STALE:` marker' && ok "Part 10: STALE: marker stays for what cannot be fixed now" || bad "Part 10: STALE marker"
+printf '%s' "$PRV" | grep -q 'Part 9 — AUDIT (read-only phase)' && printf '%s' "$PRV" | grep -q 'Do not write to any file in this mode' && ok "Part 9: audit phase stays read-only" || bad "Part 9: read-only phase"
+printf '%s' "$PRV" | grep -q 'default to `manual`, the safest' && ! printf '%s' "$PRV" | grep -q 'surface it rather than picking one' && ok "Part 7: version-policy variant is decided (default manual), not surfaced" || bad "Part 7: variant decision"
+printf '%s' "$SDN" | grep -q 'Decide the path yourself from the repo, never by asking' && ! printf '%s' "$SDN" | grep -q 'Ask the tier' && ! printf '%s' "$SDN" | grep -qF '**ask if unsure**' && ok "SKILL Step 2: path and tier are decided, not asked" || bad "SKILL Step 2: asks the user"
+
+echo "== superdoc: one page per capability (contract v4) =="
+printf '%s' "$DOCN" | grep -q 'A new feature, backend or subsystem gets its own page' && ok "documentation.md: new capability gets its own page" || bad "documentation.md: own-page line"
+P2=$(awk '/^## Part 2/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$P2" | grep -q 'One page per capability, each in its own file' && printf '%s' "$P2" | grep -q 'never a section tacked onto another page' && ok "Part 2: one page per capability rule" || bad "Part 2: one-page rule"
+P3=$(awk '/^### `superdoc\/<capability>\/<name>.md`/{f=1;next} /^### /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$P3" | grep -q 'one capability per page' && ok "Part 3 feature-page skeleton: one capability per page" || bad "Part 3 skeleton: one capability per page"
+printf '%s' "$SDN" | grep -q 'MAP one worker per capability folder' && printf '%s' "$SDN" | grep -q 'one page per capability' && printf '%s' "$SDN" | grep -q 'one `features/\*.md` per real capability' && ok "SKILL Step 2b: one worker per capability folder, one page per capability" || bad "SKILL Step 2b wording"
+printf '%s' "$PRV" | grep -q 'One page per capability: no page covers several unrelated' && ok "Part 8: one-page-per-capability box" || bad "Part 8: one-page box"
+printf '%s' "$PRV" | grep -q '\*\*Page size and scope\*\*' && printf '%s' "$PRV" | grep -q 'a judgement call, not a hard limit' && ok "Part 9: page size and scope bullet (judgement, not a hard limit)" || bad "Part 9: page size bullet"
+SZCMD=$(grep -o "find <doc-root> -type f -name '\*.md' -size +12288c -exec wc -c {} \\\\;" "$PB" | head -1)
+[ -n "$SZCMD" ] && ok "Part 9: page-size command is a single line" || bad "Part 9: page-size command missing"
+szd=$T/pagesize; mkdir -p $szd/superdoc/features
+head -c 12000 /dev/zero | tr '\0' 'a' > $szd/superdoc/features/small.md
+head -c 13000 /dev/zero | tr '\0' 'b' > $szd/superdoc/features/big.md
+head -c 20000 /dev/zero | tr '\0' 'c' > $szd/superdoc/features/huge.txt
+szout=$(cd $szd && eval "$(printf '%s' "$SZCMD" | sed 's#<doc-root>#superdoc#')")
+check "page-size command flags only the .md over 12 KB, with its size" "$szout" "13000 superdoc/features/big.md"
+printf '%s' "$PRV" | grep -q '\*\*Splitting a page\*\*' && printf '%s' "$PRV" | grep -q 'move the content into them \*\*verbatim\*\*' && printf '%s' "$PRV" | grep -q "Fix every link and \`@\`-ref" && printf '%s' "$PRV" | grep -q 'README.md. index and the overview.s module map' && printf '%s' "$PRV" | grep -q 'confirm nothing was lost' && ok "Part 10: splitting moves verbatim, fixes links/@-refs/index/module map, confirms before cutting" || bad "Part 10: splitting bullet"
+printf '%s' "$PRV" | grep -q 'When an entry.s detail has no page yet, it gets its own new page' && ok "Part 10: TERMINOLOGY trim creates a page when none exists" || bad "Part 10: trim creates page"
+printf '%s' "$PRV" | grep -q 'collapses it back into .CLAUDE.md.' && ok "Part 0/9: scaffolding-only superdoc is collapsed by repair, not proposed" || bad "Part 0/9: collapse"
 tdoc=$T/termaudit; mkdir -p $tdoc/meta
 { printf '# Terminology\n\n## Terms\n\n- **Short** — a one-liner. See `superdoc/features/short.md`.\n- **Long** — '; head -c 400 /dev/zero | tr '\0' 'x'; printf '\n'; } > $tdoc/meta/TERMINOLOGY.md
 audit_cmd=$(grep -o "awk '/^- .*TERMINOLOGY.md" "$PB" | head -1 | sed "s#<doc-root>#$tdoc#")
@@ -743,7 +822,7 @@ grep -q 'force-load budget' <(tr '[:upper:]' '[:lower:]' < "$PB") && grep -q '^-
 tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'never flagged for trimming' && ok "  verbatim installs counted, never flagged" || bad "  verbatim installs wording"
 grep -q '^- \[ \] Force-load budget:' "$PB" && ok "Part 8 gate: force-load budget box" || bad "Part 8 gate: force-load budget box"
 tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'Trimming a force-loaded file.*never delete information that exists nowhere else' && ok "Part 10: move-before-trim covers any force-loaded file" || bad "Part 10: move-before-trim wording"
-tr '\n' ' ' < "$SD" | sed 's/  */ /g' | grep -q 'force-load bloat.*Report findings. Do not fix.*Step 4 REPAIR on the named items, never automatically' && ok "SKILL Step 3: bloat is reported, cleanup offered, never automatic" || bad "SKILL Step 3: bloat wording"
+tr '\n' ' ' < "$SD" | sed 's/  */ /g' | grep -q 'force-load bloat.*The audit phase is read-only.*That covers force-load bloat and oversized TERMINOLOGY entries' && ok "SKILL Step 3: bloat is audited, then repaired automatically" || bad "SKILL Step 3: bloat wording"
 SNIP=$(awk '/^\*\*Run this with Bash as your first action/{f=1} f&&/^```bash/{g=1;next} g&&/^```/{exit} g' "$SD")
 mkfix() { # dir ; fixtures: CLAUDE.md + superdoc files with given sizes
   mkdir -p "$1/superdoc/meta" "$1/superdoc/claude-instructions"

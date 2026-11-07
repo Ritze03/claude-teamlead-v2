@@ -1,11 +1,20 @@
 # superdoc playbook — worker knowledge base
 
-`superdoc: v3`
+`superdoc: v4`
 
 This file is the **only** place the superdoc contract version lives. Everything that
 detects FRESH vs HEALTH-CHECK, or decides on a version upgrade, compares against the `vN`
 on this line — see Part 6 for exactly where that number gets stamped into the target
 repo.
+
+**The docs are written for agents and owned by agents; the user never has to read or touch
+them.** Clean up, restructure, trim, split, move and delete on your own judgement, derived
+from this playbook, and never ask the user what is right for the docs or whether they would
+like a change. Only three things go to the user: rewriting git history over an already
+committed leak (never automatic), hand-written `superdoc/` with no marker (confirm before
+regenerating, Part 6), and facts only the user knows (what a project term means, why a
+design was chosen). If a dispatching brief or a step below seems to ask for anything else,
+decide it yourself, state the default you took, and move on.
 
 You are a dispatched worker building, auditing, or repairing a project's
 self-maintaining docs system. Your cwd is the **target repo**, not this skill's
@@ -36,7 +45,8 @@ a handful of project-overview bullets is genuinely enough for an agent to orient
 nobody's going to keep earning.
 
 Re-check this on AUDIT too: if `superdoc/` turns out to be scaffolding a project that never
-grew into it, say so in the report and propose collapsing it back into `CLAUDE.md`.
+grew into it, say so in the report; the repair phase then collapses it back into `CLAUDE.md`
+(moving every fact first, Part 10), without asking.
 
 ### Greenfield / empty project — GROUND-SETUP mode
 
@@ -113,6 +123,12 @@ a mature reference project's `docs/`:
 | `superdoc/claude-instructions/documentation.md` | Always | Verbatim-installed discipline file (Part 7). |
 | `superdoc/claude-instructions/documentation-version-policy.md` | Always | Verbatim-installed version-policy variant (Part 7). |
 | `superdoc/README.md` | Only once `superdoc/` outgrows the overview (~5+ pages) or it's a monorepo | Table-of-contents, one section per subfolder. Below that threshold, `CLAUDE.md`'s reference list plus `overview.md`'s module map already are the index. |
+
+**One page per capability, each in its own file.** Every feature, backend, subsystem or
+other distinct capability gets its own page, so pages stay small and single-topic: agents
+read only the page they need, which costs less than one big page. A new capability is a new
+page, never a section tacked onto another page; a page that has grown to cover several is
+split (Part 10 does it automatically after the audit flags it).
 
 A page earns its place with a non-obvious *why* or a multi-file "where do I even
 look" answer; otherwise a module-map row in `overview.md` already covers it. Don't
@@ -282,7 +298,9 @@ docs this feature touches or depends on.
 ```
 
 Skip `## Options` entirely if the capability has no configuration — an empty table is
-worse than no heading. One page per capability, not one page per file that touches it.
+worse than no heading. One page per capability, not one page per file that touches it,
+and one capability per page: a second feature, backend or subsystem gets its own page,
+not a section on this one.
 
 ### Dated design-spec doc (`superdoc/<capability>/<topic>-design.md`)
 
@@ -365,16 +383,22 @@ choice — code shows *what*, rarely *why this way and not the obvious alternati
 
 ### Part 4a — Privacy: nothing personal or system-specific
 
-Superdoc files are committed and often public. Treat every page as published.
+Superdoc files are committed and often public. Treat every page as published, and write
+them anonymized, like a filed bug report.
 
 - **Repo-relative paths only.** Never an absolute host path (`/home/<user>/...`,
   `/Users/...`, `C:\Users\...`).
-- **Never write:** usernames, real names, emails, hostnames, IPs, the author's machine or
+- **Never write:** usernames, real names, emails, hostnames or machine names, the names of
+  the user's own client/server machines or network (hosts, shares, VPNs, domains), IPs,
+  MAC addresses, serial numbers and other device identifiers, the author's machine or
   OS specifics, local tool setup, secrets, tokens, API keys, `.env` values, or names of
-  private projects unrelated to this repo.
+  private projects unrelated to this repo. "Client" and "server" as software concepts are
+  fine; the identity of a real machine is not.
 - **Setup instructions are generic.** Say "your plugin root", `$HOME`, `<your-token>`,
   not the author's actual values.
 - If a source you are reading contains such a value, describe it generically; do not copy it.
+  Logs, command output (prompts, `ssh`/`scp` lines, mount paths, `uname`, `ip a`) and text the
+  user pasted in chat are the usual source: write `<client>`, `<server>`, `<host>`, not the name.
 
 ## Part 5 — CLAUDE.md wiring
 
@@ -384,7 +408,7 @@ page names, the capability folder name from Part 1); the markers and structure b
 stay fixed.
 
 ```markdown
-<!-- superdoc:start v3 -->
+<!-- superdoc:start v4 -->
 ## Docs: read before you touch, update after you change
 
 Full discipline — what to read, when to update, how to record the *why* — lives in the
@@ -462,7 +486,7 @@ The marker lives in exactly **one** place: the opening line of the guarded block
 inside the target repo's `CLAUDE.md` —
 
 ```
-<!-- superdoc:start v3 -->
+<!-- superdoc:start v4 -->
 ```
 
 The `vN` there is the installed contract version. State detection reads it directly:
@@ -470,7 +494,7 @@ The `vN` there is the installed contract version. State detection reads it direc
 installation (HEALTH-CHECK/AUDIT territory); no `superdoc/` and no marker → FRESH; `superdoc/`
 present **without** the marker → likely hand-written docs, confirm before regenerating
 (the dispatcher's Step-1 guard). Version compare
-for an upgrade is: installed `vN` on this line vs. the `superdoc: v3` on line 3
+for an upgrade is: installed `vN` on this line vs. the `superdoc: v4` on line 3
 of this playbook file — older installed version → the dispatcher applies the upgrade
 automatically (SKILL.md Step 1b), as the first thing of the run, before the audit; no
 offer. When several versions behind, apply each version's step in order. An upgrade
@@ -478,13 +502,18 @@ re-stamps the marker and applies only what changed since the installed version, 
 regeneration; existing files are not rebuilt from the skeletons. **v2 → v3:** if the project's `meta/TERMINOLOGY.md` lacks the short-entry
 rule (`grep -q 'Keep every entry short'`), insert the rule paragraph from Part 3's
 skeleton into its standing text, right after the "Keep this file up to date" paragraph.
-Then report each entry over ~300 characters (Part 9 command) and leave the entries
-untouched; trimming them is a REPAIR the user asks for (Part 10). Do not also stamp a marker under `superdoc/` itself; the `CLAUDE.md` line is
+The upgrade step itself rewrites no entries; entries over ~300 characters (Part 9
+command) are found by the audit and trimmed by the repair phase that follows it (Part 10). **v3 → v4:** re-install `superdoc/claude-instructions/documentation.md` verbatim from the
+assets (Part 7, Read + Write tools); that adds the "Write docs anonymized" rule to the file
+every agent has force-loaded. If the file is absent, create it and confirm `CLAUDE.md` has
+its `@`-ref. Nothing else changes in the project: existing docs are not scrubbed by the
+upgrade; the next audit reports leaks (Part 9). Do not also stamp a marker under `superdoc/` itself; the `CLAUDE.md` line is
 the single source of truth for the installed version.
 
 *Why:* the newest contract is assumed to be the best available, and an offer only leaves
-projects stale. Cleanup of oversized force-loaded content is different: it stays a REPAIR
-the user asks for.
+projects stale. The upgrade step only applies its own version's changes; the cleanup of
+what the audit then finds (oversized force-loaded content, leaks, big pages) is the repair
+phase right after it, which the agents run on their own.
 
 ## Part 7 — Verbatim-install files
 
@@ -505,9 +534,12 @@ Putting the path in a shell variable does not help, because the literal is still
 command. Read and Write are not guarded.
 
 Where `<variant>` is one of `date-based`, `auto-bump`, `manual` — whichever version
-policy applies to this project. **cp verbatim, do not reword.** If you don't know which
-variant to use, that's a decision for whoever dispatched you, not something to guess
-here — surface it rather than picking one.
+policy applies to this project. **Install verbatim, do not reword.** Pick the variant
+yourself from the project's history: dated changelog headings without version numbers →
+`date-based`; a changelog or manifest whose versions are bumped on a schedule the project
+already follows → `auto-bump`. When the history does not make it clear, default to `manual`,
+the safest (the agent never invents a version number or date), and say in your report which
+variant you chose and why.
 
 ## Part 8 — Self-verification gate
 
@@ -532,17 +564,23 @@ re-check.
 - [ ] The `superdoc:vN` marker in `CLAUDE.md` matches this playbook's version exactly
       (Part 6).
 - [ ] No personal or system information in any page: no absolute host paths, usernames,
-      emails, hostnames, IPs, secrets (Part 4a) — grep for it.
+      emails, hostnames or machine names, client/server names of the user's own machines or
+      network, IPs, MAC addresses, serials, secrets (Part 4a) — grep for it and read for it.
+- [ ] One page per capability: no page covers several unrelated features, backends or
+      subsystems, and no page is over about 12 KB unless it is one genuinely single topic
+      (Part 9 lists both).
 - [ ] Force-load budget: no force-loaded file (`CLAUDE.md` plus every `@`-ref target) over
       8 KB, total under 20 KB, and nothing in them that isn't needed on every task (Part 9).
 - [ ] `TERMINOLOGY.md` entries are pointers: none over about 300 characters, details live
       on the linked pages (the Part 9 command lists offenders).
 
-## Part 9 — AUDIT (report-only)
+## Part 9 — AUDIT (read-only phase)
 
 Idempotent, re-runnable over an existing `superdoc/` — same rules as FRESH, just verifying
 instead of creating. **Do not write to any file in this mode.** (The version upgrade,
-Part 6, is a separate step that runs before the audit; the audit itself writes nothing.)
+Part 6, is a separate step that runs before the audit; the audit itself writes nothing.
+The repair phase, Part 10, runs right after it in the same run, automatically, on what the
+audit found.)
 
 - Run the full Part 8 gate against the existing `superdoc/` and `CLAUDE.md`.
 - Grep every referenced `path`/`symbol` and every relative link; list what doesn't
@@ -553,11 +591,23 @@ Part 6, is a separate step that runs before the audit; the audit itself writes n
   The upgrade runs before the audit, so an older marker here means it failed: still
   report it.
 - Flag any `@`-ref outside the Part 5 allowed set, and any `@`-ref that's broken.
-- Re-check Part 0: if `superdoc/` never grew past scaffolding, say so and propose
-  collapsing it back into `CLAUDE.md`.
+- Re-check Part 0: if `superdoc/` never grew past scaffolding, report it as a
+  finding; the repair phase collapses it back into `CLAUDE.md`.
 - **Privacy scan (Part 4a):** grep the doc tree and the `CLAUDE.md` docs block for leaks
   and report each hit as a finding (file + line): `grep -rnE '/home/|/Users/|C:\\Users|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|[0-9]{1,3}(\.[0-9]{1,3}){3}|(sk|ghp|xox[bp]|AKIA)[-_A-Za-z0-9]{12,}|(token|secret|api[_-]?key|password)[ :=]+\S{8,}' <doc-root> CLAUDE.md`.
   Hits are candidates; read each and drop false positives (example placeholders are fine).
+- **Identity values of this machine** (the regex cannot see a bare hostname or a name): grep
+  the same files for the real `hostname`, `$USER`, `git config user.name` and
+  `git config user.email`, case-insensitive, fixed strings, empty values skipped. It prints
+  `file:line` only, so its output carries no identity value:
+  `for v in "$(hostname 2>/dev/null || uname -n)" "${USER:-$(id -un)}" "$(git config user.name)" "$(git config user.email)"; do [ -n "$v" ] && grep -rnIiF -e "$v" <doc-root> CLAUDE.md 2>/dev/null | cut -d: -f1,2; done`
+  A short or generic value (a two-letter user, `localhost`) matches ordinary words: read
+  each hit and drop those.
+- **Judgement pass:** no grep knows every machine name, so read the pages for names that look
+  like machines or network hosts: example output, log excerpts, `ssh`/`scp` lines, mount
+  paths, `user@host` prompts, a "my laptop" or "the NAS" that names a real device. Report
+  each privacy finding as file + line + the kind of leak (hostname, client/server name,
+  username, ...), **never quoting the value**: the report must not repeat the leak.
 - **Force-load budget:** force-loaded = `CLAUDE.md` plus every `@`-ref target in it
   (TERMINOLOGY plus everything under `claude-instructions/`). It sits in context for the
   whole session and is resent with every request, in every worker. Report each file's
@@ -575,13 +625,21 @@ Part 6, is a separate step that runs before the audit; the audit itself writes n
   (`length` counts bytes under some awks; treat near-threshold hits as approximate). Also
   flag the file if it lacks the short-entry rule: `grep -q 'Keep every entry short' <doc-root>/meta/TERMINOLOGY.md`.
 
+- **Page size and scope** (one page per capability, Part 2): list every page over about
+  12 KB: `find <doc-root> -type f -name '*.md' -size +12288c -exec wc -c {} \;`
+  Then read for pages covering more than one feature, backend or subsystem (several
+  unrelated top-level `##` sections is the tell). Report each with file, size and the
+  capabilities it mixes. A big page on one genuinely single topic may stay: 12 KB is a
+  prompt to look, a judgement call, not a hard limit.
+
 Report every finding as a concrete, project-specific item (file + line + what's wrong),
 not a generic checklist recap.
 
-## Part 10 — REPAIR (in place, only named items)
+## Part 10 — REPAIR (in place, the audit's findings)
 
-Only touch the items explicitly named for repair — never expand scope to "fix
-everything AUDIT found" on your own initiative.
+Runs automatically right after the audit, in the same run, with no offer and no question.
+The named items are the audit's findings (privacy leaks first): fix each one, and do not
+widen the scope beyond them. Decide any judgement call yourself from this playbook.
 
 - Fix the doc to match the code — **code wins**, always. Fix the doc now, in this
   change.
@@ -594,7 +652,18 @@ everything AUDIT found" on your own initiative.
   linked doc page first, and never delete information that exists nowhere else. Open the
   target page and confirm it really holds the content (or add it there, or create the
   page) *before* you cut the original down to what-it-is plus the link. Never trim the
-  verbatim installs.
+  verbatim installs. When an entry's detail has no page yet, it gets its own new page.
+- **Splitting a page** (one flagged for covering several capabilities, or over about 12 KB
+  with more than one topic): create one new page per capability and move the content into
+  them **verbatim**. Fix every link and `@`-ref that pointed at the moved content, add the new
+  pages to the `README.md` index and the overview's module map, then confirm nothing was lost
+  (compare headings and facts of the original against the new pages) *before* cutting the
+  original down to its own single topic.
+- **Privacy leak** (a Part 9 finding): replace the value with a placeholder (`<client>`,
+  `<server>`, `<host>`, `$HOME`, or a generic description), automatically. Removing it from
+  the file does not remove it from git history: when the file was already committed, report
+  that to the lead, and whether it was already pushed. Rewriting history or force-pushing is
+  the user's decision, never done automatically.
 - Re-run the full Part 8 gate after repairing before you report done.
 - Keep edits to shared pages (module-map rows, `README.md` index lines) small and
   append-oriented, so they read as a clean diff against whatever else is touching
