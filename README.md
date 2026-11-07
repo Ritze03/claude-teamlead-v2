@@ -41,6 +41,7 @@ impossible to break rather than merely discouraged:
   background worker could not answer. A worker that needs a path it was not given sends the
   lead a `SCOPE REQUEST`; the lead checks it, adds it to the row's `owns` and replies
   (outside the project it asks you first).
+- **Stale worktree base** — Claude Code branches a worker's worktree from `origin/HEAD`, so unpushed local commits can be missing. When your checkout is ahead of origin, each worker is told at start to fast-forward to your exact commit first. Optional: `{"worktree":{"baseRef":"head"}}` in a project's `.claude/settings.local.json` makes Claude Code branch from your current HEAD directly (whichever branch that is).
 - **Restore** — after `/clear` or a compaction, open state is re-injected automatically.
 - **Merged means merged** — a task marked merged whose branch still has unmerged commits is
   caught against git, not taken on trust.
