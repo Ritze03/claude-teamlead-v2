@@ -708,8 +708,27 @@ printf '%s' "$SKEL" | grep -q '^\*Why:\*' && ok "  skeleton has its *Why:*" || b
 grep -q 'entries are pointers: none over about 300 characters' "$PB" && ok "Part 8 gate: entries are pointers" || bad "Part 8 gate: TERMINOLOGY entries bullet"
 grep -q '\*\*TERMINOLOGY.md size\*\* (the specific case' "$PB" && ok "Part 9 audit: oversized-entry bullet" || bad "Part 9 audit: oversized-entry bullet"
 grep -q 'never delete information that exists nowhere else' "$PB" && ok "Part 10: trim moves detail to the page first" || bad "Part 10: trim wording"
-grep -q 'v2 → v3' "$PB" && grep -q 'leave the entries' <(tr '\n' ' ' < "$PB" | sed 's/  */ /g') && ok "Part 6: upgrade adds the rule, never rewrites entries" || bad "Part 6: upgrade sentence"
-grep -q 'v2 → v3' "$SD" && ok "SKILL: health-check offers the v2 → v3 upgrade" || bad "SKILL: upgrade offer"
+PBN=$(tr '\n' ' ' < "$PB" | sed 's/  */ /g'); SDN=$(tr '\n' ' ' < "$SD" | sed 's/  */ /g')
+printf '%s' "$PBN" | grep -q 'v2 → v3' && printf '%s' "$PBN" | grep -q 'leave the entries' && ok "Part 6: upgrade adds the rule, never rewrites entries" || bad "Part 6: upgrade sentence"
+printf '%s' "$PBN" | grep -q 'the dispatcher applies the upgrade automatically (SKILL.md Step 1b)' && printf '%s' "$PBN" | grep -q 'apply each version.s step in order' && printf '%s' "$PBN" | grep -q 'never a regeneration; existing files are not rebuilt from the skeletons' && ok "Part 6: upgrade is automatic, in order, incremental" || bad "Part 6: automatic upgrade wording"
+printf '%s' "$PBN" | grep -q 'the newest contract is assumed to be the best available' && ok "Part 6: has its *Why:* (newest assumed best)" || bad "Part 6: upgrade *Why:*"
+printf '%s' "$PBN" | grep -q 'an older marker here means it failed: still report it' && ok "Part 9: older marker at audit time = failed upgrade, still reported" || bad "Part 9: marker bullet"
+printf '%s' "$PBN" | grep -q 'Part 6, is a separate step that runs before the audit; the audit itself writes nothing' && printf '%s' "$PBN" | grep -q 'Do not write to any file in this mode' && ok "Part 9: audit stays write-free, upgrade is a separate step" || bad "Part 9: report-only distinction"
+STEP1B=$(awk '/^## Step 1b/{f=1;next} /^## /{f=0} f' "$SD" | tr '\n' ' ' | sed 's/  */ /g')
+[ -n "$STEP1B" ] && ok "SKILL: Step 1b exists" || bad "SKILL: Step 1b missing"
+printf '%s' "$STEP1B" | grep -q 'without offering or asking' && printf '%s' "$STEP1B" | grep -q 'one writing worker' && printf '%s' "$STEP1B" | grep -q 'worktree' && ok "SKILL Step 1b: automatic, one writing worker in a worktree" || bad "SKILL Step 1b: automatic/worker wording"
+printf '%s' "$STEP1B" | grep -q 'in order (v2 → v3, then every later one)' && printf '%s' "$STEP1B" | grep -q 'N ≥ M' && printf '%s' "$STEP1B" | grep -q 'sed -n 3p' && ok "SKILL Step 1b: compares with playbook line 3, in order, N >= M is a no-op" || bad "SKILL Step 1b: version compare / ordering"
+printf '%s' "$STEP1B" | grep -q 'in \*\*one line\*\*' && printf '%s' "$STEP1B" | grep -q 'never silent' && ok "SKILL Step 1b: tells the user in one line, never silent" || bad "SKILL Step 1b: one-line notice"
+printf '%s' "$STEP1B" | grep -q 'not rebuilt from skeletons' && printf '%s' "$STEP1B" | grep -q 'entries are not rewritten' && ok "SKILL Step 1b: incremental, entries untouched" || bad "SKILL Step 1b: incremental wording"
+printf '%s' "$STEP1B" | grep -q 'marker `none`.*not an upgrade.*hand-written' && ok "SKILL Step 1b: no marker = hand-written docs, not an upgrade" || bad "SKILL Step 1b: no-marker guard"
+printf '%s' "$STEP1B" | grep -q '^\*Why:\*\|\*Why:\* the newest contract is assumed to be the best available' && ok "SKILL Step 1b: has its *Why:*" || bad "SKILL Step 1b: *Why:*"
+printf '%s' "$SDN" | grep -q 'Present → \*\*Step 1b\*\* (automatic upgrade check), then \*\*HEALTH-CHECK\*\*' && ok "SKILL Step 1: routing runs the upgrade check before the health check" || bad "SKILL Step 1: routing line"
+printf '%s' "$SDN" | grep -q 'Never auto-fix audit findings\*\* (the upgrade in Step 1b is not a repair' && ok "SKILL Step 4: never-auto-fix covers audit findings, not the upgrade" || bad "SKILL Step 4: never-auto-fix scope"
+printf '%s' "$SDN" | grep -q 'the Step 1b upgrade has already run before it' && printf '%s' "$SDN" | grep -q 'upgrade failed: report it as a finding' && ok "SKILL Step 3: audit report-only, older marker = failed upgrade" || bad "SKILL Step 3: upgrade wording"
+# No offer / ask-first wording about upgrades may remain (a cleanup offer is fine).
+stale=$(printf '%s\n%s\n' "$PBN" "$SDN" | grep -oiE 'offer(s|ed|ing)? (the |a )?(version |contract )?upgrade|upgrade offer|never apply it unasked|unasked|accepted upgrade|upgrade is offered|offers? a version upgrade' | grep -vi '^$' | head -5)
+check "no offer/unasked wording about upgrades in SKILL.md or the playbook" "$stale" ""
+printf '%s' "$SDN" | grep -q 'offer the cleanup to the user; it then runs as Step 4 REPAIR' && ok "  cleanup offer sentence is still there (stays a REPAIR)" || bad "  cleanup offer sentence"
 check "playbook line 3 names contract v3" "$(sed -n 3p "$PB")" '`superdoc: v3`'
 check "Part 6 marker example matches line 3" "$(grep -o '<!-- superdoc:start v[0-9]* -->' "$PB" | sort -u)" "<!-- superdoc:start v3 -->"
 check "Part 6 compare sentence names v3" "$(tr '\n' ' ' < "$PB" | grep -o 'the `superdoc: v[0-9]*` on line 3')" 'the `superdoc: v3` on line 3'
@@ -745,8 +764,12 @@ dang=$T/fl_dang; mkfix $dang 500 1000; rm $dang/superdoc/claude-instructions/doc
 out_d=$(cd $dang && bash -c "$SNIP" 2>&1); rc=$?
 check "budget: dangling ref does not crash the snippet" "$rc" "0"
 printf '%s\n' "$out_d" | grep -q 'force-loads superdoc/claude-instructions/documentation.md — that file does not exist' && printf '%s\n' "$out_d" | grep -q '^force-loaded total: ' && ok "  dangling ref flagged, total still printed" || bad "  dangling ref output ($out_d)"
+printf '%s\n' "$out_ok" | grep -q '^superdoc marker: none$' && ok "marker line: a CLAUDE.md without the guarded block prints none" || bad "marker line: none ($(printf '%s\n' "$out_ok" | grep marker))"
+mkdir -p $T/fl_mk; printf '# P\n<!-- superdoc:start v2 -->\n@superdoc/x.md\n<!-- superdoc:end -->\n' > $T/fl_mk/CLAUDE.md
+check "marker line: prints the installed vN" "$(cd $T/fl_mk && bash -c "$SNIP" 2>&1 | grep '^superdoc marker:')" "superdoc marker: v2"
 mkdir -p $T/fl_none; out_n=$(cd $T/fl_none && bash -c "$SNIP" 2>&1); rc=$?
 check "budget: absent CLAUDE.md does not crash" "$rc/$(printf '%s\n' "$out_n" | grep -c '⚠')" "0/0"
+printf '%s\n' "$out_n" | grep -q '^superdoc marker: none$' && ok "marker line: absent CLAUDE.md prints none" || bad "marker line: absent CLAUDE.md"
 printf '%s\n' "$out_n" | grep -q '^force-loaded total: 0B$' && ok "  absent CLAUDE.md totals 0B" || bad "  absent CLAUDE.md total ($out_n)"
 
 echo "== superdoc workers copy assets via Read/Write, not Bash on a plugin-root path (#5) =="
