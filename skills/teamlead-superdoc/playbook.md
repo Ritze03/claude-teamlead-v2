@@ -560,6 +560,10 @@ Before you report anything — FRESH, AUDIT, or REPAIR — confirm every box bel
 report a doc set you haven't verified; a red box means fix it or drop the claim, then
 re-check.
 
+- [ ] `lint.sh` run first (`bash <plugin-root>/skills/teamlead-superdoc/lint.sh`, whole tree) and
+      every finding fixed: it decides what a script can (leaks, line references, dangling
+      `@`-refs, force-load size, glossary entry length, pages missing from the README) and never
+      prints a leaked value. The boxes below cover what it cannot.
 - [ ] Every `path:symbol` written anywhere in `superdoc/` resolves: the path exists and the
       symbol is actually in it (grep it, don't eyeball it).
 - [ ] Every relative link written anywhere in `superdoc/` resolves to a file that exists.
@@ -589,7 +593,7 @@ re-check.
       nothing in them that isn't needed on every task (Part 9).
 - [ ] `TERMINOLOGY.md` entries are pointers: none over about 300 characters, wrapped lines
       counted (an entry runs to the next entry or heading), details live on the linked
-      pages (the Part 9 command lists offenders). The file has no size limit of its own.
+      pages (`lint.sh` lists offenders). The file has no size limit of its own.
 
 ## Part 9 — AUDIT (read-only phase)
 
@@ -599,6 +603,16 @@ Part 6, is a separate step that runs before the audit; the audit itself writes n
 The repair phase, Part 10, runs right after it in the same run, automatically, on what the
 audit found.)
 
+- **Start from `lint.sh` output:** `bash <plugin-root>/skills/teamlead-superdoc/lint.sh --doc <doc-root>`
+  (the literal plugin root from your brief) scans the doc tree and `CLAUDE.md` and prints one
+  `path:line: error|warn: <kind>` per finding, never the value. Its findings are the audit's first
+  items; the bullets below are what it cannot decide. **Errors** (high-confidence leaks): absolute
+  home paths, emails, private-range IPs (RFC 1918, link-local, CGNAT). **Warnings:** other
+  machine-specific host paths and public IPs, `file.ext:123` line references under `architecture/`,
+  dangling `@`-refs, the force-load size findings, TERMINOLOGY entries over ~300 characters, and
+  pages missing from `README.md`. Loopback, documentation ranges, `example.*` addresses and
+  placeholder homes (`/home/user`, `$HOME`, `<name>`) are never findings. A line carrying
+  `superdoc-lint: allow` is skipped: for a true false positive only, never for a real value.
 - Run the full Part 8 gate against the existing `superdoc/` and `CLAUDE.md`.
 - Grep every referenced `path`/`symbol` and every relative link; list what doesn't
   resolve.
@@ -610,9 +624,13 @@ audit found.)
 - Flag any `@`-ref outside the Part 5 allowed set, and any `@`-ref that's broken.
 - Re-check Part 0: if `superdoc/` never grew past scaffolding, report it as a
   finding; the repair phase collapses it back into `CLAUDE.md`.
-- **Privacy scan (Part 4a):** grep the doc tree and the `CLAUDE.md` docs block for leaks
-  and report each hit as a finding (file + line): `grep -rnE '/home/|/Users/|C:\\Users|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|[0-9]{1,3}(\.[0-9]{1,3}){3}|(sk|ghp|xox[bp]|AKIA)[-_A-Za-z0-9]{12,}|(token|secret|api[_-]?key|password)[ :=]+\S{8,}' <doc-root> CLAUDE.md`.
-  Hits are candidates; read each and drop false positives (example placeholders are fine).
+- **Privacy scan (Part 4a):** the leak checks are `lint.sh` (above): every error is a finding
+  (file + line + kind), not a candidate to second-guess, and its allowlist already drops
+  placeholders. What it cannot decide stays a judgement scan, printing `file:line` only so its
+  output carries no value: tokens and secrets,
+  `grep -rnIE '(sk|ghp|xox[bp]|AKIA)[-_A-Za-z0-9]{12,}|(token|secret|api[_-]?key|password)[ :=]+\S{8,}' <doc-root> CLAUDE.md | cut -d: -f1,2`.
+  Read each hit and drop false positives (example placeholders are fine); a real secret is a
+  finding, and its value is never quoted anywhere.
 - **Identity values of this machine** (the regex cannot see a bare hostname or a name): grep
   the same files for the real `hostname`, `$USER`, `git config user.name` and
   `git config user.email`, case-insensitive, fixed strings, empty values skipped. It prints
@@ -628,7 +646,7 @@ audit found.)
 - **Force-load budget:** force-loaded = `CLAUDE.md` plus every `@`-ref target in it
   (TERMINOLOGY plus everything under `claude-instructions/`). It sits in context for the
   whole session and is resent with every request, in every worker. Report each file's
-  size and the counted total (`wc -c`; SKILL.md Step 1 prints the same, labelling each file):
+  size and the counted total (`lint.sh --doc <doc-root> --force-load` prints the report, labelling each file, the same one SKILL.md Step 1 runs):
   flag any single file over 8 KB, except `TERMINOLOGY.md` (judged by entry length, next
   bullet), and a counted total over 20 KB. **Counted** means `CLAUDE.md`, `TERMINOLOGY.md`
   and project-owned files. `documentation.md` and `documentation-version-policy.md` are
@@ -638,13 +656,12 @@ audit found.)
   not needed on every task — reference material, feature detail, history, rationale — and
   name the linked page it should move to.
 - **TERMINOLOGY.md entry length** (the specific case of the above; the file's size is not
-  flagged, its entries are): list every entry over ~300 characters (the 200 in the skeleton
-  is the guide; 300 is the threshold, so normal entries aren't flagged) as a finding, with
-  the line it starts on and its summed length. An entry is its `- **` line plus every
-  following line up to the next entry or heading, so a hard-wrapped entry counts whole:
-  `awk 'function flush(){if(n>300)print s": "n" chars"} /^- \*\*/{flush();n=0;s=FILENAME":"FNR;on=1} /^#/{flush();n=0;on=0} on{n+=length($0)} END{flush()}' <doc-root>/meta/TERMINOLOGY.md`
-  (`length` counts bytes under some awks, and newlines are not counted; treat near-threshold
-  hits as approximate). Also flag the file if it lacks the short-entry rule:
+  flagged, its entries are): `lint.sh` lists every entry over ~300 characters (the 200 in the
+  skeleton is the guide; 300 is the threshold, so normal entries aren't flagged) as a finding,
+  with the line it starts on and its summed length. An entry is its `- **` line plus every
+  following line up to the next entry or heading, so a hard-wrapped entry counts whole (`length`
+  counts bytes under some awks and newlines are not counted; treat near-threshold hits as
+  approximate). Also flag the file if it lacks the short-entry rule:
   `grep -q 'Keep every entry short' <doc-root>/meta/TERMINOLOGY.md`.
 - **Total over budget, every entry short** (a note, not a finding to cut): the glossary can
   be complete and still push the counted total past 20 KB. Ask yourself, not the user,

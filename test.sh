@@ -9,6 +9,7 @@ B="$CLAUDE_PLUGIN_ROOT/scripts/board.py"
 PL="$H/plan-lint.sh"
 PS2="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 SD="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/SKILL.md"
+LINT="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/lint.sh"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 # statusline.sh normally prints a cache and refreshes in the background; the
 # assertions on its content want the computed segment, so compute inline. The
@@ -663,7 +664,7 @@ grep -q 'plan-watch' "$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md" && ok "
 
 echo "== superdoc stays at the root, and its @-refs are verified =="
 grep -q 'Do not also copy it into' "$SD" && ok "says not to duplicate into .claude/" || bad "says not to duplicate into .claude/"
-grep -q 'does not exist' "$SD" && ok "  detects a dangling @-ref" || bad "  detects a dangling @-ref"
+grep -q 'does not exist' "$LINT" && ok "  detects a dangling @-ref (lint.sh)" || bad "  detects a dangling @-ref"
 grep -q 'no longer exists' "$SD" && ok "  health-check audits @-refs too" || bad "  health-check audits @-refs"
 # (the detection snippet itself is run against fixtures in the force-load budget section)
 
@@ -689,6 +690,8 @@ grep -q "after that Go I'll offer" "$TLS" && ok "  help text: the /clear offer c
 
 echo "== the @-budget rule keeps its reasoning =="
 PB="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md"
+LINT="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/lint.sh"
+lintin() { local d=$1; shift; (cd "$d" && "$LINT" "$@"); }   # run lint.sh from inside a fixture dir
 grep -q 'nothing else, ever' "$PB" && ok "the exact set is still mandated" || bad "the exact set is still mandated"
 grep -q 'does not suggest a file, it \*pastes\* it' "$PB" && ok "  explains @ pastes the file" || bad "  explains @ pastes the file"
 grep -q 'for the whole session' "$PB" && grep -q 'carries its own copy' "$PB" && ok "  names the cost: whole session, every request, every worker" || bad "  names the cost: whole session, every request, every worker"
@@ -759,7 +762,8 @@ check "  a clean doc is not flagged (an empty git email is skipped, not matched 
 check "  CLAUDE.md is scanned too" "$(printf 'ref testhost-01\n' >> $idd/CLAUDE.md; idrun | grep -c '^CLAUDE.md:')" "1"
 PRV=$(tr '\n' ' ' < "$PB" | sed 's/  */ /g')
 printf '%s' "$PRV" | grep -q '\*\*Identity values of this machine\*\*' && printf '%s' "$PRV" | grep -q 'case-insensitive, fixed strings, empty values skipped' && printf '%s' "$PRV" | grep -q 'A short or generic value' && printf '%s' "$PRV" | grep -q '\*\*Judgement pass:\*\*' && printf '%s' "$PRV" | grep -q 'never quoting the value' && ok "Part 9: identity pass, false-positive note, judgement pass, no quoting" || bad "Part 9: privacy second pass wording"
-grep -q "grep -rnE '/home/|/Users/" "$PB" && ok "  Part 9: the original path/email/IP/token regex is kept" || bad "  Part 9: original regex missing"
+grep -qF '(sk|ghp|xox[bp]|AKIA)[-_A-Za-z0-9]{12,}|(token|secret|api[_-]?key|password)[ :=]+\S{8,}' "$PB" && grep -qF "CLAUDE.md | cut -d: -f1,2" "$PB" && ok "  Part 9: the token/secret regex stays as a judgement scan (file:line only)" || bad "  Part 9: token regex missing"
+printf '%s' "$PRV" | grep -q 'the leak checks are `lint.sh`' && printf '%s' "$PRV" | grep -q 'every error is a finding' && ! grep -q "grep -rnE '/home/|/Users/" "$PB" && ok "  Part 9: privacy scan points at lint.sh, no second copy of the path/email/IP regex" || bad "  Part 9: privacy scan wording"
 printf '%s' "$PRV" | grep -q '\*\*Privacy leak\*\* (a Part 9 finding): replace the value with a placeholder' && printf '%s' "$PRV" | grep -q 'Rewriting history or force-pushing is the user.s decision, never done automatically' && ok "Part 10: leak -> placeholder automatically, history rewrite stays the user's" || bad "Part 10: privacy leak bullet"
 # Repo hygiene: no real identity values may live in this repo's tracked skill files.
 hyg=0
@@ -808,11 +812,9 @@ printf '%s' "$PRV" | grep -q 'When an entry.s detail has no page yet, it gets it
 printf '%s' "$PRV" | grep -q 'collapses it back into .CLAUDE.md.' && ok "Part 0/9: scaffolding-only superdoc is collapsed by repair, not proposed" || bad "Part 0/9: collapse"
 tdoc=$T/termaudit; mkdir -p $tdoc/meta
 { printf '# Terminology\n\n## Terms\n\n- **Short** — a one-liner. See `superdoc/features/short.md`.\n- **Long** — '; head -c 400 /dev/zero | tr '\0' 'x'; printf '\n'; } > $tdoc/meta/TERMINOLOGY.md
-AUDIT_RAW=$(grep -o "awk 'function flush.*TERMINOLOGY.md" "$PB")
-check "Part 9: the entry-length command is one line in the playbook, run verbatim below" "$(printf '%s\n' "$AUDIT_RAW" | grep -c .)" "1"
-audit_cmd=$(printf '%s\n' "$AUDIT_RAW" | head -1 | sed "s#<doc-root>#$tdoc#")
-hits=$(eval "$audit_cmd")
-check "Part 9 awk flags exactly the long entry" "$(printf '%s\n' "$hits" | sed 's/: [0-9]* chars//' | sed "s#$tdoc/##")" "meta/TERMINOLOGY.md:6"
+check "Part 9: no second copy of the entry-length awk in the playbook or SKILL.md" "$(grep -c 'function flush' "$PB" "$SD" | tr '\n' ' ' | sed "s#$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/##g")" "playbook.md:0 SKILL.md:0 "
+hits=$(cd $T && "$LINT" --doc termaudit | grep 'TERMINOLOGY entry')
+check "Part 9 (lint.sh) flags exactly the long entry" "$(printf '%s\n' "$hits" | sed 's/: warn.*//; s#termaudit/##')" "meta/TERMINOLOGY.md:6"
 # #12: entries hard-wrapped over several lines are summed, not judged by their first line.
 wdoc=$T/termwrap; mkdir -p $wdoc/meta
 {
@@ -827,10 +829,10 @@ wdoc=$T/termwrap; mkdir -p $wdoc/meta
   printf -- '- **Last** — final entry, no trailing heading\n'                         # last entry of the file
   for i in 1 2 3; do printf '  %s\n' "$(head -c 130 /dev/zero | tr '\0' 'z')"; done
 } > $wdoc/meta/TERMINOLOGY.md
-whits=$(eval "$(printf '%s\n' "$AUDIT_RAW" | sed "s#<doc-root>#$wdoc#")" | sed "s#$wdoc/##")
+whits=$(cd $T && "$LINT" --doc termwrap | grep 'TERMINOLOGY entry' | sed 's/^[^:]*:\([0-9]*\): warn: TERMINOLOGY entry over ~300 characters (\([0-9]*\) chars)$/\1 \2/')
 lnum() { grep -n -- "^- \*\*$1" $wdoc/meta/TERMINOLOGY.md | cut -d: -f1; }
-check "Part 9 awk: a wrapped entry is flagged at its start line, summed over its lines; a short wrapped entry is not; an entry before a heading and the last entry of the file are flushed" \
-  "$(printf '%s\n' "$whits" | sed 's/: \([0-9]*\) chars/ \1/' | awk '{split($1,a,":"); printf "%s=%s ", a[2], ($2>390 && $2<470)?"long":"odd:"$2}')" \
+check "Part 9 (lint.sh): a wrapped entry is flagged at its start line, summed over its lines; a short wrapped entry is not; an entry before a heading and the last entry of the file are flushed" \
+  "$(printf '%s\n' "$whits" | awk '{printf "%s=%s ", $1, ($2>390 && $2<470)?"long":"odd:"$2}')" \
   "$(lnum Wrapped)=long $(lnum Cut)=long $(lnum Last)=long "
 
 echo "== superdoc: force-load budget check (Step 1 snippet, Step 3, Part 8/9/10) =="
@@ -840,6 +842,9 @@ grep -q '^- \[ \] Force-load budget:' "$PB" && ok "Part 8 gate: force-load budge
 tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'Trimming a force-loaded file.*never delete information that exists nowhere else' && ok "Part 10: move-before-trim covers any force-loaded file" || bad "Part 10: move-before-trim wording"
 tr '\n' ' ' < "$SD" | sed 's/  */ /g' | grep -q 'force-load bloat.*The audit phase is read-only.*That covers force-load bloat and oversized TERMINOLOGY entries' && ok "SKILL Step 3: bloat is audited, then repaired automatically" || bad "SKILL Step 3: bloat wording"
 SNIP=$(awk '/^\*\*Run this with Bash as your first action/{f=1} f&&/^```bash/{g=1;next} g&&/^```/{exit} g' "$SD")
+# Step 1 runs lint.sh through the plugin-root state file; the fixtures get that file, so the real
+# snippet (detection lines + the lint.sh call) is what is exercised, end to end.
+snip() { mkdir -p "$1/.claude/teamlead/.state"; printf '%s\n' "$CLAUDE_PLUGIN_ROOT" > "$1/.claude/teamlead/.state/plugin-root"; (cd "$1" && bash -c "$SNIP" 2>&1); }
 mkgloss() { # file entries chars-per-entry: a glossary of "- **Tn** — xxxx" entries (invented content)
   { printf '# Terminology\n\n## Terms\n\n'
     for i in $(seq 1 "$2"); do printf -- '- **T%s** — ' "$i"; head -c "$3" /dev/zero | tr '\0' 'x'; printf '\n'; done; } > "$1"
@@ -857,7 +862,7 @@ nwarn() { printf '%s\n' "$1" | grep -c '⚠'; }
 mkfix $T/fl_ok 4200 40 110          # healthy: ~5 KB glossary of short entries
 mkfix $T/fl_short 4200 100 110      # ~12 KB glossary of short entries: counted total over 20 KB, no entry long
 mkfix $T/fl_big 4200 100 510        # real-world shape: ~51 KB glossary of long entries
-out_ok=$(cd $T/fl_ok && bash -c "$SNIP" 2>&1); out_short=$(cd $T/fl_short && bash -c "$SNIP" 2>&1); out_big=$(cd $T/fl_big && bash -c "$SNIP" 2>&1)
+out_ok=$(snip $T/fl_ok); out_short=$(snip $T/fl_short); out_big=$(snip $T/fl_big)
 check "budget: healthy tree prints its 5 files, no warning, no note" "$(printf '%s\n' "$out_ok" | grep -c '^force-loaded: ')/$(nwarn "$out_ok")/$(printf '%s\n' "$out_ok" | grep -c '^note:')" "5/0/0"
 want_ok=$(cat $T/fl_ok/CLAUDE.md $T/fl_ok/superdoc/meta/TERMINOLOGY.md $T/fl_ok/superdoc/claude-instructions/changelog.md | wc -c)
 check "budget: the total counts CLAUDE.md, the glossary and project files, and leaves the verbatim installs out" "$(printf '%s\n' "$out_ok" | grep '^force-loaded total: ')" "force-loaded total: ${want_ok}B"
@@ -878,20 +883,20 @@ head -c 30000 /dev/zero | tr '\0' 'n' > $btk/superdoc/meta/BIG.md
   printf '(@superdoc/meta/PAREN.md)\n'
   printf 'in a span `@superdoc/meta/NOPE.md` and then @superdoc/meta/MIXED.md\n'
   printf '@superdoc/meta/GONE.md\n'; } > $btk/CLAUDE.md
-out_bt=$(cd $btk && bash -c "$SNIP" 2>&1)
+out_bt=$(snip $btk)
 check "refs: backticked @-refs give no warning; real refs at line start, after a space, in parens and after a span all do" \
   "$(printf '%s\n' "$out_bt" | grep -o 'force-loads [^ ]*' | sed 's#force-loads superdoc/meta/##' | sort | tr '\n' ' ')" "AFTERSPACE.md GONE.md MIXED.md PAREN.md START.md "
 check "refs: a backticked ref to an existing file is not force-loaded in the size report either" "$(printf '%s\n' "$out_bt" | grep -c 'BIG.md')" "0"
 printf 'x @superdoc/meta/a.md\n' > $btk/CLAUDE.md
-check "refs: the capture group leaves a clean path (a real ref after a space is checked as superdoc/meta/a.md)" "$(cd $btk && bash -c "$SNIP" 2>&1 | grep -o 'force-loads [^ ]*')" "force-loads superdoc/meta/a.md"
+check "refs: the capture group leaves a clean path (a real ref after a space is checked as superdoc/meta/a.md)" "$(snip $btk | grep -o 'force-loads [^ ]*')" "force-loads superdoc/meta/a.md"
 dang=$T/fl_dang; mkfix $dang 500 10 100; rm $dang/superdoc/claude-instructions/documentation.md
-out_d=$(cd $dang && bash -c "$SNIP" 2>&1); rc=$?
+out_d=$(snip $dang); rc=$?
 check "budget: dangling ref does not crash the snippet" "$rc" "0"
 printf '%s\n' "$out_d" | grep -q 'force-loads superdoc/claude-instructions/documentation.md — that file does not exist' && printf '%s\n' "$out_d" | grep -q '^force-loaded total: ' && ok "  dangling ref flagged, total still printed" || bad "  dangling ref output ($out_d)"
 printf '%s\n' "$out_ok" | grep -q '^superdoc marker: none$' && ok "marker line: a CLAUDE.md without the guarded block prints none" || bad "marker line: none ($(printf '%s\n' "$out_ok" | grep marker))"
 mkdir -p $T/fl_mk; printf '# P\n<!-- superdoc:start v2 -->\n@superdoc/x.md\n<!-- superdoc:end -->\n' > $T/fl_mk/CLAUDE.md
-check "marker line: prints the installed vN" "$(cd $T/fl_mk && bash -c "$SNIP" 2>&1 | grep '^superdoc marker:')" "superdoc marker: v2"
-mkdir -p $T/fl_none; out_n=$(cd $T/fl_none && bash -c "$SNIP" 2>&1); rc=$?
+check "marker line: prints the installed vN" "$(snip $T/fl_mk | grep '^superdoc marker:')" "superdoc marker: v2"
+mkdir -p $T/fl_none; out_n=$(snip $T/fl_none); rc=$?
 check "budget: absent CLAUDE.md does not crash" "$rc/$(printf '%s\n' "$out_n" | grep -c '⚠')" "0/0"
 printf '%s\n' "$out_n" | grep -q '^superdoc marker: none$' && ok "marker line: absent CLAUDE.md prints none" || bad "marker line: absent CLAUDE.md"
 printf '%s\n' "$out_n" | grep -q '^force-loaded total: 0B$' && ok "  absent CLAUDE.md totals 0B" || bad "  absent CLAUDE.md total ($out_n)"
@@ -908,8 +913,9 @@ printf '%s' "$P8" | grep -q 'except `TERMINOLOGY.md`' && printf '%s' "$P8" | gre
 SD3=$(awk '/^## Step 3/{f=1;next} /^## /{f=0} f' "$SD" | tr '\n' ' ' | sed 's/  */ /g')
 printf '%s' "$SD3" | grep -q 'is judged by entry length' && printf '%s' "$SD3" | grep -q 'left out of the 20 KB total' && printf '%s' "$SD3" | grep -q 'every glossary entry short is a note, not a `⚠`' && ok "SKILL Step 3: same accounting" || bad "SKILL Step 3: accounting wording"
 printf '%s' "$SDN" | grep -q 'A `note:` (total over 20 KB while every glossary entry is short) is not a `⚠`' && ok "SKILL Step 1: explains the note" || bad "SKILL Step 1: note explanation"
-check "SKILL Step 1: one @-ref pattern (REF) shared by both loops, no inline copy of the regex" "$(printf '%s\n' "$SNIP" | grep -c "^REF=")/$(printf '%s\n' "$SNIP" | grep -c "grep -oE")" "1/1"
-check "SKILL Step 1: the entry-length awk is defined once (LONG) and the playbook's command is the same text" "$(printf '%s\n' "$SNIP" | grep -c "^LONG=")/$(printf '%s' "$AUDIT_RAW" | sed "s/^awk '//; s/' <doc-root>.*//")" "1/$(printf '%s\n' "$SNIP" | sed -n "s/^LONG='\(.*\)'$/\1/p")"
+check "SKILL Step 1: only calls lint.sh --force-load; REF, LONG, refs() and the size loop are not copied there" "$(printf '%s\n' "$SNIP" | grep -c 'lint.sh" --doc "\$DOC" --force-load')/$(printf '%s\n' "$SNIP" | grep -cE '^REF=|^LONG=|^refs\(\)|grep -oE|wc -c|function flush')" "1/0"
+check "lint.sh: REF, LONG, refs() and the force-load size loop are each defined once" "$(grep -c '^REF=' "$LINT")/$(grep -c '^LONG=' "$LINT")/$(grep -c '^refs() ' "$LINT")/$(grep -c 'wc -c' "$LINT")" "1/1/1/1"
+check "SKILL Step 1 keeps the detection lines (present, wired, marker, gitignored)" "$(printf '%s\n' "$SNIP" | grep -c 'superdoc: present\|CLAUDE.md: wired\|superdoc marker:\|GITIGNORED')" "4"
 
 echo "== superdoc: everyday rules reach agents, local details have a home (#14, #15) =="
 check "documentation.md: 'Renamed / moved / removed' line absorbs the grep-the-docs rule (no extra line)" "$(printf '%s' "$DOCN" | grep -c 'Renamed / moved / removed.*grep the docs for the old name in the same commit')" "1"
@@ -923,6 +929,216 @@ printf '%s' "$P10" | grep -q 'whether the repo is public (`gh repo view --json v
 S4=$(awk '/^## Step 4/{f=1;next} /^## /{f=0} f' "$SD" | tr '\n' ' ' | sed 's/  */ /g')
 printf '%s' "$S4" | grep -q "after anything useful in it has moved to \`.claude/local/\`" && printf '%s' "$S4" | grep -q "main checkout's absolute\*\* \`.claude/local/\` path, so put that path in the repair row's \`owns\`" && printf '%s' "$S4" | grep -q 'whether the repo is public' && printf '%s' "$S4" | grep -q 'any exposed credential must be rotated first' && printf '%s' "$S4" | grep -q 'the decision stays with them' && ok "SKILL Step 4: .claude/local/ via the main checkout's absolute owns; public/rotate/history report" || bad "SKILL Step 4: leak and local wording"
 printf '%s' "$S4" | grep -q 'Do not trust "read Part 4a"\.' && printf '%s' "$S4" | grep -q 'carries the rule text itself\*\*' && printf '%s' "$S4" | grep -q 're-runs the Part 9 privacy scans on the result' && printf '%s' "$S4" | grep -q 'the identity-values pass' && ok "SKILL Step 4: privacy-repair brief carries the rule text; QC re-runs the Part 9 scans" || bad "SKILL Step 4: brief carries rule / QC rescans"
+
+echo "== superdoc: lint.sh (leak checks, drift checks, modes) (#14, #15) =="
+[ -x "$LINT" ] && ok "lint.sh exists and is executable" || bad "lint.sh missing or not executable"
+SENT=sentinelzq9   # a unique value: it must never appear in any output of any mode
+mklf() { rm -rf "$1"; mkdir -p "$1/superdoc/architecture" "$1/superdoc/features" "$1/superdoc/meta"; printf '# P\n' > "$1/CLAUDE.md"; }
+LF=$T/lf; mklf $LF
+{ printf '# Leaks\n'
+  printf 'a /home/%s/x\n' $SENT; printf 'b /Users/%s/x\n' $SENT; printf 'c C:\\Users\\%s\\x\n' $SENT
+  printf 'd %s@corp-%s.io\n' $SENT $SENT
+  printf 'e 10.77.66.55\n'; printf 'f 172.20.66.55\n'; printf 'g 192.168.66.55\n'; printf 'h 169.254.66.55\n'; printf 'i 100.70.66.55\n'
+  printf 'j 8.77.66.55\n'; printf 'k /mnt/%s/x\n'  $SENT; } > $LF/superdoc/features/leak.md
+printf '# A\nsee main.py:42 and util.go:7\n' > $LF/superdoc/architecture/a.md
+printf '# F\nsee main.py:42 here is fine\n' > $LF/superdoc/features/f.md
+out_lf=$(lintin $LF 2>&1); rc_lf=$?
+for kv in "2:error: home path" "3:error: home path" "4:error: home path" "5:error: email" "6:error: private IP" "7:error: private IP" "8:error: private IP" "9:error: private IP" "10:error: private IP" "11:warn: public IP" "12:warn: host path"; do
+  printf '%s\n' "$out_lf" | grep -qx "superdoc/features/leak.md:${kv%%:*}: ${kv#*:}" && ok "  lint: leak.md line ${kv%%:*} is '${kv#*:}'" || bad "  lint: leak.md line ${kv%%:*} should be '${kv#*:}' ($out_lf)"
+done
+check "lint: errors make the exit status 1" "$rc_lf" "1"
+check "lint: a line reference is a warning in architecture/ only" "$(printf '%s\n' "$out_lf" | grep 'line reference' | sed 's/: warn.*//')" "superdoc/architecture/a.md:2"
+printf '%s\n' "$out_lf" | grep -q '^fix: replace each flagged value with a placeholder' && printf '%s\n' "$out_lf" | grep -q '\.claude/local/' && printf '%s\n' "$out_lf" | grep -q 'superdoc-lint: allow.*true false positives only.*never for a real value' && ok "lint: after errors, one fix line (placeholder, .claude/local/) and the allow marker is documented as false-positive-only" || bad "lint: fix lines ($out_lf)"
+check "lint: no message asks the user anything about docs" "$(printf '%s\n' "$out_lf" | grep -ci 'ask the user\|would you\|do you want\|?$')" "0"
+check "lint: the sentinel value never appears in the output (whole tree)" "$(printf '%s\n' "$out_lf" | grep -c "$SENT\|corp-\|77.66.55")" "0"
+check "lint: no source line is echoed (only path:line: sev: kind)" "$(printf '%s\n' "$out_lf" | grep -vcE '^(superdoc/|CLAUDE.md)[^ ]*:[0-9]+: (error|warn): [A-Za-z ~()@0-9-]+$|^(fix|note|hint): |^superdoc-lint: ')" "0"
+
+# --- allowlist and the listed false positives: each on its own, each must be silent -----------
+fpc() { # label line
+  mklf $T/fp; printf '# T\n%s\n' "$2" > $T/fp/superdoc/features/t.md
+  local o; o=$(lintin $T/fp 2>&1); [ -z "$o" ] && ok "  lint no finding: $1" || bad "  lint false positive: $1 ($o)"
+}
+fpc "loopback 127.0.0.1" "bind 127.0.0.1 and 127.9.9.9"
+fpc "0.0.0.0" "listen on 0.0.0.0"
+fpc "localhost and ::1" "http://localhost:3000 and ::1"
+fpc "documentation ranges" "192.0.2.7 198.51.100.9 203.0.113.250"
+fpc "example.com/.org/.net emails" "a@example.com b@example.org c@mail.example.net"
+fpc "*.example *.invalid *.test *.localhost emails" "a@x.example b@x.invalid c@x.test d@x.localhost"
+fpc "noreply addresses" "noreply@corp.io and 1234+bob@users.noreply.github.com"
+fpc "git@host: SSH remote" "git clone git@github.com:org/repo.git"
+fpc "placeholder homes /home/user /home/you /home/username" "/home/user/x /home/you/x /home/username/x"
+fpc "placeholder homes /home/<name> /home/\$USER /Users/you /Users/<name>" '/home/<name>/x /home/$USER/x /home/${USER}/x /Users/you/x /Users/<name>/x'
+fpc "placeholder Windows home" 'C:\Users\<name>\x and C:\Users\Public\x'
+fpc "generic system paths" "/usr/lib/x /etc/hosts /tmp/x /dev/null /proc/1 /bin/sh /var/log/x"
+fpc "version string v10.0.0.1" "v10.0.0.1 and version 192.168.1.1 and >=10.0.0.1 and ^172.16.0.1"
+fpc "longer dotted number 1.10.0.1.2" "1.10.0.1.2 and 10.0.0.1.5"
+fpc "invalid octets 999.1.1.1" "999.1.1.1 and 300.1.1.1 and 1.2.3"
+fpc "retina filenames" "icon@2x.png and logo@3x.webp"
+fpc "npm scopes and versions" "@scope/pkg@1.2.3 and lodash@4.17.21 and pkg@1.2.3-beta.rc and next@canary"
+fpc "@-mentions" "thanks @octocat and @media screen"
+fpc "URL with @ that is not an email" "https://user:pw@host.org/path and ssh://git@gitlab.corp.io/x.git"
+fpc "URLs that look like /home/ paths" "https://example.com/home/page/x and https://foo.org/Users/list/ and docs/home/x/y"
+fpc "the RFC ranges themselves" "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10"
+fpc "superdoc-lint: allow skips a line" "/home/$SENT/x 10.9.9.9 a@corp.io <!-- superdoc-lint: allow -->"
+fpc "/opt/homebrew and WSL /mnt/c" "/opt/homebrew/bin /mnt/c/x"
+fpc "textbook placeholder public IPs" "1.1.1.1 8.8.8.8 1.2.3.4"
+tpc() { # label line expected
+  mklf $T/tp; printf '# T\n%s\n' "$2" > $T/tp/superdoc/features/t.md
+  local o; o=$(lintin $T/tp 2>&1 | grep ':2: ' | sed 's/^[^:]*:2: //'); check "  lint finds: $1" "$o" "$3"
+}
+tpc "file:// home path" "file:///home/$SENT/x" "error: home path"
+tpc "quoted home path" "\"/home/$SENT/x\"" "error: home path"
+tpc "mailto email" "mailto:$SENT@corp.io" "error: email"
+tpc "ssh user@private-ip" "ssh $SENT@10.9.9.9" "error: private IP"
+tpc "private IP in a URL" "http://10.9.9.9:8080/x" "error: private IP"
+tpc "private IP in a blockquote" "> 10.9.9.9" "error: private IP"
+tpc "private CIDR that is not a range itself" "10.4.4.0/24" "error: private IP"
+tpc "172.32 is public, not private" "172.32.0.1" "warn: public IP"
+tpc "/srv host path" "/srv/www" "warn: host path"
+tpc "a real home next to a placeholder" "/home/you/x and /home/$SENT/y" "error: home path"
+mklf $T/bin; printf '# T\nsecret /home/%s/x\0\001\002 binary\n' $SENT > $T/bin/superdoc/features/b.bin; printf 'x\n' > $T/bin/superdoc/features/ok.md
+check "lint: binary files are skipped" "$(lintin $T/bin 2>&1)" ""
+
+# --- exit codes, usage, silence ------------------------------------------------------------------
+mklf $T/wo; printf '# T\n/mnt/nas/x\n' > $T/wo/superdoc/features/w.md
+out_wo=$(lintin $T/wo 2>&1); check "lint: warnings only: exit 0, still printed" "$?/$(printf '%s\n' "$out_wo" | grep -c ': warn: host path')" "0/1"
+lintin $T/wo --bogus >/dev/null 2>&1; check "lint: unknown argument is exit 2" "$?" "2"
+lintin $T/wo --staged --files x >/dev/null 2>&1; check "lint: two modes is exit 2" "$?" "2"
+lintin $T/wo --doc >/dev/null 2>&1; check "lint: --doc without a value is exit 2" "$?" "2"
+lintin $T/wo --range nodots >/dev/null 2>&1; check "lint: --range without A..B is exit 2" "$?" "2"
+check "lint: the usage error text carries no doc value" "$(lintin $T/wo --bogus 2>&1 | grep -c "$SENT")" "0"
+mkdir -p $T/nosd; printf '# P\nno docs here\n' > $T/nosd/CLAUDE.md
+out_ns=$(lintin $T/nosd 2>&1); check "lint: no doc root and no marker: exit 0, silent" "$?/$out_ns" "0/"
+out_ns=$(lintin $T/nosd --files CLAUDE.md 2>&1); check "lint: ... also with --files" "$?/$out_ns" "0/"
+lintin $LF --files >/dev/null 2>&1; check "lint: --files with no files is a quiet exit 0" "$?" "0"
+
+# --- --files: all checks, report only the given files ---------------------------------------------
+printf '# G\n/home/%s/y\n' $SENT > $LF/superdoc/features/other.md
+printf '# Out\n/home/%s/y\n' $SENT > $LF/notes.md
+out_f=$(lintin $LF --files superdoc/features/other.md notes.md 2>&1); rc_f=$?
+check "lint --files: reports the given doc file only (old debt in leak.md stays quiet; a file outside the doc tree is ignored)" "$(printf '%s\n' "$out_f" | grep -c '^superdoc/features/other.md:2: error: home path$')/$(printf '%s\n' "$out_f" | grep -c 'leak.md\|notes.md')/$rc_f" "1/0/1"
+check "lint --files: a file outside the doc tree alone is ignored entirely" "$(lintin $LF --files notes.md 2>&1; echo rc=$?)" "rc=0"
+check "lint --files: a cwd-relative path works from inside a subdirectory" "$(cd $LF/superdoc/features && "$LINT" --files other.md 2>&1 | grep -c '^superdoc/features/other.md:2: error')" "1"
+check "lint --files: the sentinel is not in the output" "$(printf '%s\n' "$out_f" | grep -c "$SENT")" "0"
+# repo-wide force-load findings report only when a force-loaded file is among the files
+FL=$T/lfl; mklf $FL; head -c 21000 /dev/zero | tr '\0' 'c' > $FL/CLAUDE.md; printf '# x\n' > $FL/superdoc/features/x.md
+check "lint all: an over-budget CLAUDE.md is a warning (file size and total)" "$(lintin $FL 2>&1 | grep -c '^CLAUDE.md:1: warn: force-loaded')" "2"
+check "lint --files: ... not reported when no force-loaded file is given" "$(lintin $FL --files superdoc/features/x.md 2>&1 | wc -c | tr -d ' ')" "0"
+check "lint --files: ... reported when CLAUDE.md is given" "$(lintin $FL --files CLAUDE.md 2>&1 | grep -c '^CLAUDE.md:1: warn: force-loaded')" "2"
+# dangling @-ref (with its line), glossary entry, README coverage
+DR=$T/ldr; mklf $DR
+printf '# P\n\nread @superdoc/meta/TERMINOLOGY.md and @superdoc/gone.md\nin a span `@superdoc/nope.md` is prose\n' > $DR/CLAUDE.md
+{ printf '# Terminology\n\n## Terms\n\n- **Long** — '; head -c 400 /dev/zero | tr '\0' 'x'; printf '\n- **Short** — fine.\n'; } > $DR/superdoc/meta/TERMINOLOGY.md
+printf '# README\n\n- [A](architecture/a.md)\n' > $DR/superdoc/README.md
+printf '# a\n' > $DR/superdoc/architecture/a.md; printf '# b\n' > $DR/superdoc/features/b.md
+mkdir -p $DR/superdoc/claude-instructions; printf '# d\n' > $DR/superdoc/claude-instructions/documentation.md
+out_dr=$(lintin $DR 2>&1); rc_dr=$?
+check "lint all: a dangling @-ref is reported on its CLAUDE.md line, a backticked one is not" "$(printf '%s\n' "$out_dr" | grep ': warn: dangling' | sed 's/: warn.*//')" "CLAUDE.md:3"
+check "lint all: a TERMINOLOGY entry over ~300 characters is a warning at its line" "$(printf '%s\n' "$out_dr" | grep 'TERMINOLOGY entry' | sed 's/: warn.*//')" "superdoc/meta/TERMINOLOGY.md:5"
+check "lint all: pages missing from README.md are reported; README.md itself and the claude-instructions/ installs (not in this README) are not" "$(printf '%s\n' "$out_dr" | grep 'not listed' | sed 's/: warn.*//' | sort | tr '\n' ' ')" "superdoc/features/b.md:1 superdoc/meta/TERMINOLOGY.md:1 "
+check "lint all: warnings alone leave the exit status 0" "$rc_dr" "0"
+printf '# README\n\n- [A](architecture/a.md)\n## claude-instructions/\n- [D](claude-instructions/documentation.md)\n' > $DR/superdoc/README.md
+printf '# d2\n' > $DR/superdoc/claude-instructions/documentation-version-policy.md
+check "lint all: once README.md lists claude-instructions/, an unlisted install is a finding too" "$(lintin $DR 2>&1 | grep 'not listed' | grep -c version-policy)" "1"
+rm $DR/superdoc/README.md
+check "lint all: no README.md, no 'not listed' findings" "$(lintin $DR 2>&1 | grep -c 'not listed')" "0"
+check "lint --files: the dangling ref is reported when CLAUDE.md is given, not otherwise" "$(lintin $DR --files CLAUDE.md 2>&1 | grep -c ': warn: dangling')/$(lintin $DR --files superdoc/features/b.md 2>&1 | grep -c ': warn: dangling')" "1/0"
+check "lint --force-load: the Step 1 report, labelled files and total" "$(lintin $T/fl_ok --doc superdoc --force-load | grep -c '^force-loaded')" "6"
+
+# --- custom doc root -----------------------------------------------------------------------------------
+CD=$T/lcd; rm -rf $CD; mkdir -p $CD/handbook/meta $CD/handbook/features
+printf '# P\n@handbook/meta/TERMINOLOGY.md\n' > $CD/CLAUDE.md
+printf '# T\n' > $CD/handbook/meta/TERMINOLOGY.md; printf '/home/%s/x\n' $SENT > $CD/handbook/features/l.md
+check "lint: the doc root is derived from the @.../meta/TERMINOLOGY.md ref in CLAUDE.md" "$(lintin $CD 2>&1 | grep -c '^handbook/features/l.md:1: error: home path$')" "1"
+printf '# P\n@handbook/claude-instructions/documentation.md\n' > $CD/CLAUDE.md; rm $CD/handbook/meta/TERMINOLOGY.md
+check "lint: ... or from a @.../claude-instructions/ ref" "$(lintin $CD 2>&1 | grep -c '^handbook/features/l.md:1: error')" "1"
+printf '# P\nnothing\n' > $CD/CLAUDE.md
+check "lint: --doc names the folder explicitly (trailing slash too)" "$(lintin $CD --doc handbook 2>&1 | grep -c '^handbook/features/l.md:1: error')/$(lintin $CD --doc handbook/ 2>&1 | grep -c '^handbook/features/l.md:1: error')" "1/1"
+check "lint: without --doc and without any ref or marker, handbook/ is not guessed" "$(lintin $CD 2>&1)" ""
+mkdir -p $CD/superdoc; printf 'x\n' > $CD/superdoc/p.md
+check "lint: superdoc/ wins over a derived folder" "$(printf '# P\n@handbook/meta/TERMINOLOGY.md\n' > $CD/CLAUDE.md; lintin $CD 2>&1 | grep -c handbook)" "0"
+printf '# P\n<!-- superdoc:start v4 -->\n@superdoc/gone.md\n<!-- superdoc:end -->\n' > $CD/CLAUDE.md; rm -rf $CD/superdoc
+check "lint: a superdoc marker without a doc folder still checks CLAUDE.md (dangling ref)" "$(lintin $CD 2>&1 | grep -c '^CLAUDE.md:3: warn: dangling')" "1"
+
+# --- git modes: --staged and --range ----------------------------------------------------------------------
+gfix() { # dir : a git repo with superdoc/
+  rm -rf "$1"; mkdir -p "$1/superdoc/features" "$1/sub"; (cd "$1" && git init -q && git config user.email t@t.t && git config user.name t && git config commit.gpgsign false)
+}
+GS=$T/lgs; gfix $GS
+printf '# T\nold /home/olddebt/x\nclean\n' > $GS/superdoc/features/leak.md; printf '# P\n' > $GS/CLAUDE.md
+(cd $GS && git add -A && git commit -qm base)
+printf '# T\nnew %s@corp-%s.io\nold /home/olddebt/x\nclean\nadded 10.77.66.55\n' $SENT $SENT > $GS/superdoc/features/leak.md
+printf 'outside /home/%s/x\n' $SENT > $GS/sub/outside.md
+printf '# P\nclaude /home/%s/x\n' $SENT >> $GS/CLAUDE.md
+(cd $GS && git add superdoc CLAUDE.md sub)
+printf 'unstaged 10.1.1.1\n' >> $GS/superdoc/features/leak.md
+out_s=$(lintin $GS --staged 2>&1); rc_s=$?
+check "lint --staged: only lines ADDED in the index, with real line numbers (old debt on untouched lines is quiet; unstaged and out-of-tree changes ignored)" "$(printf '%s\n' "$out_s" | grep ': error' | sort | tr '\n' ' ')" "CLAUDE.md:3: error: home path superdoc/features/leak.md:2: error: email superdoc/features/leak.md:5: error: private IP "
+check "lint --staged: exit 1, sentinel and source text never printed" "$rc_s/$(printf '%s\n' "$out_s" | grep -c "$SENT\|corp-\|77.66.55\|olddebt")" "1/0"
+check "lint --staged: no commit is mentioned (it is not a range finding)" "$(printf '%s\n' "$out_s" | grep -c 'commit')" "0"
+check "lint --staged: works from a subdirectory (cwd-relative root)" "$(cd $GS/sub && "$LINT" --staged 2>&1 | grep -c ': error')" "3"
+check "lint --staged: nothing staged is a quiet exit 0" "$(cd $GS && git reset -q && "$LINT" --staged 2>&1; echo rc=$?)" "rc=0"
+# hunk headers: an insert in the middle of a file and an append at the end
+printf '# T\nold /home/olddebt/x\nclean\nl4\nl5\nl6\n' > $GS/superdoc/features/m.md; (cd $GS && git add superdoc/features/m.md && git commit -qm m)
+printf '# T\nold /home/olddebt/x\nins a\nins 10.88.2.2\nclean\nl4\nl5\nl6\nn9 10.88.1.1\n' > $GS/superdoc/features/m.md
+(cd $GS && git add superdoc/features/m.md)
+check "lint --staged: line numbers follow the hunk headers (insert in the middle, append at the end)" "$(lintin $GS --staged 2>&1 | grep 'features/m.md' | sed 's/^[^:]*://; s/: error.*//' | tr '\n' ' ')" "4 9 "
+(cd $GS && git commit -qm m2)
+
+# --range: the net diff is clean, the pushed commits are not
+GR=$T/lgr; gfix $GR
+printf '# P\n' > $GR/CLAUDE.md; printf '# T\nclean\n' > $GR/superdoc/features/a.md; (cd $GR && git add -A && git commit -qm c1)
+c1=$(cd $GR && git rev-parse HEAD)
+printf '# T\nclean\nleak /home/%s/x\n' $SENT > $GR/superdoc/features/a.md; (cd $GR && git commit -qam c2)
+c2s=$(cd $GR && git log -1 --format=%h)
+printf '# T\nclean\n' > $GR/superdoc/features/a.md; (cd $GR && git commit -qam c3)
+out_r=$(lintin $GR --range "$c1..HEAD" 2>&1); rc_r=$?
+check "lint --range: a value added in one commit and removed in a later one is still found (not the net diff), with the commit" "$(printf '%s\n' "$out_r" | grep ': error')" "superdoc/features/a.md:3: error: home path (commit $c2s)"
+check "lint --range: exit 1, the sentinel is never printed" "$rc_r/$(printf '%s\n' "$out_r" | grep -c "$SENT")" "1/0"
+printf '%s\n' "$out_r" | grep -q '^fix: .*local commit.*repairing the file does not remove it.*rewritten before pushing.*user.s decision.*lead' && ok "lint --range: a finding in a commit gets the rewrite-the-commit fix line (the user's decision, via the lead)" || bad "lint --range: commit fix line ($out_r)"
+check "lint --range: the net diff of the same range is clean (a net-diff check would have missed it)" "$(cd $GR && git diff $c1 HEAD -- superdoc CLAUDE.md | grep -c "$SENT")" "0"
+check "lint --range: a range after the leaking commits is clean" "$(lintin $GR --range "HEAD~1..HEAD" 2>&1; echo rc=$?)" "rc=0"
+check "lint --range: a leak in a commit at or before A is old debt, not reported" "$(lintin $GR --range "$c2s..HEAD" 2>&1 | grep -c ': error')" "0"
+# root commit and the empty-tree start
+GT=$T/lgt; gfix $GT
+printf '# T\nroot /home/%s/x\n' $SENT > $GT/superdoc/features/r.md; printf '# P\n' > $GT/CLAUDE.md; (cd $GT && git add -A && git commit -qm root)
+rs=$(cd $GT && git log -1 --format=%h); et=$(cd $GT && git hash-object -t tree /dev/null)
+check "lint --range: the root commit is scanned from the empty tree" "$(lintin $GT --range "$et..HEAD" 2>&1 | grep ': error')" "superdoc/features/r.md:2: error: home path (commit $rs)"
+check "lint --range: ... and from an all-zero start (new branch)" "$(lintin $GT --range "0000000000000000000000000000000000000000..HEAD" 2>&1 | grep -c "(commit $rs)")" "1"
+lintin $GT --range "nosuchrev..HEAD" >/dev/null 2>&1; check "lint --range: an unknown revision is exit 2" "$?" "2"
+check "lint: no leak text from any mode (range, whole tree, --files, --staged)" "$( { lintin $GT --range "$et..HEAD"; lintin $GT; lintin $GT --files superdoc/features/r.md; lintin $GT --staged; } 2>&1 | grep -c "$SENT")" "0"
+# a repo with no superdoc: silent, in every mode
+GN=$T/lgn; gfix $GN; rm -rf $GN/superdoc; printf '# P\nmail a@corp.io /home/x1/y\n' > $GN/CLAUDE.md; (cd $GN && git add -A && git commit -qm n)
+check "lint: a git repo with no superdoc folder and no marker is silent, exit 0, in every mode" "$( { lintin $GN; lintin $GN --staged; lintin $GN --range "HEAD..HEAD"; lintin $GN --files CLAUDE.md; } 2>&1; echo rc=$?)" "rc=0"
+
+# --- git hook environment and linked worktrees ---------------------------------------------------------------
+GH=$T/lgh; gfix $GH; printf '# P\n' > $GH/CLAUDE.md; printf '# T\nclean\n' > $GH/superdoc/features/a.md; (cd $GH && git add -A && git commit -qm base)
+printf '#!/bin/sh\nexec "%s" --staged\n' "$LINT" > $GH/.git/hooks/pre-commit; chmod +x $GH/.git/hooks/pre-commit
+printf '# T\nclean\nleak /home/%s/x\n' $SENT > $GH/superdoc/features/a.md
+out_h=$(cd $GH/sub && git add ../superdoc && git commit -qm leak 2>&1); rc_h=$?
+check "lint as a pre-commit hook (commit run from a subdirectory): blocks the commit, names file:line:kind, prints no value" "$([ $rc_h -ne 0 ] && echo blocked)/$(printf '%s\n' "$out_h" | grep -c '^superdoc/features/a.md:3: error: home path$')/$(printf '%s\n' "$out_h" | grep -c "$SENT")" "blocked/1/0"
+printf '# T\nclean\nleak /home/%s/x <!-- superdoc-lint: allow -->\n' $SENT > $GH/superdoc/features/a.md
+(cd $GH && git add superdoc && git commit -qm ok >/dev/null 2>&1); check "lint as a pre-commit hook: superdoc-lint: allow lets a true false positive through" "$(cd $GH && git log --oneline | wc -l | tr -d ' ')" "2"
+# the hook env set by hand (GIT_DIR, GIT_INDEX_FILE relative to the root)
+printf '# T\nclean\nleak /home/%s/x <!-- superdoc-lint: allow -->\nagain 10.5.5.5\n' $SENT > $GH/superdoc/features/a.md; (cd $GH && git add superdoc)
+check "lint with GIT_DIR/GIT_INDEX_FILE set (relative, as a hook sees them): still finds the staged line" "$(cd $GH && GIT_DIR=.git GIT_INDEX_FILE=.git/index "$LINT" --staged 2>&1 | grep -c '^superdoc/features/a.md:4: error: private IP')" "1"
+(cd $GH && git reset -q && git checkout -q superdoc)
+# linked worktree
+(cd $GH && git worktree add -q $T/lgh-wt -b wt >/dev/null 2>&1)
+printf '# T\nwt 10.6.6.6\n' > $T/lgh-wt/superdoc/features/a.md; (cd $T/lgh-wt && git add superdoc)
+check "lint works from a linked worktree (and its subdirectories): --staged and the whole tree" "$(cd $T/lgh-wt && "$LINT" --staged 2>&1 | grep -c '^superdoc/features/a.md:2: error: private IP')/$(mkdir -p $T/lgh-wt/sub && cd $T/lgh-wt/sub && "$LINT" 2>&1 | grep -c '^superdoc/features/a.md:2: error: private IP')" "1/1"
+check "lint --range works from a linked worktree" "$(cd $T/lgh-wt && git commit -q --no-verify -m wt >/dev/null 2>&1; "$LINT" --range 'HEAD~1..HEAD' 2>&1 | grep -c '(commit ')" "1"
+
+# --- Step 1 and Part 9 reuse lint.sh -------------------------------------------------------------------------
+grep -q 'lint.sh" --doc "\$DOC" --force-load' "$SD" && ok "SKILL Step 1: the force-load report is lint.sh --force-load" || bad "SKILL Step 1: lint.sh call"
+printf '%s' "$SDN" | grep -q 'starting from `lint.sh` output' && ok "SKILL Step 3: audits start from lint.sh output" || bad "SKILL Step 3: lint.sh"
+P9=$(awk '/^## Part 9/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+P8=$(awk '/^## Part 8/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$P9" | grep -q 'Start from `lint.sh` output' && printf '%s' "$P9" | grep -q 'never the value' && printf '%s' "$P9" | grep -q 'superdoc-lint: allow. is skipped: for a true false positive only, never for a real value' && ok "Part 9: starts from lint.sh, never the value, the allow marker is for false positives only" || bad "Part 9: lint.sh bullet"
+printf '%s' "$P8" | grep -q '`lint.sh` run first' && ok "Part 8: gate starts from lint.sh" || bad "Part 8: lint.sh box"
+printf '%s' "$P9" | grep -q 'lint.sh. lists every entry over ~300 characters' && printf '%s' "$P9" | grep -q 'Keep every entry short' && ok "Part 9: the TERMINOLOGY bullet points at lint.sh and keeps the short-entry-rule check" || bad "Part 9: TERMINOLOGY bullet"
+printf '%s' "$P9" | grep -q 'Identity values of this machine' && ok "Part 9: the identity-values pass stays in the playbook (a script cannot know)" || bad "Part 9: identity pass"
+printf '%s' "$P9" | grep -q 'never quoting the value' && ok "Part 9: the never-quote-the-value rule is kept" || bad "Part 9: never quote"
 
 echo "== superdoc workers copy assets via Read/Write, not Bash on a plugin-root path (#5) =="
 ! grep -qF '$(cat .claude/teamlead/.state/plugin-root)' "$PB" && ok "playbook: no worktree-relative plugin-root lookup" || bad "playbook: worker told to cat the state file (missing in a worktree)"

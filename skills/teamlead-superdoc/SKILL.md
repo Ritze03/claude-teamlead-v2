@@ -73,53 +73,14 @@ test -f CLAUDE.md && grep -q 'superdoc:start' CLAUDE.md && echo "CLAUDE.md: wire
 # Installed contract version: the vN on the guarded marker, or "none" (also when CLAUDE.md is absent).
 echo "superdoc marker: $(grep -om1 'superdoc:start v[0-9]*' CLAUDE.md 2>/dev/null | sed 's/.*start //' | grep . || echo none)"
 git check-ignore -q "$DOC" 2>/dev/null && echo "⚠ GITIGNORED — superdoc must be committed or the knowledge dies at the next clone" || echo "git: superdoc is tracked"
-# One @-ref pattern for both loops below, so they cannot drift. A match cannot follow a
-# backtick, so an `@superdoc/...` written inside a code span (prose, not a force-load) is
-# ignored; the sed drops the one character the pattern captures in front of the @.
-REF='(^|[^`])@'"$DOC"'/[^ )`]+'
-refs() { grep -oE "$REF" CLAUDE.md 2>/dev/null | sed 's/^[^@]*@//'; }
-# A glossary is judged by entry length, not file size: sum each "- **" entry (its wrapped
-# lines too) up to the next entry or heading and print entries over ~300 characters.
-LONG='function flush(){if(n>300)print s": "n" chars"} /^- \*\*/{flush();n=0;s=FILENAME":"FNR;on=1} /^#/{flush();n=0;on=0} on{n+=length($0)} END{flush()}'
-# A dangling @-ref loads NOTHING and says nothing about it — the docs look wired
-# while the agent silently gets none of them.
-refs | while read -r f; do
-  test -f "$f" || echo "⚠ CLAUDE.md force-loads $f — that file does not exist"
-done
-# Force-load budget: CLAUDE.md plus every @-ref target sits in context for the whole
-# session, goes out with every request, and every worker carries its own copy.
-# Counted toward the 20 KB total: CLAUDE.md, the glossary, project-owned files. Verbatim
-# installs are listed but not counted (nobody may trim them). The glossary has no 8 KB
-# flag; its entries are checked instead.
-total=0; vtotal=0; flagged=0; longn=0; gloss=0
-for f in CLAUDE.md $(refs | sort -u); do
-  test -f "$f" || continue
-  b=$(wc -c < "$f")
-  case "$f" in
-    */claude-instructions/documentation.md|*/claude-instructions/documentation-version-policy.md)
-      vtotal=$((vtotal + b)); echo "force-loaded: $f ${b}B (verbatim install: listed, not counted, never trimmed)" ;;
-    */meta/TERMINOLOGY.md)
-      total=$((total + b)); gloss=1; echo "force-loaded: $f ${b}B (glossary: judged by entry length, not file size)"
-      ents=$(awk "$LONG" "$f"); longn=$(printf '%s' "$ents" | grep -c .)
-      if [ "$longn" -gt 0 ]; then
-        echo "⚠ $f has $longn entries over ~300 characters (an entry is what the term is plus a link):"
-        printf '%s\n' "$ents" | head -10 | sed 's/^/    /'
-      fi ;;
-    *)
-      total=$((total + b)); echo "force-loaded: $f ${b}B"
-      if [ "$b" -gt 8192 ]; then flagged=$((flagged + 1)); echo "⚠ $f is ${b}B (over 8 KB): force-loaded files are paid for all session"; fi ;;
-  esac
-done
-echo "force-loaded total: ${total}B"
-if [ "$vtotal" -gt 0 ]; then echo "verbatim installs: ${vtotal}B (listed above, not in the total)"; fi
-if [ "$total" -gt 20480 ]; then
-  if [ "$gloss" = 1 ] && [ "$longn" = 0 ] && [ "$flagged" = 0 ]; then
-    echo "note: force-loaded total is ${total}B (over 20 KB) with every glossary entry short: ask whether every term must be known on every task (playbook Part 9)"
-  else echo "⚠ force-loaded total is ${total}B (over 20 KB)"; fi
-fi
+# Force-load size report, dangling @-refs and glossary entry length: one script, never a copy
+# here (its logic lives in lint.sh only). It prints the `force-loaded:` lines, the `⚠`
+# findings and the `note:` below.
+bash "$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/lint.sh" --doc "$DOC" --force-load
 ```
 
-A `⚠` from the size check is a HEALTH-CHECK finding (Step 3), not something to fix now.
+`lint.sh` is also the leak and drift scanner (`lint.sh --doc "$DOC"` for the whole tree; the playbook,
+Part 9, lists its checks). A `⚠` from the size check is a HEALTH-CHECK finding (Step 3), not something to fix now.
 A `note:` (total over 20 KB while every glossary entry is short) is not a `⚠`: the
 repair is the judgement pass in playbook Part 9, never a cut to meet a number.
 
@@ -204,7 +165,9 @@ repo more expensive; send it back.
 
 ## Step 3 — HEALTH-CHECK
 
-Dispatch workers to audit the existing tree against the playbook: missing pages,
+Dispatch workers to audit the existing tree against the playbook, **starting from `lint.sh`
+output** (the brief carries the literal `<plugin-root>/skills/teamlead-superdoc/lint.sh` path;
+its findings are the audit's first items and it never prints a leaked value): missing pages,
 stale content, broken structure, absent Why-notes, unwired CLAUDE.md, and any
 `@`-ref in `CLAUDE.md` pointing at a file that no longer exists, and **force-load
 bloat**: any force-loaded file (`CLAUDE.md` plus every `@`-ref target) over 8 KB, a total
@@ -259,7 +222,7 @@ loses information (playbook Part 10: move to the linked page first).
 admitted it had not; its edits passed only because the lead grepped them. So the brief for
 a privacy repair **carries the rule text itself** (the Privacy paragraph above plus the
 `.claude/local/` rule), not a pointer to it, and the **QC after repair re-runs the Part 9
-privacy scans on the result** (the path/email/IP/token regex and the identity-values pass)
+privacy scans on the result** (`lint.sh`, the token scan and the identity-values pass)
 instead of trusting the worker's report.
 
 ## Why superdoc sits at the root
