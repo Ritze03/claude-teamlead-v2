@@ -14,9 +14,22 @@ playbook substitutes it everywhere). Absent such a request, every brief just say
 That is the agent's knowledge base; `docs/` stays user-facing unless the user said otherwise.
 
 **Privacy: superdoc files are committed and often public.** Every worker brief must say:
-repo-relative paths only, and no personal or system information (usernames, emails,
-hostnames, absolute host paths, secrets, the author's local setup). Playbook Part 4a has
-the full rule; audit mode greps for leaks.
+repo-relative paths only, and write anonymized, like a filed bug report: no personal or
+system information (usernames, real names, emails, hostnames or machine names, the names
+of the user's own client/server machines or network, IPs, MAC addresses, serials, absolute
+host paths, secrets, the author's local setup). Logs and pasted output are the usual source:
+describe them generically. Playbook Part 4a has the full rule; audit mode greps for leaks.
+
+**Superdoc is for agents, not the user.** The user never has to read or touch it, so agents
+clean it up, restructure, trim, move and delete in it on their own judgement, derived from
+the plugin's instructions (this skill and the playbook), and never ask the user what is
+right for the docs or whether they would like a change. Only three things go to the user:
+(1) rewriting git history or force-pushing over a leak that is already committed (destructive,
+never automatic: tell the user the value is in history and whether it was pushed);
+(2) `superdoc/` present with no marker, which is hand-written docs someone else owns
+(confirm before regenerating, Step 1b); (3) facts only the user knows: what a project term
+means (the TERMINOLOGY "ask before acting on an undefined term" rule) and why a design was
+chosen. Everything else about the docs is the agents' call.
 
 **You orchestrate; you do not read, inventory, or write docs yourself.** Every unit
 of real work goes to a worker. Stay inside the target project.
@@ -84,7 +97,7 @@ works locally and the knowledge vanishes for anyone who clones. Un-ignore it bef
 writing a single page.
 
 `superdoc: absent` → **FRESH**. Present → **Step 1b** (automatic upgrade check), then
-**HEALTH-CHECK**, and REPAIR only if asked.
+**HEALTH-CHECK** (audit, then repair, Steps 3 and 4).
 
 ## Step 1b — Upgrade an older install (automatic, no offer, no question)
 
@@ -99,20 +112,24 @@ health check. Compare the snippet's `superdoc marker: vN` with `superdoc: vM` on
   `vM`. Several versions behind: the worker applies each version's step in order (v2 → v3,
   then every later one) and re-stamps the marker to `vM`. An upgrade applies only what
   changed in those versions: existing files are not rebuilt from skeletons, and entries
-  are not rewritten. Then tell the user in **one line** what happened, for example
-  `Upgraded the superdoc contract v2 → v3: added the short-entry rule to TERMINOLOGY.md,
-  re-stamped the marker.` It is never silent. Then run HEALTH-CHECK on the upgraded tree,
+  are not rewritten by the upgrade step itself (the repair phase after the audit trims
+  them, Step 4). Then tell the user in **one line** what happened, for example
+  `Upgraded the superdoc contract v3 → v4: re-installed documentation.md (adds the
+  anonymize rule), re-stamped the marker.` (Several steps: one line naming what each did.) It is never silent. Then run HEALTH-CHECK on the upgraded tree,
   so its findings reflect the new version.
 - **`superdoc/` present with marker `none`** → not an upgrade. That is likely hand-written
-  docs: confirm with the user before regenerating anything (playbook Part 6).
+  docs someone else owns: confirm with the user before regenerating anything (playbook
+  Part 6). This is one of the three things that go to the user.
 
 *Why:* the newest contract is assumed to be the best available, and an offer only leaves
-projects stale. The upgrade is a separate step before the audit, so the audit itself stays
-report-only.
+projects stale. The upgrade is a separate step before the audit, so the audit phase itself
+stays read-only.
 
 ## Step 2 — FRESH setup
 
-Ask the tier, then take one of two paths.
+Decide the path yourself from the repo, never by asking: an empty or near-empty repo (no
+source, no real capabilities) takes 2a, anything with real code takes 2b. If it is borderline,
+take 2a (it only lays a skeleton, and docs accrete from there).
 
 **2a — GROUND-SETUP (empty/greenfield).** No capabilities exist yet, so **do not
 scout or fan capability pages** — writing docs for code that isn't there is exactly
@@ -130,15 +147,18 @@ from now gets documented as it lands.
 **2b — full FRESH (real capabilities). Scout-then-fan.** Dispatch a **Sonnet**
 scout to inventory real capabilities (entry points, modules, features). When it
 returns, **MAP one worker per capability folder**, each scoped to its own folder so
-writes never collide.
+writes never collide. Inside a folder every feature, backend or subsystem gets its own
+page, so a folder holds one page per capability (small single-topic pages; agents read
+only the one they need). A worker never folds a second capability into another's page.
 
 **Tier per capability:** reading/inventory → Sonnet · ordinary doc-writing
 (`features/*.md`, UI pages) → Sonnet · only `superdoc/architecture/overview.md` and
-genuinely architectural rationale → Opus. The feature-page boundary is blurry —
-**ask if unsure** rather than guessing.
+genuinely architectural rationale → Opus. The feature-page boundary is blurry — when
+unsure, **take Opus**: a page that explains a design choice or a trade-off is architectural
+rationale, a page that only describes behaviour is ordinary writing.
 
 Workers emit: `architecture/overview.md` hub, `meta/TERMINOLOGY.md`,
-`ui/STYLING-GUIDE.md` if there's UI, `features/*.md` per real capability with inline
+`ui/STYLING-GUIDE.md` if there's UI, one `features/*.md` per real capability with inline
 **Why:** notes, `claude-instructions/documentation.md` verbatim, `README.md` ToC,
 and dated design-spec docs for big decisions — all under the doc root. Wire a thin
 `CLAUDE.md` via the guarded markers, `@`-force-loading only TERMINOLOGY and
@@ -159,23 +179,41 @@ stale content, broken structure, absent Why-notes, unwired CLAUDE.md, and any
 bloat**: any force-loaded file (`CLAUDE.md` plus every `@`-ref target) over 8 KB, a total
 over 20 KB, or content in them that isn't needed on every task (playbook Part 9 has the
 judgement pass; the verbatim `claude-instructions/` installs count toward the total but
-are never flagged for trimming). **Report findings. Do not fix.** (The audit is report-only; the Step 1b upgrade has
-already run before it.) When it finds bloat,
-offer the cleanup to the user; it then runs as Step 4 REPAIR on the named items, never
-automatically.
+are never flagged for trimming). The audit phase is read-only: its workers write nothing
+(the Step 1b upgrade has already run before it) and report findings, privacy leaks first.
+**Then, in the same run, go straight to Step 4: dispatch the repairs for the findings. No
+offer, no question.** That covers force-load bloat and oversized TERMINOLOGY entries, stale
+claims, broken links and `@`-refs, missing pages, and privacy leaks. When it is done, tell
+the user in a short summary what was fixed, **privacy leaks first**; if a leaked value was
+already committed, say it is in git history and whether it was pushed (that is the user's
+call, Step 4).
+
+*Why:* the user said "agents should know that the superdoc is for THEM, so they are free to
+clean it up and such, without asking the user what is right and wrong to do. They should
+derive that from the instructions of the plugin and their own judgement. Not the users
+liking, since the user should never have to touch it." An audit that stops at a report just
+hands the user chores about files they never read.
 
 **Installed marker older than the playbook's version** at this point means the Step 1b
 upgrade failed: report it as a finding and say why. (For v2 → v3 the upgrade adds the
 short-entry rule to an existing `meta/TERMINOLOGY.md`, and the audit reports entries over
-~300 characters; entries are never rewritten by an upgrade.)
+~300 characters; the upgrade step does not rewrite entries, the repair phase trims them.
+For v3 → v4 it re-installs `claude-instructions/documentation.md`; existing docs are not
+scrubbed by the upgrade, the audit finds leaks and the repair phase fixes them.)
 
-## Step 4 — REPAIR (only on explicit ask)
+## Step 4 — REPAIR (automatic, after the audit)
 
-**Never auto-fix audit findings** (the upgrade in Step 1b is not a repair and is not
-covered by this rule). Only when the user asks, dispatch workers against the named
-items, in place, **per-item tier** (reading → Sonnet, ordinary writing → Sonnet,
-architectural rationale → Opus; ask if unsure). Then run **QC after repair** —
-`tl-sonnet-high` by default, `tl-opus-high` only for architectural repairs.
+Runs right after Step 3's audit, in the same run, without offering or asking. The named
+items are the audit's findings. Dispatch workers against them, in place, **per-item tier**
+(reading → Sonnet, ordinary writing → Sonnet, architectural rationale → Opus; when unsure,
+Opus). Then run **QC after repair** — `tl-sonnet-high` by default, `tl-opus-high` only for
+architectural repairs. Only if the user literally asks for a report only (an audit with no
+changes) do you stop after Step 3.
+
+A leaked value is replaced with a placeholder automatically. **Never rewrite git history or
+force-push**: when a leaked value was already committed, repairing the file does not remove
+it from history, so tell the user that and whether it was pushed, and leave the decision to
+them. Trimming never loses information (playbook Part 10: move to the linked page first).
 
 ## Why superdoc sits at the root
 
