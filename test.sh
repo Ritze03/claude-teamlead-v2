@@ -3050,43 +3050,70 @@ state3=$(python3 -c "import json; print(json.load(open('$T/qc3out'))['state'])")
 check "  row is returned, not overwritten to queued" "$state3" "returned"
 
 qc3rp=$T/qc3race; mkdir -p $qc3rp
-qc3_stop_racer() {
+# Each racer slows board.save by 0.5s (the lock is held across it) and touches
+# the marker file ($1) just before sleeping, so a caller can wait for "this racer
+# holds the board lock" and only then start the other one. That makes the order
+# deterministic; the old version started both at once and the winner was decided
+# by python startup jitter, so the test asserted an order it never controlled.
+qc3_racer() {  # $1 = marker file, $2 = stop | forget
   python3 -c "
-import sys, time
+import sys, time, pathlib
 sys.path.insert(0, '$bd')
 import board
 orig = board.save
 def slow(db, project=None):
+    pathlib.Path('$1').touch()
     time.sleep(0.5)
     orig(db, project)
 board.save = slow
-board.worker_stop('A', '$qc3rp')
+if '$2' == 'stop':
+    board.worker_stop('A', '$qc3rp')
+else:
+    board.forget(['A'], '$qc3rp')
 "
 }
-qc3_forget_racer() {
-  python3 -c "
-import sys, time
-sys.path.insert(0, '$bd')
-import board
-orig = board.save
-def slow(db, project=None):
-    time.sleep(0.5)
-    orig(db, project)
-board.save = slow
-board.forget(['A'], '$qc3rp')
-"
-}
-for i in 1 2 3; do
+qc3_setup() {
   rm -rf $qc3rp; mkdir -p $qc3rp
-  python3 "$B" add --project $qc3rp --task "qc3 race row" --agent tl-sonnet-low --owns "qc3r/$i" >/dev/null  # id 1
+  python3 "$B" add --project $qc3rp --task "qc3 race row" --agent tl-sonnet-low --owns "qc3r/$1" >/dev/null  # id 1
   python3 "$B" update --project $qc3rp --id 1 --state running --worker A >/dev/null
   printf '%s  start     agent=teamlead:tl-sonnet-medium  id=A\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     > $qc3rp/.claude/teamlead/.state/events.log
-  qc3_stop_racer & sp1=$!
-  qc3_forget_racer & sp2=$!
+}
+qc3_row() {
+  python3 -c "import json; d=json.load(open('$qc3rp/.claude/teamlead/.state/board.json')); t=[x for x in d['tasks'] if x['id']==1][0]; print(t['state']+'|'+str(t['notes']))"
+}
+qc3_wait_for() { for _ in $(seq 1 200); do [ -e "$1" ] && return 0; sleep 0.05; done; return 1; }
+QC3_LOST='queued|requeued: worker A lost on restart'
+for i in 1 2 3; do
+  # stop takes the lock first; forget then re-checks under the lock, finds the row returned, requeues nothing
+  qc3_setup "s$i"
+  qc3_racer $qc3rp/m1 stop & sp1=$!
+  qc3_wait_for $qc3rp/m1
+  qc3_racer $qc3rp/m2 forget & sp2=$!
   wait $sp1 $sp2
-  race3=$(python3 -c "import json; d=json.load(open('$qc3rp/.claude/teamlead/.state/board.json')); t=[x for x in d['tasks'] if x['id']==1][0]; print(t['state']+'|'+str(t['notes']))")
-  check "race iteration $i: row 1 is returned with no requeue note (stop wins, precondition re-checked under the lock)" "$race3" "returned|None"
+  check "race iteration $i (stop holds the lock first): row 1 is returned with no requeue note" "$(qc3_row)" "returned|None"
+  # forget takes the lock first and requeues; stop then re-checks under the lock, finds the row queued, leaves it alone
+  qc3_setup "f$i"
+  qc3_racer $qc3rp/m1 forget & sp1=$!
+  qc3_wait_for $qc3rp/m1
+  qc3_racer $qc3rp/m2 stop & sp2=$!
+  wait $sp1 $sp2
+  check "race iteration $i (forget holds the lock first): row 1 is requeued once, stop does not clobber it" "$(qc3_row)" "$QC3_LOST"
+done
+# Unordered race: both start at once. Either order is legal, but the outcome must
+# be exactly one of the two consistent states, never a mix (returned with a requeue
+# note, queued without one, a doubled note).
+for i in 1 2 3; do
+  qc3_setup "u$i"
+  qc3_racer $qc3rp/m1 stop & sp1=$!
+  qc3_racer $qc3rp/m2 forget & sp2=$!
+  wait $sp1 $sp2
+  race3=$(qc3_row)
+  if [ "$race3" = "returned|None" ] || [ "$race3" = "$QC3_LOST" ]; then
+    ok "unordered race iteration $i: one consistent outcome ($race3)"
+  else
+    bad "unordered race iteration $i: mixed or lost state (got $race3)"
+  fi
 done
 
 echo "== QC4: forget's requeue lands on 'blocked', not 'queued', when a blocker is unmerged =="
