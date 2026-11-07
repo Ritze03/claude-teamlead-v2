@@ -1,6 +1,6 @@
 # superdoc playbook — worker knowledge base
 
-`superdoc: v2`
+`superdoc: v3`
 
 This file is the **only** place the superdoc contract version lives. Everything that
 detects FRESH vs HEALTH-CHECK, or offers a version upgrade, compares against the `vN`
@@ -192,10 +192,22 @@ it before acting on it.** Once its meaning is clear, add it to this file. Keep t
 file up to date automatically: whenever the user introduces or clarifies a term, add or
 amend the entry here.
 
+**Keep every entry short: what the term is, and where to read more.** One or two
+sentences, about 200 characters. Details, behaviour, option names, history and rationale
+belong on the linked doc page. If that page doesn't exist and there is more to say, write
+the page; don't grow the entry. When you amend an entry, trim it to this form instead of
+appending. This file stays in context for the whole session.
+
 ## Terms
 
-- **Term** — definition. Link to the doc that shows it in use if useful.
+- **Term** — what it is, in one line. See `superdoc/features/term.md`.
 ```
+
+*Why:* this file is force-loaded: it occupies context for the whole session, goes out
+with every request, and every worker that loads `CLAUDE.md` carries its own copy, while a
+linked page costs nothing until an agent needs it. The rule sits inside the file's own
+standing text because that is the one place every agent adding a term is guaranteed to
+see it. A plain term with nothing more to read needs no link.
 
 Never create this file empty just to have it exist — it earns its place the first time
 a real project-specific term needs defining. **The one exception is GROUND-SETUP** (Part
@@ -372,7 +384,7 @@ page names, the capability folder name from Part 1); the markers and structure b
 stay fixed.
 
 ```markdown
-<!-- superdoc:start v2 -->
+<!-- superdoc:start v3 -->
 ## Docs: read before you touch, update after you change
 
 Full discipline — what to read, when to update, how to record the *why* — lives in the
@@ -414,10 +426,12 @@ The `@`-force-load set is **exactly** `superdoc/meta/TERMINOLOGY.md` plus every 
 every capability page, `STYLING-GUIDE.md`, `README.md`) is a plain on-demand link.
 
 **Why the set is this small.** `@` does not suggest a file, it *pastes* it — the whole
-contents enter context on every turn of every session in this project, whether or not the
-task has anything to do with it. A plain link costs nothing until an agent chooses to read
+contents load at session start (and again after `/clear` or compaction), then sit in
+context for the whole session and go out with every request (mostly at the cached rate),
+whether or not the task has anything to do with it. Every worker that loads `CLAUDE.md`
+carries its own copy. A plain link costs nothing until an agent chooses to read
 it, and an agent that needs `STYLING-GUIDE.md` will find it from the overview. So each `@`
-is a permanent tax levied on every future task, paid to avoid one lookup. It is worth
+is a permanent tax levied on every future session, paid to avoid one lookup. It is worth
 paying only where *not* knowing would make an agent act wrongly on work unrelated to the
 document — which is true of project vocabulary and of the documentation rules themselves,
 and of essentially nothing else.
@@ -448,7 +462,7 @@ The marker lives in exactly **one** place: the opening line of the guarded block
 inside the target repo's `CLAUDE.md` —
 
 ```
-<!-- superdoc:start v2 -->
+<!-- superdoc:start v3 -->
 ```
 
 The `vN` there is the installed contract version. State detection reads it directly:
@@ -456,9 +470,15 @@ The `vN` there is the installed contract version. State detection reads it direc
 installation (HEALTH-CHECK/AUDIT territory); no `superdoc/` and no marker → FRESH; `superdoc/`
 present **without** the marker → likely hand-written docs, confirm before regenerating
 (the dispatcher's Step-1 guard). Version compare
-for an upgrade offer is: installed `vN` on this line vs. the `superdoc: v2` on line 3
+for an upgrade offer is: installed `vN` on this line vs. the `superdoc: v3` on line 3
 of this playbook file — older installed version → offer the upgrade, never silently
-rewrite it. Do not also stamp a marker under `superdoc/` itself; the `CLAUDE.md` line is
+rewrite it. An accepted upgrade re-stamps the marker and applies only what changed
+since the installed version, never a regeneration; existing files are not rebuilt from
+the skeletons. **v2 → v3:** if the project's `meta/TERMINOLOGY.md` lacks the short-entry
+rule (`grep -q 'Keep every entry short'`), insert the rule paragraph from Part 3's
+skeleton into its standing text, right after the "Keep this file up to date" paragraph.
+Then report each entry over ~300 characters (Part 9 command) and leave the entries
+untouched; trimming them is a REPAIR the user asks for (Part 10). Do not also stamp a marker under `superdoc/` itself; the `CLAUDE.md` line is
 the single source of truth for the installed version.
 
 ## Part 7 — Verbatim-install files
@@ -508,6 +528,10 @@ re-check.
       (Part 6).
 - [ ] No personal or system information in any page: no absolute host paths, usernames,
       emails, hostnames, IPs, secrets (Part 4a) — grep for it.
+- [ ] Force-load budget: no force-loaded file (`CLAUDE.md` plus every `@`-ref target) over
+      8 KB, total under 20 KB, and nothing in them that isn't needed on every task (Part 9).
+- [ ] `TERMINOLOGY.md` entries are pointers: none over about 300 characters, details live
+      on the linked pages (the Part 9 command lists offenders).
 
 ## Part 9 — AUDIT (report-only)
 
@@ -527,6 +551,22 @@ instead of creating. **Do not write to any file in this mode.**
 - **Privacy scan (Part 4a):** grep the doc tree and the `CLAUDE.md` docs block for leaks
   and report each hit as a finding (file + line): `grep -rnE '/home/|/Users/|C:\\Users|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|[0-9]{1,3}(\.[0-9]{1,3}){3}|(sk|ghp|xox[bp]|AKIA)[-_A-Za-z0-9]{12,}|(token|secret|api[_-]?key|password)[ :=]+\S{8,}' <doc-root> CLAUDE.md`.
   Hits are candidates; read each and drop false positives (example placeholders are fine).
+- **Force-load budget:** force-loaded = `CLAUDE.md` plus every `@`-ref target in it
+  (TERMINOLOGY plus everything under `claude-instructions/`). It sits in context for the
+  whole session and is resent with every request, in every worker. Report each file's
+  size and the total (`wc -c`; SKILL.md Step 1 prints the same): flag any single file over
+  8 KB and a total over 20 KB (a healthy tree is around 15 KB). Then read each
+  force-loaded file and flag content not needed on every task — reference material,
+  feature detail, history, rationale — and name the linked page it should move to.
+  `documentation.md` and `documentation-version-policy.md` are verbatim installs: they
+  count toward the total but are never flagged for trimming, since the project doesn't own
+  their wording.
+- **TERMINOLOGY.md size** (the specific case of the above): list every entry over ~300
+  characters (the 200 in the skeleton is the guide; 300 is the threshold, so normal
+  entries aren't flagged) as a finding with line and length:
+  `awk '/^- \*\*/ && length($0)>300 {print FILENAME":"FNR": "length($0)" chars"}' <doc-root>/meta/TERMINOLOGY.md`
+  (`length` counts bytes under some awks; treat near-threshold hits as approximate). Also
+  flag the file if it lacks the short-entry rule: `grep -q 'Keep every entry short' <doc-root>/meta/TERMINOLOGY.md`.
 
 Report every finding as a concrete, project-specific item (file + line + what's wrong),
 not a generic checklist recap.
@@ -542,6 +582,12 @@ everything AUDIT found" on your own initiative.
   reflects reality.
 - Stale claim genuinely out of scope to fix right now → leave a single greppable
   `STALE:` marker at the point of the claim instead of silently leaving it wrong.
+- **Trimming a force-loaded file** (an oversized `TERMINOLOGY.md` entry, or bloat in
+  `CLAUDE.md` or a project-owned `claude-instructions/` file): move the detail to a
+  linked doc page first, and never delete information that exists nowhere else. Open the
+  target page and confirm it really holds the content (or add it there, or create the
+  page) *before* you cut the original down to what-it-is plus the link. Never trim the
+  verbatim installs.
 - Re-run the full Part 8 gate after repairing before you report done.
 - Keep edits to shared pages (module-map rows, `README.md` index lines) small and
   append-oriented, so they read as a clean diff against whatever else is touching
