@@ -665,12 +665,7 @@ echo "== superdoc stays at the root, and its @-refs are verified =="
 grep -q 'Do not also copy it into' "$SD" && ok "says not to duplicate into .claude/" || bad "says not to duplicate into .claude/"
 grep -q 'does not exist' "$SD" && ok "  detects a dangling @-ref" || bad "  detects a dangling @-ref"
 grep -q 'no longer exists' "$SD" && ok "  health-check audits @-refs too" || bad "  health-check audits @-refs"
-# the detection snippet itself must work
-sdp=$T/sdref; mkdir -p $sdp/superdoc/meta
-printf '@superdoc/meta/TERMINOLOGY.md and @superdoc/meta/GONE.md\n' > $sdp/CLAUDE.md
-printf 'terms\n' > $sdp/superdoc/meta/TERMINOLOGY.md
-miss=$(cd $sdp && grep -oE '@superdoc/[^ )`]+' CLAUDE.md | sed 's/^@//' | while read -r f; do test -f "$f" || echo "$f"; done)
-check "flags exactly the missing ref" "$miss" "superdoc/meta/GONE.md"
+# (the detection snippet itself is run against fixtures in the force-load budget section)
 
 echo "== superdoc: default folder yields to an explicit user request; privacy rule present =="
 grep -q 'explicitly asks in plain text for another folder' "$SD" && ok "SKILL: an explicit user folder request wins" || bad "SKILL: user folder request"
@@ -706,7 +701,7 @@ printf '%s' "$SKEL" | grep -q 'about 200 characters' && printf '%s' "$SKEL" | gr
 printf '%s' "$SKEL" | grep -qF -- '- **Term** — what it is, in one line. See `superdoc/features/term.md`.' && ok "  skeleton example shows the pointer shape" || bad "  skeleton example line"
 printf '%s' "$SKEL" | grep -q '^\*Why:\*' && ok "  skeleton has its *Why:*" || bad "  skeleton *Why:*"
 grep -q 'entries are pointers: none over about 300 characters' "$PB" && ok "Part 8 gate: entries are pointers" || bad "Part 8 gate: TERMINOLOGY entries bullet"
-grep -q '\*\*TERMINOLOGY.md size\*\* (the specific case' "$PB" && ok "Part 9 audit: oversized-entry bullet" || bad "Part 9 audit: oversized-entry bullet"
+grep -q '\*\*TERMINOLOGY.md entry length\*\* (the specific case' "$PB" && ok "Part 9 audit: oversized-entry bullet" || bad "Part 9 audit: oversized-entry bullet"
 grep -q 'never delete information that exists nowhere else' "$PB" && ok "Part 10: trim moves detail to the page first" || bad "Part 10: trim wording"
 PBN=$(tr '\n' ' ' < "$PB" | sed 's/  */ /g'); SDN=$(tr '\n' ' ' < "$SD" | sed 's/  */ /g')
 printf '%s' "$PBN" | grep -q 'v2 → v3' && printf '%s' "$PBN" | grep -q 'The upgrade step itself rewrites no entries' && printf '%s' "$PBN" | grep -q 'trimmed by the repair phase that follows it' && ok "Part 6: upgrade step rewrites no entries, the repair phase trims them" || bad "Part 6: upgrade sentence"
@@ -813,33 +808,83 @@ printf '%s' "$PRV" | grep -q 'When an entry.s detail has no page yet, it gets it
 printf '%s' "$PRV" | grep -q 'collapses it back into .CLAUDE.md.' && ok "Part 0/9: scaffolding-only superdoc is collapsed by repair, not proposed" || bad "Part 0/9: collapse"
 tdoc=$T/termaudit; mkdir -p $tdoc/meta
 { printf '# Terminology\n\n## Terms\n\n- **Short** — a one-liner. See `superdoc/features/short.md`.\n- **Long** — '; head -c 400 /dev/zero | tr '\0' 'x'; printf '\n'; } > $tdoc/meta/TERMINOLOGY.md
-audit_cmd=$(grep -o "awk '/^- .*TERMINOLOGY.md" "$PB" | head -1 | sed "s#<doc-root>#$tdoc#")
+AUDIT_RAW=$(grep -o "awk 'function flush.*TERMINOLOGY.md" "$PB")
+check "Part 9: the entry-length command is one line in the playbook, run verbatim below" "$(printf '%s\n' "$AUDIT_RAW" | grep -c .)" "1"
+audit_cmd=$(printf '%s\n' "$AUDIT_RAW" | head -1 | sed "s#<doc-root>#$tdoc#")
 hits=$(eval "$audit_cmd")
 check "Part 9 awk flags exactly the long entry" "$(printf '%s\n' "$hits" | sed 's/: [0-9]* chars//' | sed "s#$tdoc/##")" "meta/TERMINOLOGY.md:6"
+# #12: entries hard-wrapped over several lines are summed, not judged by their first line.
+wdoc=$T/termwrap; mkdir -p $wdoc/meta
+{
+  printf '# Terminology\n\nrule text, not an entry\n\n## Terms\n\n'
+  printf -- '- **Wrapped** — first line is short\n'                                    # line 7: wraps to 3 x 130 = ~410
+  for i in 1 2 3; do printf '  %s\n' "$(head -c 130 /dev/zero | tr '\0' 'w')"; done
+  printf -- '- **Tiny** — a short entry. See `superdoc/features/tiny.md`.\n'            # line 11
+  printf -- '- **Small** — short but wrapped\n  %s\n' "$(head -c 80 /dev/zero | tr '\0' 's')"   # line 12: ~120
+  printf -- '- **Cut** — ends at a heading\n'                                           # line 14
+  for i in 1 2 3; do printf '  %s\n' "$(head -c 130 /dev/zero | tr '\0' 'c')"; done
+  printf '\n## More\n\n'
+  printf -- '- **Last** — final entry, no trailing heading\n'                         # last entry of the file
+  for i in 1 2 3; do printf '  %s\n' "$(head -c 130 /dev/zero | tr '\0' 'z')"; done
+} > $wdoc/meta/TERMINOLOGY.md
+whits=$(eval "$(printf '%s\n' "$AUDIT_RAW" | sed "s#<doc-root>#$wdoc#")" | sed "s#$wdoc/##")
+lnum() { grep -n -- "^- \*\*$1" $wdoc/meta/TERMINOLOGY.md | cut -d: -f1; }
+check "Part 9 awk: a wrapped entry is flagged at its start line, summed over its lines; a short wrapped entry is not; an entry before a heading and the last entry of the file are flushed" \
+  "$(printf '%s\n' "$whits" | sed 's/: \([0-9]*\) chars/ \1/' | awk '{split($1,a,":"); printf "%s=%s ", a[2], ($2>390 && $2<470)?"long":"odd:"$2}')" \
+  "$(lnum Wrapped)=long $(lnum Cut)=long $(lnum Last)=long "
 
 echo "== superdoc: force-load budget check (Step 1 snippet, Step 3, Part 8/9/10) =="
 grep -q 'force-load budget' <(tr '[:upper:]' '[:lower:]' < "$PB") && grep -q '^- \*\*Force-load budget:\*\*' "$PB" && ok "Part 9 audit: force-load budget bullet" || bad "Part 9 audit: force-load budget bullet"
-tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'never flagged for trimming' && ok "  verbatim installs counted, never flagged" || bad "  verbatim installs wording"
+tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'never flag them for trimming' && ok "  verbatim installs listed, left out of the total, never flagged" || bad "  verbatim installs wording"
 grep -q '^- \[ \] Force-load budget:' "$PB" && ok "Part 8 gate: force-load budget box" || bad "Part 8 gate: force-load budget box"
 tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'Trimming a force-loaded file.*never delete information that exists nowhere else' && ok "Part 10: move-before-trim covers any force-loaded file" || bad "Part 10: move-before-trim wording"
 tr '\n' ' ' < "$SD" | sed 's/  */ /g' | grep -q 'force-load bloat.*The audit phase is read-only.*That covers force-load bloat and oversized TERMINOLOGY entries' && ok "SKILL Step 3: bloat is audited, then repaired automatically" || bad "SKILL Step 3: bloat wording"
 SNIP=$(awk '/^\*\*Run this with Bash as your first action/{f=1} f&&/^```bash/{g=1;next} g&&/^```/{exit} g' "$SD")
-mkfix() { # dir ; fixtures: CLAUDE.md + superdoc files with given sizes
+mkgloss() { # file entries chars-per-entry: a glossary of "- **Tn** — xxxx" entries (invented content)
+  { printf '# Terminology\n\n## Terms\n\n'
+    for i in $(seq 1 "$2"); do printf -- '- **T%s** — ' "$i"; head -c "$3" /dev/zero | tr '\0' 'x'; printf '\n'; done; } > "$1"
+}
+mkfix() { # dir claude-bytes entries chars-per-entry ; CLAUDE.md + glossary + one project-owned file + the two verbatim installs
   mkdir -p "$1/superdoc/meta" "$1/superdoc/claude-instructions"
   head -c "$2" /dev/zero | tr '\0' 'c' > "$1/CLAUDE.md"
   printf '\n@superdoc/meta/TERMINOLOGY.md\n@superdoc/claude-instructions/changelog.md\n@superdoc/claude-instructions/documentation.md\n@superdoc/claude-instructions/documentation-version-policy.md\n' >> "$1/CLAUDE.md"
-  head -c "$3" /dev/zero | tr '\0' 't' > "$1/superdoc/meta/TERMINOLOGY.md"
+  mkgloss "$1/superdoc/meta/TERMINOLOGY.md" "$3" "$4"
   head -c 5300 /dev/zero | tr '\0' 'l' > "$1/superdoc/claude-instructions/changelog.md"
   head -c 2900 /dev/zero | tr '\0' 'd' > "$1/superdoc/claude-instructions/documentation.md"
   head -c 2300 /dev/zero | tr '\0' 'v' > "$1/superdoc/claude-instructions/documentation-version-policy.md"
 }
-mkfix $T/fl_ok 4200 1000        # healthy shape: ~16 KB total
-mkfix $T/fl_big 4200 51000      # gamescope-ritz shape: TERMINOLOGY 51 KB
-out_ok=$(cd $T/fl_ok && bash -c "$SNIP" 2>&1); out_big=$(cd $T/fl_big && bash -c "$SNIP" 2>&1)
-check "budget: healthy tree prints sizes, no warning" "$(printf '%s\n' "$out_ok" | grep -c '^force-loaded: ')/$(printf '%s\n' "$out_ok" | grep -c '⚠')" "5/0"
-printf '%s\n' "$out_ok" | grep -q '^force-loaded total: 1[0-9]\{4\}B$' && ok "  healthy total is reported" || bad "  healthy total ($(printf '%s\n' "$out_ok" | grep total))"
-check "budget: over-budget tree flags exactly TERMINOLOGY and the total" "$(printf '%s\n' "$out_big" | grep '⚠' | sed 's/ is [0-9]*B.*//;s/ is [0-9]*B.*//;s/ force-loaded total.*/ total/' | tr '\n' '|')" "⚠ superdoc/meta/TERMINOLOGY.md|⚠ total|"
-dang=$T/fl_dang; mkfix $dang 500 1000; rm $dang/superdoc/claude-instructions/documentation.md
+nwarn() { printf '%s\n' "$1" | grep -c '⚠'; }
+mkfix $T/fl_ok 4200 40 110          # healthy: ~5 KB glossary of short entries
+mkfix $T/fl_short 4200 100 110      # ~12 KB glossary of short entries: counted total over 20 KB, no entry long
+mkfix $T/fl_big 4200 100 510        # real-world shape: ~51 KB glossary of long entries
+out_ok=$(cd $T/fl_ok && bash -c "$SNIP" 2>&1); out_short=$(cd $T/fl_short && bash -c "$SNIP" 2>&1); out_big=$(cd $T/fl_big && bash -c "$SNIP" 2>&1)
+check "budget: healthy tree prints its 5 files, no warning, no note" "$(printf '%s\n' "$out_ok" | grep -c '^force-loaded: ')/$(nwarn "$out_ok")/$(printf '%s\n' "$out_ok" | grep -c '^note:')" "5/0/0"
+want_ok=$(cat $T/fl_ok/CLAUDE.md $T/fl_ok/superdoc/meta/TERMINOLOGY.md $T/fl_ok/superdoc/claude-instructions/changelog.md | wc -c)
+check "budget: the total counts CLAUDE.md, the glossary and project files, and leaves the verbatim installs out" "$(printf '%s\n' "$out_ok" | grep '^force-loaded total: ')" "force-loaded total: ${want_ok}B"
+check "  verbatim installs are listed, marked as such, with their own sum" "$(printf '%s\n' "$out_ok" | grep -c 'verbatim install: listed, not counted')/$(printf '%s\n' "$out_ok" | grep '^verbatim installs: ')" "2/verbatim installs: 5200B (listed above, not in the total)"
+printf '%s\n' "$out_ok" | grep -q 'superdoc/meta/TERMINOLOGY.md [0-9]*B (glossary: judged by entry length' && ok "  the glossary is labelled as judged by entry length" || bad "  glossary label"
+check "budget: a 12 KB glossary of short entries gets no file-size warning" "$([ "$(wc -c < $T/fl_short/superdoc/meta/TERMINOLOGY.md)" -gt 8192 ] && echo over8k)/$(printf '%s\n' "$out_short" | grep -c '⚠.*over 8 KB')" "over8k/0"
+check "budget: total over 20 KB with every entry short is a note, not a warning" "$(nwarn "$out_short")/$(printf '%s\n' "$out_short" | grep -c '^note: force-loaded total is .*over 20 KB')" "0/1"
+check "budget: a 51 KB glossary of long entries warns once on its entries, with the count (not on file size)" "$(printf '%s\n' "$out_big" | grep '⚠' | grep -v 'force-loaded total' | sed 's/ (an entry.*//;s#superdoc/meta/TERMINOLOGY.md#TERM#')" "⚠ TERM has 100 entries over ~300 characters"
+printf '%s\n' "$out_big" | grep -q '^    .*TERMINOLOGY.md:5: 5[0-9][0-9] chars$' && ok "  and lists the entries with line and length" || bad "  entry listing ($(printf '%s\n' "$out_big" | sed -n 1,12p))"
+check "  and the total is flagged too (entries are long, so it is a finding)" "$(printf '%s\n' "$out_big" | grep -c '^⚠ force-loaded total is .*over 20 KB')/$(printf '%s\n' "$out_big" | grep -c '^note:')" "1/0"
+# #11: an @-ref inside a code span is prose, not a force-load; real refs are still found, and
+# the size loop uses the same pattern as the dangling-ref loop.
+btk=$T/fl_bt; mkdir -p $btk/superdoc/meta
+head -c 30000 /dev/zero | tr '\0' 'n' > $btk/superdoc/meta/BIG.md
+{ printf 'See `@superdoc/meta/NOPE.md` and `@superdoc/meta/BIG.md` for the loading rule.\n'
+  printf '@superdoc/meta/START.md\n'
+  printf 'read @superdoc/meta/AFTERSPACE.md now\n'
+  printf '(@superdoc/meta/PAREN.md)\n'
+  printf 'in a span `@superdoc/meta/NOPE.md` and then @superdoc/meta/MIXED.md\n'
+  printf '@superdoc/meta/GONE.md\n'; } > $btk/CLAUDE.md
+out_bt=$(cd $btk && bash -c "$SNIP" 2>&1)
+check "refs: backticked @-refs give no warning; real refs at line start, after a space, in parens and after a span all do" \
+  "$(printf '%s\n' "$out_bt" | grep -o 'force-loads [^ ]*' | sed 's#force-loads superdoc/meta/##' | sort | tr '\n' ' ')" "AFTERSPACE.md GONE.md MIXED.md PAREN.md START.md "
+check "refs: a backticked ref to an existing file is not force-loaded in the size report either" "$(printf '%s\n' "$out_bt" | grep -c 'BIG.md')" "0"
+printf 'x @superdoc/meta/a.md\n' > $btk/CLAUDE.md
+check "refs: the capture group leaves a clean path (a real ref after a space is checked as superdoc/meta/a.md)" "$(cd $btk && bash -c "$SNIP" 2>&1 | grep -o 'force-loads [^ ]*')" "force-loads superdoc/meta/a.md"
+dang=$T/fl_dang; mkfix $dang 500 10 100; rm $dang/superdoc/claude-instructions/documentation.md
 out_d=$(cd $dang && bash -c "$SNIP" 2>&1); rc=$?
 check "budget: dangling ref does not crash the snippet" "$rc" "0"
 printf '%s\n' "$out_d" | grep -q 'force-loads superdoc/claude-instructions/documentation.md — that file does not exist' && printf '%s\n' "$out_d" | grep -q '^force-loaded total: ' && ok "  dangling ref flagged, total still printed" || bad "  dangling ref output ($out_d)"
@@ -850,6 +895,34 @@ mkdir -p $T/fl_none; out_n=$(cd $T/fl_none && bash -c "$SNIP" 2>&1); rc=$?
 check "budget: absent CLAUDE.md does not crash" "$rc/$(printf '%s\n' "$out_n" | grep -c '⚠')" "0/0"
 printf '%s\n' "$out_n" | grep -q '^superdoc marker: none$' && ok "marker line: absent CLAUDE.md prints none" || bad "marker line: absent CLAUDE.md"
 printf '%s\n' "$out_n" | grep -q '^force-loaded total: 0B$' && ok "  absent CLAUDE.md totals 0B" || bad "  absent CLAUDE.md total ($out_n)"
+
+echo "== superdoc: glossary judged by entry length, wording kept consistent (#13) =="
+P9=$(awk '/^## Part 9/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+P8=$(awk '/^## Part 8/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+P10=$(awk '/^## Part 10/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$P9" | grep -q 'except `TERMINOLOGY.md` (judged by entry length' && printf '%s' "$P9" | grep -q 'leave them out of the total' && printf '%s' "$P9" | grep -q 'list them in the size report, marked as such' && ok "Part 9: TERMINOLOGY exempt from the 8 KB flag; verbatim installs listed, not counted" || bad "Part 9: accounting wording"
+printf '%s' "$P9" | grep -q 'a healthy tree counts around 10 KB' && ! printf '%s' "$P9$P8$SDN" | grep -q 'around 15 KB' && ok "Part 9: healthy figure matches the new counting (10 KB), the old 15 KB is gone" || bad "Part 9: healthy figure"
+printf '%s' "$P9" | grep -q 'Ask yourself, not the user, whether every term has to be known on every task' && printf '%s' "$P9" | grep -q "moves to that feature's page, which is a repair you make yourself" && printf '%s' "$P9" | grep -q 'Never delete a term just to meet a number' && printf '%s' "$P9" | grep -q 'never split the file into a core list and a linked list' && printf '%s' "$P9" | grep -q 'only works if the force-loaded list is complete' && ok "Part 9: the every-entry-short note (agents decide; never delete; never core/linked split)" || bad "Part 9: note wording"
+printf '%s' "$P10" | grep -q 'Never delete a term just to meet a number, and never split the glossary into a core list and a linked list' && ok "Part 10: states both prohibitions too" || bad "Part 10: prohibitions"
+printf '%s' "$P8" | grep -q 'except `TERMINOLOGY.md`' && printf '%s' "$P8" | grep -q 'wrapped lines counted' && printf '%s' "$P8" | grep -q 'The file has no size limit of its own' && ok "Part 8: gate boxes agree (glossary by entry length, wrapped lines counted)" || bad "Part 8: gate boxes"
+SD3=$(awk '/^## Step 3/{f=1;next} /^## /{f=0} f' "$SD" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$SD3" | grep -q 'is judged by entry length' && printf '%s' "$SD3" | grep -q 'left out of the 20 KB total' && printf '%s' "$SD3" | grep -q 'every glossary entry short is a note, not a `⚠`' && ok "SKILL Step 3: same accounting" || bad "SKILL Step 3: accounting wording"
+printf '%s' "$SDN" | grep -q 'A `note:` (total over 20 KB while every glossary entry is short) is not a `⚠`' && ok "SKILL Step 1: explains the note" || bad "SKILL Step 1: note explanation"
+check "SKILL Step 1: one @-ref pattern (REF) shared by both loops, no inline copy of the regex" "$(printf '%s\n' "$SNIP" | grep -c "^REF=")/$(printf '%s\n' "$SNIP" | grep -c "grep -oE")" "1/1"
+check "SKILL Step 1: the entry-length awk is defined once (LONG) and the playbook's command is the same text" "$(printf '%s\n' "$SNIP" | grep -c "^LONG=")/$(printf '%s' "$AUDIT_RAW" | sed "s/^awk '//; s/' <doc-root>.*//")" "1/$(printf '%s\n' "$SNIP" | sed -n "s/^LONG='\(.*\)'$/\1/p")"
+
+echo "== superdoc: everyday rules reach agents, local details have a home (#14, #15) =="
+check "documentation.md: 'Renamed / moved / removed' line absorbs the grep-the-docs rule (no extra line)" "$(printf '%s' "$DOCN" | grep -c 'Renamed / moved / removed.*grep the docs for the old name in the same commit')" "1"
+printf '%s' "$DOCN" | grep -q 'by symbol (`file:symbol`), not line number; line numbers go stale' && ok "documentation.md: reference code by symbol, not line number" || bad "documentation.md: symbol rule"
+printf '%s' "$DOCN" | grep -q '`.claude/local/` (git-ignored: add it to `.gitignore` first' && printf '%s' "$DOCN" | grep -q 'refer to it generically; secrets go nowhere in the repo' && ok "documentation.md: local details go to .claude/local/, ignored, referred to generically" || bad "documentation.md: local home"
+[ "$(wc -c < "$DOCM")" -lt 6144 ] && ok "  documentation.md still under 6 KB after the additions ($(wc -c < "$DOCM")B)" || bad "  documentation.md over 6 KB"
+P4A=$(awk '/^### Part 4a/{f=1;next} /^## /{f=0} f' "$PB" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$P4A" | grep -q 'Local details have a home: `.claude/local/`' && printf '%s' "$P4A" | grep -q "add \`.claude/local/\` to the repo's \`.gitignore\`" && printf '%s' "$P4A" | grep -q 'git check-ignore -q .claude/local/x' && printf '%s' "$P4A" | grep -q "main checkout's absolute\*\* \`.claude/local/\` path in the repair row's \`owns\`" && printf '%s' "$P4A" | grep -q 'Reports never carry the values' && ok "Part 4a: .claude/local/ home, how it is ignored, per-checkout caveat via absolute owns, reports without values" || bad "Part 4a: local home wording"
+printf '%s' "$P10" | grep -q 'Move before you replace' && printf '%s' "$P10" | grep -q 'first goes to `.claude/local/<topic>.md`' && printf '%s' "$P10" | grep -q 'A \*\*secret\*\* (token, password, key, `.env` value) is never copied anywhere: remove it' && ok "Part 10: useful local value moves to .claude/local/ before the placeholder; secrets are removed" || bad "Part 10: move-before-replace"
+printf '%s' "$P10" | grep -q 'whether the repo is public (`gh repo view --json visibility`' && printf '%s' "$P10" | grep -q 'any exposed credential must be rotated first, because a history rewrite does not undo exposure' && printf '%s' "$P10" | grep -q 'Rewriting history or force-pushing is the user.s decision, never done automatically' && ok "Part 10: leak step (history, public or not, rotate credentials first, rewrite stays the user's call)" || bad "Part 10: leak step"
+S4=$(awk '/^## Step 4/{f=1;next} /^## /{f=0} f' "$SD" | tr '\n' ' ' | sed 's/  */ /g')
+printf '%s' "$S4" | grep -q "after anything useful in it has moved to \`.claude/local/\`" && printf '%s' "$S4" | grep -q "main checkout's absolute\*\* \`.claude/local/\` path, so put that path in the repair row's \`owns\`" && printf '%s' "$S4" | grep -q 'whether the repo is public' && printf '%s' "$S4" | grep -q 'any exposed credential must be rotated first' && printf '%s' "$S4" | grep -q 'the decision stays with them' && ok "SKILL Step 4: .claude/local/ via the main checkout's absolute owns; public/rotate/history report" || bad "SKILL Step 4: leak and local wording"
+printf '%s' "$S4" | grep -q 'Do not trust "read Part 4a"\.' && printf '%s' "$S4" | grep -q 'carries the rule text itself\*\*' && printf '%s' "$S4" | grep -q 're-runs the Part 9 privacy scans on the result' && printf '%s' "$S4" | grep -q 'the identity-values pass' && ok "SKILL Step 4: privacy-repair brief carries the rule text; QC re-runs the Part 9 scans" || bad "SKILL Step 4: brief carries rule / QC rescans"
 
 echo "== superdoc workers copy assets via Read/Write, not Bash on a plugin-root path (#5) =="
 ! grep -qF '$(cat .claude/teamlead/.state/plugin-root)' "$PB" && ok "playbook: no worktree-relative plugin-root lookup" || bad "playbook: worker told to cat the state file (missing in a worktree)"
