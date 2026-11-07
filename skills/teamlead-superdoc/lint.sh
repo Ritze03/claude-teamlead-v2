@@ -8,11 +8,14 @@
 #   lint.sh [--doc DIR] --push REF REMOTE  same, for the commits of REF no remote-tracking ref of
 #                                        REMOTE has (a push of a new branch: old debt is not scanned)
 #   lint.sh [--doc DIR] --force-load     the force-load report (SKILL.md Step 1)
+#   lint.sh [--doc DIR] --print-doc-root print the doc root folder (what the hooks pre-filter by)
 #
 # Findings print as `path:line: error|warn: <kind>`. A leaked value is NEVER printed, in any
 # mode: no source line, no match text, only file, line and kind. Exit 0 = no errors
 # (warnings allowed), 1 = at least one error, 2 = usage error. No doc root and no superdoc
-# marker: exit 0 silently (hooks call this in every repo).
+# marker: exit 0 silently (hooks call this in every repo). --staged, --range and --push also exit 0
+# silently unless CLAUDE.md carries `superdoc:start` (an unmarked superdoc/ is someone else's
+# docs and never blocks; the native git hook stubs outlive an unwiring). An explicit --doc runs.
 #
 # The scanned set is the doc tree plus CLAUDE.md, text files only. A line containing
 # `superdoc-lint: allow` is skipped (for true false positives only, never for a real value).
@@ -24,13 +27,16 @@ set -u
 ALLOW_HOME_NAMES="user you username name yourname your-name your_name youruser your-user your_username myuser me foo bar example alice bob someone runner node vscode ubuntu builder circleci shared public guest default all"
 ALLOW_HOME_FIRST_CHAR='<$%{[~*'      # a name starting with one of these is a placeholder
 ALLOW_EMAIL_DOMAINS="example.com example.org example.net"   # and every subdomain of them
+ALLOW_EMAIL_PLACEHOLDER_DOMAINS="test.com domain.com email.com company.com acme.com yourcompany.com mycompany.com yourdomain.com foo.com bar.com foo.bar bar.baz host.tld"   # exactly these (no subdomains); also any domain whose first label is one letter (a@b.com)
 ALLOW_EMAIL_TLDS="example invalid test localhost"            # *.example *.invalid *.test *.localhost
 ALLOW_EMAIL_LOCAL_HAS="noreply no-reply no_reply donotreply do-not-reply"   # noreply addresses
 ALLOW_EMAIL_SSH_USER="git"           # git@host:path and git@host/path SSH remotes
-ALLOW_IPS="1.2.3.4 1.1.1.1 8.8.8.8 8.8.4.4 9.9.9.9"          # textbook placeholders, public resolvers
+ALLOW_IPS="1.2.3.4 1.1.1.1 8.8.8.8 8.8.4.4 9.9.9.9 169.254.169.254 172.17.0.1 10.0.2.2"   # textbook placeholders, public resolvers, cloud metadata, Docker bridge, QEMU user net
+# (An IP ending .0 followed by /N is a network block, never reported: 10.0.1.0/24. A host address
+#  with a suffix, 192.168.1.5/24, is still an error, and so is a private host IP on its own.)
 ALLOW_IP_PREFIXES="192.0.2. 198.51.100. 203.0.113."          # documentation ranges
 ALLOW_CIDRS="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10"   # the ranges themselves
-ALLOW_HOST_PATH_NAMES="homebrew local c d"                    # /opt/homebrew, /opt/local, WSL /mnt/c
+ALLOW_HOST_PATH_NAMES="homebrew local c d"                    # /opt/homebrew, /opt/local, WSL /mnt/c (a /mnt/<drive>/Users/<name> home is still an error)
 # Not an email when the "TLD" is a file extension (icon@2x.png, pkg@next.js):
 DENY_EMAIL_TLDS="png jpg jpeg gif svg webp avif ico bmp tiff pdf zip tar gz tgz bz2 xz 7z txt log lock map bin exe dll so dylib wasm woff woff2 ttf otf eot mp3 mp4 mov webm csv xml ini cfg conf env js jsx ts tsx mjs cjs json md css scss html htm py rs go sh rb php java kt c h cc cpp hpp cs yml yaml toml sql vue"
 # Extensions that make `file.ext:123` a line reference:
@@ -109,13 +115,14 @@ forceload() {
 
 usage() {
   cat <<'EOF'
-usage: lint.sh [--doc DIR] [--files F... | --staged | --range A..B | --push REF REMOTE | --force-load]
+usage: lint.sh [--doc DIR] [--files F... | --staged | --range A..B | --push REF REMOTE | --force-load | --print-doc-root]
   (no mode)      whole tree, all checks
   --files F...   all checks, report only findings in the given files
   --staged       leak checks on lines added in the index
   --range A..B   leak checks on lines added by each commit in A..B
   --push REF REMOTE  the same for commits of REF that REMOTE's tracking refs lack (new-branch push)
   --force-load   the force-load size report
+  --print-doc-root  print the doc root folder (nothing when there is none)
 exit: 0 no errors, 1 errors found, 2 usage error
 EOF
 }
@@ -123,7 +130,7 @@ usage_err() { printf 'superdoc-lint: %s\n' "$1" >&2; usage >&2; exit 2; }
 
 # ---- arguments ------------------------------------------------------------------------------------
 MODE=all; DOC=""; DOC_GIVEN=0; RANGE=""; FILES_IN=""; PUSH_REF=""; PUSH_REMOTE=""
-setmode() { [ "$MODE" = all ] || usage_err "only one of --files, --staged, --range, --push, --force-load"; MODE=$1; }
+setmode() { [ "$MODE" = all ] || usage_err "only one of --files, --staged, --range, --push, --force-load, --print-doc-root"; MODE=$1; }
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help) usage; exit 0 ;;
@@ -131,6 +138,7 @@ while [ $# -gt 0 ]; do
     --doc=*) DOC=${1#--doc=}; DOC_GIVEN=1; shift ;;
     --staged) setmode staged; shift ;;
     --force-load) setmode force-load; shift ;;
+    --print-doc-root) setmode print-doc-root; shift ;;
     --range) [ $# -ge 2 ] || usage_err "--range needs A..B"; setmode range; RANGE=$2; shift 2 ;;
     --range=*) setmode range; RANGE=${1#--range=}; shift ;;
     --push) [ $# -ge 3 ] || usage_err "--push needs REF and REMOTE"; setmode push; PUSH_REF=$2; PUSH_REMOTE=$3; shift 3 ;;
@@ -174,6 +182,13 @@ else
 fi
 ROOT=$(pwd -P)
 
+# ---- wired projects only for the commit-time modes ------------------------------------------------------
+# The native hook stubs stay in .git/hooks after a project is unwired (or when an older branch has
+# hand-written docs), and an unmarked superdoc/ is never ours to block. An explicit --doc still runs.
+case $MODE in
+  staged|range|push) [ "$DOC_GIVEN" = 1 ] || grep -q 'superdoc:start' CLAUDE.md 2>/dev/null || exit 0 ;;
+esac
+
 # ---- doc root ----------------------------------------------------------------------------------------
 if [ -z "$DOC" ]; then
   if [ -d superdoc ]; then DOC=superdoc
@@ -195,6 +210,7 @@ while :; do case $DOC in ./*) DOC=${DOC#./} ;; */) DOC=${DOC%/} ;; *) break ;; e
 REF='(^|[^`])@'"$DOC"'/[^ )`]+'
 
 if [ "$MODE" = force-load ]; then forceload report; exit 0; fi
+if [ "$MODE" = print-doc-root ]; then printf '%s\n' "$DOC"; exit 0; fi
 
 # ---- the leak scanner (one awk, reads files or tab-separated records) -----------------------------------
 # Record input (--staged/--range): path TAB line TAB commit TAB text. File input: FILENAME/FNR.
@@ -202,7 +218,7 @@ if [ "$MODE" = force-load ]; then forceload report; exit 0; fi
 IFS= read -r -d '' LEAK_AWK <<'AWK'
 function setof(str, arr,    n, t, i) { n = split(str, t, " "); for (i = 1; i <= n; i++) arr[tolower(t[i])] = 1 }
 BEGIN {
-  setof(ALLOW_HOME_NAMES, HOMEOK); setof(ALLOW_EMAIL_DOMAINS, EDOM); setof(ALLOW_EMAIL_TLDS, ETLD)
+  setof(ALLOW_HOME_NAMES, HOMEOK); setof(ALLOW_EMAIL_DOMAINS, EDOM); setof(ALLOW_EMAIL_PLACEHOLDER_DOMAINS, EPDOM); setof(ALLOW_EMAIL_TLDS, ETLD)
   setof(ALLOW_EMAIL_LOCAL_HAS, ELOC); setof(ALLOW_IPS, IPOK); setof(ALLOW_IP_PREFIXES, IPPFX)
   setof(ALLOW_CIDRS, CIDROK); setof(ALLOW_HOST_PATH_NAMES, OPTOK); setof(DENY_EMAIL_TLDS, EXTDENY)
   n = split(LINEREF_EXTS, t, " "); alt = ""
@@ -227,14 +243,16 @@ function placeholder_home(name,    l, f) {
 # /home/<name>/ and /Users/<name>/ ; the char before the leading slash must not be a path char
 # (so `example.com/home/x/` and `a/home/x/` are not host paths). A bare /home/<name> with no
 # trailing slash (`cd /home/name`) counts too: same allowlist, same exclusions.
-function unixhome(s, root,    rest, seg, nm, re) {
+# root is a regex for the folder (home, Users, mnt/[A-Za-z]/[Uu]sers for a WSL home) and ncomp its
+# number of path components, so the name is the component after them.
+function unixhome(s, root, ncomp,    rest, seg, nm, re, parts) {
   rest = s
   re = "(^|[^A-Za-z0-9._~%+/-])/" root "/[A-Za-z0-9_-][A-Za-z0-9._-]*"
   while (match(rest, re)) {
     seg = substr(rest, RSTART, RLENGTH)
     rest = substr(rest, RSTART + RLENGTH)
     sub(/^[^\/]/, "", seg)
-    nm = substr(seg, length(root) + 3)
+    split(seg, parts, "/"); nm = parts[ncomp + 2]
     if (placeholder_home(nm)) continue
     sub(/\.+$/, "", nm)                         # "/home/name." at the end of a sentence
     if (nm != "" && !placeholder_home(nm)) { emit("error", "home path"); return }
@@ -245,7 +263,7 @@ function unixhome(s, root,    rest, seg, nm, re) {
     seg = substr(rest, RSTART, RLENGTH)
     rest = substr(rest, RSTART + RLENGTH - 1)
     sub(/^[^\/]/, "", seg)
-    nm = substr(seg, length(root) + 3); nm = substr(nm, 1, length(nm) - 1)
+    split(seg, parts, "/"); nm = parts[ncomp + 2]
     if (!placeholder_home(nm)) { emit("error", "home path"); return }
   }
 }
@@ -279,6 +297,8 @@ function emails(s,    rest, acc, seg, pre, post, tokpre, after, at, loc, dom, n,
     if (tld in EXTDENY) continue                 # file extension, not a TLD
     ld = tolower(dom); ll = tolower(loc); ok = 0
     if (ld in EDOM) ok = 1
+    if (ld in EPDOM) ok = 1
+    if (length(first) == 1) ok = 1               # a@b.com: a one-letter first label is a placeholder
     for (k in EDOM) if (length(ld) > length(k) && substr(ld, length(ld) - length(k)) == "." k) ok = 1
     if (tld in ETLD) ok = 1
     if (index(ld, "noreply")) ok = 1
@@ -305,7 +325,10 @@ function ips(s,    rest, acc, tok, pre, post, post2, postrest, lb, n, p, i, bad,
     bad = 0
     for (i = 1; i <= 4; i++) if (length(p[i]) > 3 || p[i] + 0 > 255 || (length(p[i]) > 1 && substr(p[i], 1, 1) == "0")) bad = 1
     if (bad) continue                            # 999.1.1.1
-    if (post == "/" && match(postrest, /^\/[0-9]+/)) { cand = tok substr(postrest, 1, RLENGTH); if (cand in CIDROK) continue }
+    if (post == "/" && match(postrest, /^\/[0-9]+/)) {
+      cand = tok substr(postrest, 1, RLENGTH); if (cand in CIDROK) continue
+      if (p[4] + 0 == 0 && substr(postrest, 2, RLENGTH - 1) + 0 <= 32 && substr(postrest, RLENGTH + 1, 1) !~ /[0-9A-Za-z_]/) continue   # 10.0.1.0/24: a network block, not a host
+    }
     if (tok in IPOK) continue
     a = p[1] + 0; b = p[2] + 0
     if (a == 0 || a == 127 || a >= 224) continue # 0.0.0.0, loopback, multicast/broadcast
@@ -335,7 +358,7 @@ function hostpaths(s,    rest, seg, nm, re) {
   if (T !~ /[0-9@\/\\]/) next
   split("", S)
   U = T; gsub(/file:\/\//, " ", U)
-  unixhome(U, "home"); unixhome(U, "Users"); winhome(T)
+  unixhome(U, "home", 1); unixhome(U, "Users", 1); unixhome(U, "mnt/[A-Za-z]/[Uu]sers", 3); winhome(T)
   emails(T); ips(T); hostpaths(U)
   if (LINEREF && index(P, ARCH) == 1 && match(T, LREGEX)) emit("warn", "line reference")
 }
@@ -343,7 +366,7 @@ AWK
 
 AWKV=(-v "DOC=$DOC"
   -v "ALLOW_HOME_NAMES=$ALLOW_HOME_NAMES" -v "ALLOW_HOME_FIRST_CHAR=$ALLOW_HOME_FIRST_CHAR"
-  -v "ALLOW_EMAIL_DOMAINS=$ALLOW_EMAIL_DOMAINS" -v "ALLOW_EMAIL_TLDS=$ALLOW_EMAIL_TLDS"
+  -v "ALLOW_EMAIL_DOMAINS=$ALLOW_EMAIL_DOMAINS" -v "ALLOW_EMAIL_PLACEHOLDER_DOMAINS=$ALLOW_EMAIL_PLACEHOLDER_DOMAINS" -v "ALLOW_EMAIL_TLDS=$ALLOW_EMAIL_TLDS"
   -v "ALLOW_EMAIL_LOCAL_HAS=$ALLOW_EMAIL_LOCAL_HAS" -v "ALLOW_EMAIL_SSH_USER=$ALLOW_EMAIL_SSH_USER"
   -v "ALLOW_IPS=$ALLOW_IPS" -v "ALLOW_IP_PREFIXES=$ALLOW_IP_PREFIXES" -v "ALLOW_CIDRS=$ALLOW_CIDRS"
   -v "ALLOW_HOST_PATH_NAMES=$ALLOW_HOST_PATH_NAMES" -v "DENY_EMAIL_TLDS=$DENY_EMAIL_TLDS"
@@ -442,13 +465,27 @@ EOF
     fi
     if [ -f "$DOC/README.md" ] && [ -n "$LIST" ]; then
       RECORDS="$RECORDS"$'\n'$(printf '%s\n' "$LIST" | awk -v doc="$DOC/" -v readme="$DOC/README.md" '
-        BEGIN { while ((getline l < readme) > 0) txt = txt "\n" l; close(readme); hasci = index(txt, "claude-instructions/") > 0 }
+        # README text by path, read once. A page counts as listed in <doc>/README.md (by its path
+        # under the doc root) or in any README of its own directory chain (by its path under that
+        # directory, or its full path under the doc root).
+        function rtext(f,    l, t) {
+          if (!(f in RDTXT)) { t = ""; while ((getline l < f) > 0) t = t "\n" l; close(f); RDTXT[f] = t }
+          return RDTXT[f]
+        }
+        BEGIN { txt = rtext(readme); hasci = index(txt, "claude-instructions/") > 0 }
         index($0, doc) == 1 && /\.md$/ {
           rel = substr($0, length(doc) + 1)
           if (rel ~ /(^|\/)README\.md$/) next
           if (index(rel, "brainstorm/") == 1) next
           if (index(rel, "claude-instructions/") == 1 && !hasci) next
-          if (index(txt, rel) == 0) printf "warn\t%s\t1\tpage not listed in %sREADME.md\t\n", $0, doc
+          if (index(txt, rel) > 0) next
+          n = split(rel, seg, "/"); dir = ""
+          for (i = 1; i < n; i++) {
+            dir = dir seg[i] "/"
+            t = rtext(doc dir "README.md")
+            if (t != "" && (index(t, substr(rel, length(dir) + 1)) > 0 || index(t, rel) > 0)) next
+          }
+          printf "warn\t%s\t1\tpage not listed in %sREADME.md\t\n", $0, doc
         }')
     fi ;;
 esac

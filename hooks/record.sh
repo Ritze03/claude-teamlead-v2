@@ -49,7 +49,7 @@ tl_stale_base_note() {
   sbgit rev-parse --verify --quiet 'refs/remotes/origin/HEAD^{commit}' >/dev/null || return 0
   sbgit merge-base --is-ancestor "$head" refs/remotes/origin/HEAD && return 0
   msg="The lead's checkout has commits origin lacks, so a fresh worktree may start on a stale base. Before anything else run: git merge-base --is-ancestor $head HEAD || git merge --ff-only $head
-If that cannot fast-forward, stop and report it to the lead instead of working."
+If that cannot fast-forward in a fresh worktree (no commits of its own yet), stop and report it to the lead instead of working. A worker that already has its own commits on its branch skips the command and carries on: the lead checks behind-main when it returns."
   jq -n --arg c "$msg" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$c}}' || true
 }
 

@@ -982,6 +982,13 @@ fpc "the RFC ranges themselves" "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254
 fpc "superdoc-lint: allow skips a line" "/home/$SENT/x 10.9.9.9 a@corp.io <!-- superdoc-lint: allow -->"
 fpc "/opt/homebrew and WSL /mnt/c" "/opt/homebrew/bin /mnt/c/x"
 fpc "textbook placeholder public IPs" "1.1.1.1 8.8.8.8 1.2.3.4"
+fpc "the QC repro: metadata IP and a@b.com" "ping 169.254.169.254, mail a@b.com"
+fpc "placeholder email domains" "a@test.com b@domain.com c@email.com d@company.com e@acme.com f@yourcompany.com g@mycompany.com h@yourdomain.com i@foo.com j@bar.com k@foo.bar l@bar.baz m@host.tld"
+fpc "a one-letter first label is a placeholder domain" "x@y.io and a@b.co.uk"
+fpc "cloud metadata, Docker bridge, QEMU user net" "169.254.169.254 172.17.0.1 10.0.2.2"
+fpc "network-address CIDR blocks" "10.0.0.0/16 172.17.0.0/16 10.0.1.0/24 192.168.4.0/24 (10.0.0.0/8)."
+fpc "WSL placeholders: Public, <name>, you, a plain drive path" '/mnt/c/Users/Public/x /mnt/c/Users/<name>/x /mnt/c/Users/you/x /mnt/c/Windows/x'
+check "lint WSL home: the value is never printed" "$(mklf $T/tp; printf '# T\n/mnt/c/Users/%s/x\n' $SENT > $T/tp/superdoc/features/t.md; lintin $T/tp 2>&1 | grep -c "$SENT")" "0"
 tpc() { # label line expected
   mklf $T/tp; printf '# T\n%s\n' "$2" > $T/tp/superdoc/features/t.md
   local o; o=$(lintin $T/tp 2>&1 | grep ':2: ' | sed 's/^[^:]*:2: //'); check "  lint finds: $1" "$o" "$3"
@@ -992,7 +999,14 @@ tpc "mailto email" "mailto:$SENT@corp.io" "error: email"
 tpc "ssh user@private-ip" "ssh $SENT@10.9.9.9" "error: private IP"
 tpc "private IP in a URL" "http://10.9.9.9:8080/x" "error: private IP"
 tpc "private IP in a blockquote" "> 10.9.9.9" "error: private IP"
-tpc "private CIDR that is not a range itself" "10.4.4.0/24" "error: private IP"
+tpc "private host address with a CIDR suffix" "10.4.4.5/24" "error: private IP"
+tpc "192.168.1.5/24 is a host, not a network block" "192.168.1.5/24" "error: private IP"
+tpc "a private host IP is still an error (192.168.1.1)" "192.168.1.1" "error: private IP"
+tpc "a private host IP is still an error (10.0.0.1)" "10.0.0.1" "error: private IP"
+tpc "a bare .0 address with no /N is still an error" "10.0.0.0" "error: private IP"
+tpc "a real-looking email at a two-letter host" "$SENT@ab.com" "error: email"
+tpc "WSL home /mnt/c/Users/NAME/x" "/mnt/c/Users/$SENT/x" "error: home path"
+tpc "WSL home /mnt/d/users/NAME (lowercase, no trailing slash)" "cd /mnt/d/users/$SENT" "error: home path"
 tpc "172.32 is public, not private" "172.32.0.1" "warn: public IP"
 tpc "/srv host path" "/srv/www" "warn: host path"
 tpc "a real home next to a placeholder" "/home/you/x and /home/$SENT/y" "error: home path"
@@ -1005,6 +1019,7 @@ out_wo=$(lintin $T/wo 2>&1); check "lint: warnings only: exit 0, still printed" 
 lintin $T/wo --bogus >/dev/null 2>&1; check "lint: unknown argument is exit 2" "$?" "2"
 lintin $T/wo --staged --files x >/dev/null 2>&1; check "lint: two modes is exit 2" "$?" "2"
 lintin $T/wo --doc >/dev/null 2>&1; check "lint: --doc without a value is exit 2" "$?" "2"
+printf '<!-- superdoc:start v4 -->\n' > $T/wo/CLAUDE.md   # --range is a commit-time mode: it only runs in a wired project
 lintin $T/wo --range nodots >/dev/null 2>&1; check "lint: --range without A..B is exit 2" "$?" "2"
 check "lint: the usage error text carries no doc value" "$(lintin $T/wo --bogus 2>&1 | grep -c "$SENT")" "0"
 mkdir -p $T/nosd; printf '# P\nno docs here\n' > $T/nosd/CLAUDE.md
@@ -1040,6 +1055,21 @@ check "lint all: warnings alone leave the exit status 0" "$rc_dr" "0"
 printf '# README\n\n- [A](architecture/a.md)\n## claude-instructions/\n- [D](claude-instructions/documentation.md)\n' > $DR/superdoc/README.md
 printf '# d2\n' > $DR/superdoc/claude-instructions/documentation-version-policy.md
 check "lint all: once README.md lists claude-instructions/, an unlisted install is a finding too" "$(lintin $DR 2>&1 | grep 'not listed' | grep -c version-policy)" "1"
+# a page listed in <doc>/README.md or in any README of its own directory chain counts as listed
+RC=$T/lrc; mklf $RC; mkdir -p $RC/superdoc/features/sub $RC/superdoc/architecture
+printf '# README\n\n- [A](architecture/a.md)\n' > $RC/superdoc/README.md
+printf '# a\n' > $RC/superdoc/architecture/a.md
+for f in b c; do printf '# x\n' > $RC/superdoc/features/$f.md; done
+printf '# d\n' > $RC/superdoc/features/sub/d.md; printf '# e\n' > $RC/superdoc/features/sub/e.md
+check "README listing: with only the root README, every page below the doc root that it does not name is reported" "$(lintin $RC 2>&1 | grep 'not listed' | sed 's/: warn.*//; s#superdoc/##' | sort | tr '\n' ' ')" "features/b.md:1 features/c.md:1 features/sub/d.md:1 features/sub/e.md:1 "
+printf '# Features\n\n- [B](b.md)\n- [D](sub/d.md)\n' > $RC/superdoc/features/README.md
+printf '# Sub\n\n- [E](e.md)\n' > $RC/superdoc/features/sub/README.md
+check "README listing: a page named in the README of its own directory (b.md in features/README.md, sub/d.md from above, e.md in sub/README.md) is listed; c.md is still not" "$(lintin $RC 2>&1 | grep 'not listed' | sed 's/: warn.*//; s#superdoc/##' | sort | tr '\n' ' ')" "features/c.md:1 "
+printf '# Arch\n\n- [C](c.md)\n' > $RC/superdoc/architecture/README.md
+check "README listing: a README in another directory does not list the page" "$(lintin $RC 2>&1 | grep 'not listed' | sed 's/: warn.*//; s#superdoc/##' | sort | tr '\n' ' ')" "features/c.md:1 "
+printf '# README\n\n- [C](features/c.md)\n' >> $RC/superdoc/README.md
+check "README listing: the doc-root README still lists a page by its path" "$(lintin $RC 2>&1 | grep -c 'not listed')" "0"
+check "README listing: the per-directory README files themselves are never reported" "$(lintin $RC 2>&1 | grep -c 'README.md:1: warn')" "0"
 rm $DR/superdoc/README.md
 check "lint all: no README.md, no 'not listed' findings" "$(lintin $DR 2>&1 | grep -c 'not listed')" "0"
 check "lint --files: the dangling ref is reported when CLAUDE.md is given, not otherwise" "$(lintin $DR --files CLAUDE.md 2>&1 | grep -c ': warn: dangling')/$(lintin $DR --files superdoc/features/b.md 2>&1 | grep -c ': warn: dangling')" "1/0"
@@ -1065,7 +1095,7 @@ gfix() { # dir : a git repo with superdoc/
   rm -rf "$1"; mkdir -p "$1/superdoc/features" "$1/sub"; (cd "$1" && git init -q && git config user.email t@t.t && git config user.name t && git config commit.gpgsign false)
 }
 GS=$T/lgs; gfix $GS
-printf '# T\nold /home/olddebt/x\nclean\n' > $GS/superdoc/features/leak.md; printf '# P\n' > $GS/CLAUDE.md
+printf '# T\nold /home/olddebt/x\nclean\n' > $GS/superdoc/features/leak.md; printf '<!-- superdoc:start v4 -->\n' > $GS/CLAUDE.md
 (cd $GS && git add -A && git commit -qm base)
 printf '# T\nnew %s@corp-%s.io\nold /home/olddebt/x\nclean\nadded 10.77.66.55\n' $SENT $SENT > $GS/superdoc/features/leak.md
 printf 'outside /home/%s/x\n' $SENT > $GS/sub/outside.md
@@ -1087,7 +1117,7 @@ check "lint --staged: line numbers follow the hunk headers (insert in the middle
 
 # --range: the net diff is clean, the pushed commits are not
 GR=$T/lgr; gfix $GR
-printf '# P\n' > $GR/CLAUDE.md; printf '# T\nclean\n' > $GR/superdoc/features/a.md; (cd $GR && git add -A && git commit -qm c1)
+printf '<!-- superdoc:start v4 -->\n' > $GR/CLAUDE.md; printf '# T\nclean\n' > $GR/superdoc/features/a.md; (cd $GR && git add -A && git commit -qm c1)
 c1=$(cd $GR && git rev-parse HEAD)
 printf '# T\nclean\nleak /home/%s/x\n' $SENT > $GR/superdoc/features/a.md; (cd $GR && git commit -qam c2)
 c2s=$(cd $GR && git log -1 --format=%h)
@@ -1101,7 +1131,7 @@ check "lint --range: a range after the leaking commits is clean" "$(lintin $GR -
 check "lint --range: a leak in a commit at or before A is old debt, not reported" "$(lintin $GR --range "$c2s..HEAD" 2>&1 | grep -c ': error')" "0"
 # root commit and the empty-tree start
 GT=$T/lgt; gfix $GT
-printf '# T\nroot /home/%s/x\n' $SENT > $GT/superdoc/features/r.md; printf '# P\n' > $GT/CLAUDE.md; (cd $GT && git add -A && git commit -qm root)
+printf '# T\nroot /home/%s/x\n' $SENT > $GT/superdoc/features/r.md; printf '<!-- superdoc:start v4 -->\n' > $GT/CLAUDE.md; (cd $GT && git add -A && git commit -qm root)
 rs=$(cd $GT && git log -1 --format=%h); et=$(cd $GT && git hash-object -t tree /dev/null)
 check "lint --range: the root commit is scanned from the empty tree" "$(lintin $GT --range "$et..HEAD" 2>&1 | grep ': error')" "superdoc/features/r.md:2: error: home path (commit $rs)"
 check "lint --range: ... and from an all-zero start (new branch)" "$(lintin $GT --range "0000000000000000000000000000000000000000..HEAD" 2>&1 | grep -c "(commit $rs)")" "1"
@@ -1112,7 +1142,7 @@ GN=$T/lgn; gfix $GN; rm -rf $GN/superdoc; printf '# P\nmail a@corp.io /home/x1/y
 check "lint: a git repo with no superdoc folder and no marker is silent, exit 0, in every mode" "$( { lintin $GN; lintin $GN --staged; lintin $GN --range "HEAD..HEAD"; lintin $GN --files CLAUDE.md; } 2>&1; echo rc=$?)" "rc=0"
 
 # --- git hook environment and linked worktrees ---------------------------------------------------------------
-GH=$T/lgh; gfix $GH; printf '# P\n' > $GH/CLAUDE.md; printf '# T\nclean\n' > $GH/superdoc/features/a.md; (cd $GH && git add -A && git commit -qm base)
+GH=$T/lgh; gfix $GH; printf '<!-- superdoc:start v4 -->\n' > $GH/CLAUDE.md; printf '# T\nclean\n' > $GH/superdoc/features/a.md; (cd $GH && git add -A && git commit -qm base)
 printf '#!/bin/sh\nexec "%s" --staged\n' "$LINT" > $GH/.git/hooks/pre-commit; chmod +x $GH/.git/hooks/pre-commit
 printf '# T\nclean\nleak /home/%s/x\n' $SENT > $GH/superdoc/features/a.md
 out_h=$(cd $GH/sub && git add ../superdoc && git commit -qm leak 2>&1); rc_h=$?
@@ -1160,7 +1190,7 @@ check "lint bare home path: the value is never printed" "$(printf '# T\ncd /home
 
 # --push REF REMOTE: only the commits no remote-tracking ref of REMOTE has
 PR=$T/lpr; PRR=$T/lpr-remote.git; gfix $PR; git init -q --bare $PRR; (cd $PR && git remote add origin $PRR)
-printf '# P\n' > $PR/CLAUDE.md; printf '# T\nold /home/olddebt/x\nclean\n' > $PR/superdoc/features/a.md
+printf '<!-- superdoc:start v4 -->\n' > $PR/CLAUDE.md; printf '# T\nold /home/olddebt/x\nclean\n' > $PR/superdoc/features/a.md
 (cd $PR && git add -A && git commit -qm base && git push -q origin HEAD:refs/heads/master >/dev/null 2>&1; git fetch -q origin)
 (cd $PR && git checkout -qb nb && printf 'new\n' >> $PR/superdoc/features/a.md && git commit -qam clean)
 check "lint --push: a new branch with a clean commit does not scan the old debt (exit 0, silent)" "$(lintin $PR --push nb origin 2>&1; echo rc=$?)" "rc=0"
@@ -1213,6 +1243,27 @@ out_u=$(sgrestore $UW)
 printf 'cd /home/%s\n' $SENT >> $UW/superdoc/features/a.md
 out_uc=$(cd $UW && git commit -qam 'unmarked docs are not ours' 2>&1); rc_uc=$?
 check "unwired (no superdoc:start): no hooks installed, no message, the commit is not blocked" "$(ls $UW/.git/hooks | grep -c '^pre-[a-z-]*$')/$(printf '%s\n' "$out_u" | grep -c 'superdoc')/$rc_uc" "0/0/0"
+# stubs left behind after the project is unwired: unmarked superdoc/ is someone else's docs and never blocks
+uwk() { # dir variant : a wired project with native stubs, then unwired (variant: unmark | nofile; an older branch with hand-written docs is the same state: no marker in the work tree)
+  sgmk "$1"; sgrestore "$1" >/dev/null
+  case $2 in
+    unmark) printf '# P\n' > "$1/CLAUDE.md"; (cd "$1" && git add CLAUDE.md && git commit -qm unmark --no-verify) ;;
+    nofile) (cd "$1" && git rm -q CLAUDE.md && git commit -qm nofile --no-verify) ;;
+  esac
+  printf 'cd /home/%s\n' $SENT >> "$1/superdoc/features/a.md"
+}
+for uv in unmark nofile; do
+  UK=$T/sguk-$uv; uwk $UK $uv
+  out_uk=$(cd $UK && git add superdoc && git commit -qm "leak in unmarked docs" 2>&1); rc_uk=$?
+  check "unwired ($uv): the native pre-commit stub left in .git/hooks does not block a staged leak" "$rc_uk/$(printf '%s\n' "$out_uk" | grep -c ': error')/$(printf '%s\n' "$out_uk" | grep -c "$SENT")" "0/0/0"
+done
+UK=$T/sguk-unmark; printf 'cd /home/%s\n' $SENT >> $UK/superdoc/features/a.md; (cd $UK && git add superdoc)
+out_uk=$(lintin $UK --staged 2>&1); check "lint --staged on an unmarked project: silent, exit 0" "$?/$out_uk" "0/"
+out_uk=$(lintin $UK --range "HEAD~1..HEAD" 2>&1); check "lint --range on an unmarked project: silent, exit 0 (even for a bad revision)" "$?/$out_uk/$(lintin $UK --range nosuchrev..HEAD 2>&1; echo $?)" "0//0"
+out_uk=$(lintin $UK --push master origin 2>&1); check "lint --push on an unmarked project: silent, exit 0" "$?/$out_uk" "0/"
+out_uk=$(lintin $UK --doc superdoc --staged 2>&1); check "lint --doc superdoc --staged on an unmarked project: an explicit --doc still runs (exit 1, kind printed, no value)" "$?/$(printf '%s\n' "$out_uk" | grep -c ': error: home path$')/$(printf '%s\n' "$out_uk" | grep -c "$SENT")" "1/1/0"
+check "lint: whole tree, --files and --force-load on an unmarked project are unchanged (audits use them)" "$(lintin $UK 2>&1 | grep -c ': error: home path')/$(lintin $UK --files superdoc/features/a.md 2>&1 | grep -c ': error: home path')/$(lintin $UK --force-load 2>&1 | grep -c '^force-loaded total')" "2/2/1"
+check "lint --staged on a wired project still blocks (marker present)" "$(cd $T/sguk-unmark && printf '# P\n<!-- superdoc:start v4 -->\n' > CLAUDE.md && git add CLAUDE.md && "$LINT" --staged 2>&1 | grep -c ': error: home path$')" "1"
 
 # a real commit
 n0=$(cd $W && git rev-list --count HEAD)
@@ -1338,7 +1389,7 @@ check "  a warning-only finding carries no 'repair now, do not push' text" "$(gr
 check "  it fires ONCE: the next Stop is silent and the state moved to HEAD" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')/$([ "$(cat $S/.claude/teamlead/.state/superdoc-lint-head)" = "$(cd $S && git rev-parse HEAD)" ] && echo head)" "0/0/head"
 (cd $S && git checkout -qb b3 && printf '# E\n' > superdoc/features/e.md && sgleakline >> superdoc/features/e.md && git add superdoc && git commit -qm e --no-verify && git checkout -q master && git merge -q --no-ff -m m3 b3)
 rc_e=$(sgstop $S)
-check "gate: an error in the merged range says a leak got past the commit hooks: repair now, do not push, and the history rewrite is the user's" "$rc_e/$(grep -c '^ *superdoc/features/e.md:2: error: home path$' $T/sgout)/$(grep -c 'got past the commit hooks' $T/sgout)/$(grep -c 'do not push' $T/sgout)/$(grep -c "Rewriting history is theirs to decide" $T/sgout)/$(grep -c "$SENT" $T/sgout)" "2/1/1/1/1/0"
+check "gate: an error in the merged range says a leak got past the commit hooks: repair now, do not push, and the history rewrite is the user's" "$rc_e/$(grep -c '^ *superdoc/features/e.md:2: error: home path (commit [0-9a-f]*)$' $T/sgout)/$(grep -c 'got past the commit hooks' $T/sgout)/$(grep -c 'do not push' $T/sgout)/$(grep -c "Rewriting history is theirs to decide" $T/sgout)/$(grep -c "$SENT" $T/sgout)" "2/1/1/1/1/0"
 check "  and it fires once" "$(sgstop $S)" "0"
 printf '%s\n' deadbeefdeadbeefdeadbeefdeadbeefdeadbeef > $S/.claude/teamlead/.state/superdoc-lint-head
 check "gate: a recorded commit that is not an ancestor resets to HEAD and says nothing" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')/$([ "$(cat $S/.claude/teamlead/.state/superdoc-lint-head)" = "$(cd $S && git rev-parse HEAD)" ] && echo head)" "0/0/head"
@@ -1352,6 +1403,63 @@ check "gate: stop_hook_active still short-circuits" "$(printf '{"hook_event_name
 US=$T/sgus; sgmk $US; printf '# P\n' > $US/CLAUDE.md; (cd $US && git commit -qam unwire)
 sgstop $US >/dev/null; (cd $US && git checkout -qb x && printf 'cd /home/%s\n' $SENT > superdoc/features/a.md && git commit -qam x --no-verify && git checkout -q master && git merge -q --no-ff -m mx x)
 check "gate: an unwired project is silent and records no state" "$(sgstop $US)/$(cat $T/sgout | wc -c | tr -d ' ')/$(ls $US/.claude/teamlead/.state | grep -c superdoc-lint-head)" "0/0/0"
+# --- gate: pre-filter, errors only from the range, warnings from the files, 40-line cap ---------------
+sgmerge() { # dir branch file content... : a branch that writes the files (content: printf %b), merged --no-ff into master
+  local d=$1 b=$2; shift 2
+  (cd "$d" && git checkout -qb "$b" && while [ $# -gt 0 ]; do mkdir -p "$(dirname "$1")"; printf '%b' "$2" > "$1"; git add -- "$1"; shift 2; done && git commit -qm "$b" --no-verify && git checkout -q master && git merge -q --no-ff -m "m-$b" "$b")
+}
+sgstate() { [ "$(cat $1/.claude/teamlead/.state/superdoc-lint-head)" = "$(cd $1 && git rev-parse HEAD)" ] && echo head || echo unmoved; }
+# a wrapper plugin root that logs every lint.sh call, then runs the real one
+FR=$T/sgfr; mkdir -p $FR/skills/teamlead-superdoc; ln -s "$CLAUDE_PLUGIN_ROOT/hooks" $FR/hooks; ln -s "$CLAUDE_PLUGIN_ROOT/scripts" $FR/scripts
+printf '#!/bin/sh\necho "$*" >> "%s"\nexec bash "%s" "$@"\n' "$T/sgcalls" "$LINT" > $FR/skills/teamlead-superdoc/lint.sh
+sgstopfr() { printf '{"hook_event_name":"Stop","cwd":"%s","stop_hook_active":false}' "$1" | env -u CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_ROOT=$FR "$H/gate.sh" >"$T/sgout" 2>&1; echo $?; }
+PF=$T/sgpf; sgmk $PF; sgstopfr $PF >/dev/null
+files30=(); for i in $(seq 1 30); do files30+=("src/x$i.txt" "x\n"); done
+: > $T/sgcalls
+sgmerge $PF bpf1 "${files30[@]}" superdoc/features/n.md '# N\nclean\n' CLAUDE.md '<!-- superdoc:start v4 -->\nedited\n'
+check "gate pre-filter: a merge with 30 non-doc files and one doc file hands lint only CLAUDE.md and the doc file" "$(sgstopfr $PF)/$(grep -c '^--files -- ' $T/sgcalls)/$(grep -- '--files' $T/sgcalls | grep -c 'src/')/$(grep -- '--files' $T/sgcalls | grep -c 'CLAUDE.md superdoc/features/n.md\|superdoc/features/n.md CLAUDE.md')" "0/1/0/1"
+: > $T/sgcalls
+sgmerge $PF bpf2 "${files30[@]}" other/z.md 'z\n'
+check "gate pre-filter: a merge that touches no doc file never calls lint --files or --range, and still advances the state" "$(sgstopfr $PF)/$(grep -c -- '--files\|--range' $T/sgcalls)/$(cat $T/sgout | wc -c | tr -d ' ')/$(sgstate $PF)" "0/0/0/head"
+check "gate pre-filter: the doc root is asked of lint.sh (--print-doc-root), not re-derived in the gate" "$(grep -c '^--print-doc-root$' $T/sgcalls)" "1"
+check "lint --print-doc-root: prints the doc root, exit 0, no other output" "$(lintin $PF --print-doc-root 2>&1; echo rc=$?)" "superdoc
+rc=0"
+HB=$T/sghb; gfix $HB; rmdir $HB/superdoc/features $HB/superdoc; mkdir -p $HB/handbook/meta $HB/handbook/features; printf '# P\n<!-- superdoc:start v4 -->\n@handbook/meta/TERMINOLOGY.md\n<!-- superdoc:end -->\n' > $HB/CLAUDE.md
+printf '# T\n' > $HB/handbook/meta/TERMINOLOGY.md; printf '# a\n' > $HB/handbook/features/a.md
+mkdir -p $HB/.claude/teamlead/.state; : > $HB/.claude/teamlead/.state/active; (cd $HB && git add CLAUDE.md handbook && git commit -qm base); sgstopfr $HB >/dev/null
+check "lint --print-doc-root: derives a non-default doc root from the @-ref in CLAUDE.md" "$(lintin $HB --print-doc-root)" "handbook"
+: > $T/sgcalls
+sgmerge $HB bhb1 handbook/features/h.md "# H\nsee /mnt/$SENT/x\n" docs/q.md 'q\n' other/z.md 'z\n'
+check "gate pre-filter: a derived doc root (handbook/) is honoured: its file is linted (and its warning shown), files elsewhere (docs/, other/) are not passed" "$(sgstopfr $HB)/$(grep -- '--files' $T/sgcalls | grep -c 'handbook/features/h.md')/$(grep -- '--files' $T/sgcalls | grep -c 'docs/\|other/')/$(grep -c 'handbook/features/h.md:2: warn: host path' $T/sgout)" "2/1/0/1"
+
+# the cap: 300 architecture pages with line references
+CP=$T/sgcap; sgmk $CP; mkdir -p $CP/superdoc/architecture; sgstop $CP >/dev/null
+capargs=(); for i in $(seq 1 300); do capargs+=("superdoc/architecture/p$i.md" '# p\nsee main.py:42\n'); done
+sgmerge $CP bcap "${capargs[@]}"
+rc_cap=$(sgstop $CP)
+check "gate cap: 300 findings show 40 lint lines, then how many more and that lint.sh lists them all; the whole Stop reason stays short" "$rc_cap/$(grep -c '^    superdoc/architecture/p[0-9]*.md:2: warn: line reference$' $T/sgout)/$(grep -c '^    \.\.\. and 261 more line(s) not shown; .*lint\.sh lists them all' $T/sgout)/$([ "$(wc -l < $T/sgout)" -lt 60 ] && echo short)" "2/40/1/short"
+check "  and fires once, state advanced" "$(sgstop $CP)/$(sgstate $CP)" "0/head"
+sgmerge $CP bcap2 superdoc/architecture/q1.md '# q\nsee main.py:42\n'
+check "gate cap: a few findings are all shown, with no 'more' line" "$(sgstop $CP)/$(grep -c 'q1.md:2: warn: line reference$' $T/sgout)/$(grep -c 'more line' $T/sgout)" "2/1/0"
+
+# old debt is not re-reported as a leak: errors only for lines added in the merge
+OD=$T/sgod; sgmk $OD
+printf '# O\nold 10.9.9.9\nline3 tyop\n' > $OD/superdoc/features/old.md; (cd $OD && git add -A && git commit -qm old --no-verify); sgstop $OD >/dev/null
+sgmerge $OD bod1 superdoc/features/old.md '# O\nold 10.9.9.9\nline3 typo\n'
+check "gate: fixing a typo in a file that holds an old private IP is silent (no 'leak got past the commit hooks'), state advanced" "$(sgstop $OD)/$(cat $T/sgout | wc -c | tr -d ' ')/$(sgstate $OD)" "0/0/head"
+sgmerge $OD bod2 superdoc/features/old.md "# O\nold 10.9.9.9\nline3 typo\ncd /home/$SENT\nsee /mnt/nas/x\n"
+rc_od=$(sgstop $OD)
+check "gate: a merge that adds a leak to that file shows the added line only: error at line 4 with its commit, not the old private IP at line 2" "$rc_od/$(grep -c '^ *superdoc/features/old.md:4: error: home path (commit [0-9a-f]*)$' $T/sgout)/$(grep -c 'old.md:2:' $T/sgout)/$(grep -c 'error: private IP' $T/sgout)" "2/1/0/0"
+check "  the warning on the added line appears once, with its hint; the fix line and the commit-rewrite line go with the error; the sentinel is never printed" "$(grep -c 'old.md:5: warn: host path$' $T/sgout)/$(grep -c '^ *hint: write repo-relative' $T/sgout)/$(grep -c '^ *fix: replace each flagged value' $T/sgout)/$(grep -c '^ *fix: a flagged value in a commit' $T/sgout)/$(grep -c "$SENT" $T/sgout)" "1/1/1/1/0"
+check "  no lint summary line is repeated into the Stop reason" "$(grep -c 'superdoc-lint: [0-9]* error' $T/sgout)" "0"
+# two calls, each under `timeout 4`; a timeout on either one is quiet and leaves the state alone
+mkdir -p $T/sgfake2; printf '#!/bin/sh\necho "$1" >> "%s"\nn=$(cat "%s" 2>/dev/null || echo 0); echo $((n+1)) > "%s"\n[ "$n" -ge "$(cat "%s")" ] && exit 124\nshift; exec "$@"\n' "$T/sgtolog" "$T/sgtocnt" "$T/sgtocnt" "$T/sgtolimit" > $T/sgfake2/timeout; chmod +x $T/sgfake2/timeout
+TO=$T/sgto; sgmk $TO; sgstop $TO >/dev/null
+sgmerge $TO bto1 superdoc/features/t.md "# T\ncd /home/$SENT\nsee /mnt/nas/x\n"
+sgstopto() { : > $T/sgtolog; printf '0' > $T/sgtocnt; printf '%s' "$1" > $T/sgtolimit; printf '{"hook_event_name":"Stop","cwd":"%s","stop_hook_active":false}' "$TO" | env -u CLAUDE_PROJECT_DIR PATH="$T/sgfake2:$PATH" "$H/gate.sh" >"$T/sgout" 2>&1; echo $?; }
+check "gate: the second lint call (--range) timing out is quiet, the state stays unmoved, and both calls ran under timeout 4" "$(sgstopto 1)/$(cat $T/sgout | wc -c | tr -d ' ')/$(sgstate $TO)/$(tr '\n' ' ' < $T/sgtolog)" "0/0/unmoved/4 4 "
+check "gate: the first lint call (--files) timing out is quiet, the state stays unmoved, and the second call is not made" "$(sgstopto 0)/$(cat $T/sgout | wc -c | tr -d ' ')/$(sgstate $TO)/$(tr '\n' ' ' < $T/sgtolog)" "0/0/unmoved/4 "
+check "gate: with no timeout it fires once: the error (range) and the warning (files) together, state advanced" "$(sgstopto 9)/$(grep -c 't.md:2: error: home path (commit' $T/sgout)/$(grep -c 't.md:3: warn: host path$' $T/sgout)/$(sgstate $TO)" "2/1/1/head"
 
 echo "== superdoc enforcement: audit reminder (restore.sh) =="
 R=$T/sgrem; sgmk $R
@@ -4425,6 +4533,8 @@ check "  hookEventName is SubagentStart" "$(jq -r .hookSpecificOutput.hookEventN
 sbctx=$(jq -r .hookSpecificOutput.additionalContext "$T/sbout" 2>/dev/null)
 case "$sbctx" in *"git merge-base --is-ancestor $sbsha HEAD || git merge --ff-only $sbsha"*) ok "  context carries the sha and the exact command";; *) bad "  context carries the sha and the exact command";; esac
 [ "$(printf '%s\n' "$sbctx" | wc -l)" -le 2 ] && ok "  context is at most two lines" || bad "  context is at most two lines"
+check "  line 2: the stop instruction is for a fresh worktree; a worker with its own commits skips the command and carries on" "$(printf '%s\n' "$sbctx" | sed -n 2p | grep -c 'in a fresh worktree.*stop and report.*already has its own commits on its branch skips the command and carries on')" "1"
+check "  line 1 keeps the command text unchanged and has no stop instruction of its own" "$(printf '%s\n' "$sbctx" | sed -n 1p | grep -c 'stop and report')/$(printf '%s\n' "$sbctx" | sed -n 1p | grep -c "Before anything else run: git merge-base --is-ancestor $sbsha HEAD || git merge --ff-only $sbsha\$")" "0/1"
 check "non-tl agent: exit 0" "$(sbev "$sbp" general-purpose)" 0
 [ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
 # Real stale worktree: branched from origin/main (what baseRef=fresh does), then run the printed command.
