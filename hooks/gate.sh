@@ -346,10 +346,16 @@ fi
 # State: $TL_STATE/superdoc-lint-head = the HEAD last checked. No state: record HEAD and say
 # nothing (old debt is not noise). A recorded commit that is no longer an ancestor of HEAD
 # (history rewritten, another branch checked out): reset to HEAD, nothing. Otherwise lint exactly
-# the files git says changed since then, and advance the state BEFORE showing anything, so a
-# finding fires once. No finding, or no doc file touched, prints nothing: this must be false on
-# every correct state. The Stop hook has 10s: lint runs under `timeout 8`, and on a timeout the
-# state stays where it was and the check stays quiet (it retries at the next Stop).
+# the files git says changed since then (pre-filtered to CLAUDE.md and the doc root: lint's
+# --files is quadratic in file count, so a huge merge must not hand it every file), and advance
+# the state BEFORE showing anything, so a finding fires once. No finding, or no doc file touched,
+# prints nothing: this must be false on every correct state. What is shown: `warn` findings from
+# `lint.sh --files` (the touched files, whatever their age), and `error` findings only from
+# `lint.sh --range last..HEAD` (lines added in this merge: "a leak got past the commit hooks" is
+# then true, and old debt on a line near a typo fix is not re-reported). Each is dropped from the
+# other so nothing shows twice. The Stop hook has 10s: each lint call runs under `timeout 4`, and
+# on a timeout the state stays where it was and the check stays quiet (it retries at the next
+# Stop). The output is capped at 40 lines, like superdoc-guard.sh.
 if tl_superdoc_wired "$TL_PROJECT"; then
   sd_head=$(git -C "$TL_PROJECT" rev-parse -q --verify HEAD 2>/dev/null) || sd_head=""
   if [ -n "$sd_head" ]; then
@@ -361,21 +367,37 @@ if tl_superdoc_wired "$TL_PROJECT"; then
       mkdir -p "$TL_STATE" 2>/dev/null; printf '%s\n' "$sd_head" > "$sd_state" 2>/dev/null
     else
       sd_lint=$(tl_superdoc_lint)
-      # NUL-separated: a name with spaces or a leading dash stays one argument
+      sd_root=""
+      [ -f "$sd_lint" ] && sd_root=$(cd "$TL_PROJECT" && bash "$sd_lint" --print-doc-root 2>/dev/null | head -n 1)
+      # NUL-separated: a name with spaces or a leading dash stays one argument. Only CLAUDE.md and
+      # files under the doc root go to lint (it ignores the rest anyway).
       sd_files=()
-      while IFS= read -r -d '' sd_f; do sd_files+=("$sd_f"); done \
-        < <(git -C "$TL_PROJECT" diff --name-only -z "$sd_last" "$sd_head" 2>/dev/null)
-      sd_out=""; sd_rc=0
+      while IFS= read -r -d '' sd_f; do
+        if [ "$sd_f" = CLAUDE.md ]; then sd_files+=("$sd_f")
+        elif [ -n "$sd_root" ]; then case "$sd_f" in "$sd_root"/*) sd_files+=("$sd_f") ;; esac
+        fi
+      done < <(git -C "$TL_PROJECT" diff --name-only -z "$sd_last" "$sd_head" 2>/dev/null)
+      sd_out=""; sd_warn=""; sd_err=""; sd_rc=0
       if [ "${#sd_files[@]}" -gt 0 ] && [ -f "$sd_lint" ]; then
-        sd_out=$(cd "$TL_PROJECT" && tl_timeout 8 bash "$sd_lint" --files -- "${sd_files[@]}" 2>/dev/null)
+        sd_warn=$(cd "$TL_PROJECT" && tl_timeout 4 bash "$sd_lint" --files -- "${sd_files[@]}" 2>/dev/null)
         sd_rc=$?
+        if [ "$sd_rc" != 124 ]; then
+          sd_err=$(cd "$TL_PROJECT" && tl_timeout 4 bash "$sd_lint" --range "$sd_last..$sd_head" 2>/dev/null)
+          sd_rc=$?
+        fi
+        # errors (and the fix/note lines that only go with them) from the range, warnings (and
+        # their hints) from the files; the summary line of either is dropped.
+        sd_out=$(printf '%s\n' "$sd_err" | grep -E ': error: |^fix: |^note: '
+                 printf '%s\n' "$sd_warn" | grep -E ': warn: |^hint: ')
       fi
       if [ "$sd_rc" = 124 ]; then
         :   # timed out: leave the state alone, say nothing
       else
         printf '%s\n' "$sd_head" > "$sd_state" 2>/dev/null
         if [ -n "$sd_out" ]; then
-          sd_msg="- superdoc: the merge brought in doc findings (shown once, in files it touched). Lint output; it never prints a value:"$'\n'"$(printf '%s\n' "$sd_out" | sed 's/^/    /')"
+          sd_n=$(printf '%s\n' "$sd_out" | wc -l)
+          sd_msg="- superdoc: the merge brought in doc findings (shown once, in files it touched). Lint output; it never prints a value:"$'\n'"$(printf '%s\n' "$sd_out" | head -n 40 | sed 's/^/    /')"
+          [ "$sd_n" -gt 40 ] && sd_msg+=$'\n'"    ... and $((sd_n - 40)) more line(s) not shown; $sd_lint lists them all (no arguments: the whole tree)"
           if printf '%s\n' "$sd_out" | grep -q ': error: '; then
             sd_msg+=$'\n'"  An error means a leak got past the commit hooks. Repair it now (placeholder in the file; anything useful moves to .claude/local/) and do not push until lint is clean. If the value is already in a commit, repairing the file does not remove it: tell the user that, and whether it was pushed. Rewriting history is theirs to decide."
           fi
