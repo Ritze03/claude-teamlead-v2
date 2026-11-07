@@ -3,7 +3,7 @@
 `superdoc: v3`
 
 This file is the **only** place the superdoc contract version lives. Everything that
-detects FRESH vs HEALTH-CHECK, or offers a version upgrade, compares against the `vN`
+detects FRESH vs HEALTH-CHECK, or decides on a version upgrade, compares against the `vN`
 on this line — see Part 6 for exactly where that number gets stamped into the target
 repo.
 
@@ -470,16 +470,21 @@ The `vN` there is the installed contract version. State detection reads it direc
 installation (HEALTH-CHECK/AUDIT territory); no `superdoc/` and no marker → FRESH; `superdoc/`
 present **without** the marker → likely hand-written docs, confirm before regenerating
 (the dispatcher's Step-1 guard). Version compare
-for an upgrade offer is: installed `vN` on this line vs. the `superdoc: v3` on line 3
-of this playbook file — older installed version → offer the upgrade, never silently
-rewrite it. An accepted upgrade re-stamps the marker and applies only what changed
-since the installed version, never a regeneration; existing files are not rebuilt from
-the skeletons. **v2 → v3:** if the project's `meta/TERMINOLOGY.md` lacks the short-entry
+for an upgrade is: installed `vN` on this line vs. the `superdoc: v3` on line 3
+of this playbook file — older installed version → the dispatcher applies the upgrade
+automatically (SKILL.md Step 1b), as the first thing of the run, before the audit; no
+offer. When several versions behind, apply each version's step in order. An upgrade
+re-stamps the marker and applies only what changed since the installed version, never a
+regeneration; existing files are not rebuilt from the skeletons. **v2 → v3:** if the project's `meta/TERMINOLOGY.md` lacks the short-entry
 rule (`grep -q 'Keep every entry short'`), insert the rule paragraph from Part 3's
 skeleton into its standing text, right after the "Keep this file up to date" paragraph.
 Then report each entry over ~300 characters (Part 9 command) and leave the entries
 untouched; trimming them is a REPAIR the user asks for (Part 10). Do not also stamp a marker under `superdoc/` itself; the `CLAUDE.md` line is
 the single source of truth for the installed version.
+
+*Why:* the newest contract is assumed to be the best available, and an offer only leaves
+projects stale. Cleanup of oversized force-loaded content is different: it stays a REPAIR
+the user asks for.
 
 ## Part 7 — Verbatim-install files
 
@@ -536,15 +541,17 @@ re-check.
 ## Part 9 — AUDIT (report-only)
 
 Idempotent, re-runnable over an existing `superdoc/` — same rules as FRESH, just verifying
-instead of creating. **Do not write to any file in this mode.**
+instead of creating. **Do not write to any file in this mode.** (The version upgrade,
+Part 6, is a separate step that runs before the audit; the audit itself writes nothing.)
 
 - Run the full Part 8 gate against the existing `superdoc/` and `CLAUDE.md`.
 - Grep every referenced `path`/`symbol` and every relative link; list what doesn't
   resolve.
 - List code capabilities/modules with no corresponding doc page.
 - List doc claims that no longer match the code (behaviour drifted).
-- Check the installed `superdoc:vN` marker (Part 6) against this playbook's version;
-  flag if older.
+- Check the installed `superdoc:vN` marker (Part 6) against this playbook's version.
+  The upgrade runs before the audit, so an older marker here means it failed: still
+  report it.
 - Flag any `@`-ref outside the Part 5 allowed set, and any `@`-ref that's broken.
 - Re-check Part 0: if `superdoc/` never grew past scaffolding, say so and propose
   collapsing it back into `CLAUDE.md`.

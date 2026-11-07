@@ -57,6 +57,8 @@ exists, have it read **first** — the version policy governs the whole run.
 DOC=superdoc   # change only if the user named another folder (no trailing slash)
 test -d "$DOC" && echo "superdoc: present" || echo "superdoc: absent"
 test -f CLAUDE.md && grep -q 'superdoc:start' CLAUDE.md && echo "CLAUDE.md: wired" || echo "CLAUDE.md: not wired"
+# Installed contract version: the vN on the guarded marker, or "none" (also when CLAUDE.md is absent).
+echo "superdoc marker: $(grep -om1 'superdoc:start v[0-9]*' CLAUDE.md 2>/dev/null | sed 's/.*start //' | grep . || echo none)"
 git check-ignore -q "$DOC" 2>/dev/null && echo "⚠ GITIGNORED — superdoc must be committed or the knowledge dies at the next clone" || echo "git: superdoc is tracked"
 # A dangling @-ref loads NOTHING and says nothing about it — the docs look wired
 # while the agent silently gets none of them.
@@ -81,7 +83,32 @@ A `⚠` from the size check is a HEALTH-CHECK finding (Step 3), not something to
 works locally and the knowledge vanishes for anyone who clones. Un-ignore it before
 writing a single page.
 
-`superdoc: absent` → **FRESH**. Present → **HEALTH-CHECK**, and REPAIR only if asked.
+`superdoc: absent` → **FRESH**. Present → **Step 1b** (automatic upgrade check), then
+**HEALTH-CHECK**, and REPAIR only if asked.
+
+## Step 1b — Upgrade an older install (automatic, no offer, no question)
+
+Runs on every `/superdoc` against an existing install, right after Step 1 and before the
+health check. Compare the snippet's `superdoc marker: vN` with `superdoc: vM` on line 3 of
+`<plugin-root>/skills/teamlead-superdoc/playbook.md` (`sed -n 3p` it yourself).
+
+- **N ≥ M** → nothing to do; go to HEALTH-CHECK.
+- **N < M** → apply the upgrade **now, as the first thing, without offering or asking**.
+  Dispatch **one writing worker** (Sonnet) in a worktree like any other doc write; you do
+  not implement it. The brief names playbook Part 6, the installed `vN` and the target
+  `vM`. Several versions behind: the worker applies each version's step in order (v2 → v3,
+  then every later one) and re-stamps the marker to `vM`. An upgrade applies only what
+  changed in those versions: existing files are not rebuilt from skeletons, and entries
+  are not rewritten. Then tell the user in **one line** what happened, for example
+  `Upgraded the superdoc contract v2 → v3: added the short-entry rule to TERMINOLOGY.md,
+  re-stamped the marker.` It is never silent. Then run HEALTH-CHECK on the upgraded tree,
+  so its findings reflect the new version.
+- **`superdoc/` present with marker `none`** → not an upgrade. That is likely hand-written
+  docs: confirm with the user before regenerating anything (playbook Part 6).
+
+*Why:* the newest contract is assumed to be the best available, and an offer only leaves
+projects stale. The upgrade is a separate step before the audit, so the audit itself stays
+report-only.
 
 ## Step 2 — FRESH setup
 
@@ -132,17 +159,20 @@ stale content, broken structure, absent Why-notes, unwired CLAUDE.md, and any
 bloat**: any force-loaded file (`CLAUDE.md` plus every `@`-ref target) over 8 KB, a total
 over 20 KB, or content in them that isn't needed on every task (playbook Part 9 has the
 judgement pass; the verbatim `claude-instructions/` installs count toward the total but
-are never flagged for trimming). **Report findings. Do not fix.** When it finds bloat,
+are never flagged for trimming). **Report findings. Do not fix.** (The audit is report-only; the Step 1b upgrade has
+already run before it.) When it finds bloat,
 offer the cleanup to the user; it then runs as Step 4 REPAIR on the named items, never
 automatically.
 
-**Installed marker older than the playbook's version** → offer the upgrade (playbook
-Part 6); never apply it unasked. For v2 → v3 it adds the short-entry rule to an existing
-`meta/TERMINOLOGY.md` and reports entries over ~300 characters, without rewriting any.
+**Installed marker older than the playbook's version** at this point means the Step 1b
+upgrade failed: report it as a finding and say why. (For v2 → v3 the upgrade adds the
+short-entry rule to an existing `meta/TERMINOLOGY.md`, and the audit reports entries over
+~300 characters; entries are never rewritten by an upgrade.)
 
 ## Step 4 — REPAIR (only on explicit ask)
 
-**Never auto-fix.** Only when the user asks, dispatch workers against the named
+**Never auto-fix audit findings** (the upgrade in Step 1b is not a repair and is not
+covered by this rule). Only when the user asks, dispatch workers against the named
 items, in place, **per-item tier** (reading → Sonnet, ordinary writing → Sonnet,
 architectural rationale → Opus; ask if unsure). Then run **QC after repair** —
 `tl-sonnet-high` by default, `tl-opus-high` only for architectural repairs.

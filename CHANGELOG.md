@@ -4,6 +4,13 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.5.0 — 2026-11-07
+
+- superdoc: contract upgrades apply automatically. Any `/superdoc` run on an existing install whose `<!-- superdoc:start vN -->` marker is older than the playbook's version (line 3) now upgrades first, with no offer and no question; before, the skill only offered the upgrade and waited, so projects stayed stale ("It won't be applied unless you ask"). The newest contract is assumed to be the best available.
+- New SKILL.md Step 1b between detection and the health check: the lead compares the installed marker with playbook line 3, dispatches one writing worker in a worktree like any other doc write, which applies each version's step in order (v2 → v3, then later ones as they are added) and re-stamps the marker; the lead then tells the user in one line what was upgraded (never silent). The health check runs afterwards on the upgraded tree, so its findings reflect the new version. Marker equal or newer: nothing to do.
+- Unchanged: an upgrade applies only what changed in those versions (no rebuild from skeletons, entries are not rewritten). The audit stays report-only ("Do not write to any file in this mode" still holds; the upgrade is a separate step before it), and Step 4's "never auto-fix" now says it covers audit findings, not upgrades. Cleanup of oversized force-loaded content stays a REPAIR the user asks for. `superdoc/` without a marker is still treated as hand-written docs (confirm before regenerating). An older marker at audit time now means the upgrade failed and is still reported. The contract itself stays v3.
+- SKILL.md Step 1 snippet prints `superdoc marker: vN` (or `none`, also with no `CLAUDE.md`) so the lead can compare versions. Playbook Part 6 and Part 9 reworded to match.
+
 ## 2.4.0 — 2026-11-07
 
 - superdoc (contract v2 → v3): `meta/TERMINOLOGY.md` entries are pointers, not documentation. The skeleton's standing text now says an entry is what the term is plus where to read more (one or two sentences, ~200 characters); details live on the linked page, and amending trims instead of appending. The file is force-loaded (in context all session, resent with every request, copied into every worker), and a real project had grown to 51 KB with single entries up to 3 KB.
