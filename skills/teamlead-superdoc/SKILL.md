@@ -63,7 +63,19 @@ git check-ignore -q "$DOC" 2>/dev/null && echo "⚠ GITIGNORED — superdoc must
 grep -oE "@$DOC/"'[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | while read -r f; do
   test -f "$f" || echo "⚠ CLAUDE.md force-loads $f — that file does not exist"
 done
+# Force-load budget: CLAUDE.md plus every @-ref target sits in context for the whole
+# session, goes out with every request, and every worker carries its own copy.
+total=0
+for f in CLAUDE.md $(grep -oE "@$DOC/"'[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | sort -u); do
+  test -f "$f" || continue
+  b=$(wc -c < "$f"); total=$((total + b)); echo "force-loaded: $f ${b}B"
+  if [ "$b" -gt 8192 ]; then echo "⚠ $f is ${b}B (over 8 KB): force-loaded files are paid for all session"; fi
+done
+echo "force-loaded total: ${total}B"
+if [ "$total" -gt 20480 ]; then echo "⚠ force-loaded total is ${total}B (over 20 KB)"; fi
 ```
+
+A `⚠` from the size check is a HEALTH-CHECK finding (Step 3), not something to fix now.
 
 **If it reports `⚠ GITIGNORED`, fix that first.** The failure is silent: everything
 works locally and the knowledge vanishes for anyone who clones. Un-ignore it before
@@ -105,8 +117,9 @@ and dated design-spec docs for big decisions — all under the doc root. Wire a 
 `CLAUDE.md` via the guarded markers, `@`-force-loading only TERMINOLOGY and
 `claude-instructions/*`.
 
-**Hold that line at QC.** `@` pastes a file's whole contents into every turn of every
-session in the project, so each one is a permanent tax on all future work. Anything
+**Hold that line at QC.** `@` pastes a file's whole contents into context at session
+start, where it stays and goes out with every request, in every worker that loads
+`CLAUDE.md` too, so each one is a permanent tax on all future work. Anything
 else — `overview.md`, capability pages, the styling guide — is a plain link an agent
 reads when it needs it. A worker that force-loads more has made every task in this
 repo more expensive; send it back.
@@ -115,8 +128,17 @@ repo more expensive; send it back.
 
 Dispatch workers to audit the existing tree against the playbook: missing pages,
 stale content, broken structure, absent Why-notes, unwired CLAUDE.md, and any
-`@`-ref in `CLAUDE.md` pointing at a file that no longer exists. **Report
-findings. Do not fix.**
+`@`-ref in `CLAUDE.md` pointing at a file that no longer exists, and **force-load
+bloat**: any force-loaded file (`CLAUDE.md` plus every `@`-ref target) over 8 KB, a total
+over 20 KB, or content in them that isn't needed on every task (playbook Part 9 has the
+judgement pass; the verbatim `claude-instructions/` installs count toward the total but
+are never flagged for trimming). **Report findings. Do not fix.** When it finds bloat,
+offer the cleanup to the user; it then runs as Step 4 REPAIR on the named items, never
+automatically.
+
+**Installed marker older than the playbook's version** → offer the upgrade (playbook
+Part 6); never apply it unasked. For v2 → v3 it adds the short-entry rule to an existing
+`meta/TERMINOLOGY.md` and reports entries over ~300 characters, without rewriting any.
 
 ## Step 4 — REPAIR (only on explicit ask)
 

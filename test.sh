@@ -696,8 +696,58 @@ echo "== the @-budget rule keeps its reasoning =="
 PB="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/playbook.md"
 grep -q 'nothing else, ever' "$PB" && ok "the exact set is still mandated" || bad "the exact set is still mandated"
 grep -q 'does not suggest a file, it \*pastes\* it' "$PB" && ok "  explains @ pastes the file" || bad "  explains @ pastes the file"
-grep -q 'every turn of every' "$PB" && ok "  names the per-turn cost" || bad "  names the per-turn cost"
+grep -q 'for the whole session' "$PB" && grep -q 'carries its own copy' "$PB" && ok "  names the cost: whole session, every request, every worker" || bad "  names the cost: whole session, every request, every worker"
 grep -q 'permanent tax' "$SD" && ok "  the lead is told to hold the line at QC" || bad "  lead told to hold the line"
+
+echo "== superdoc: TERMINOLOGY.md entries are pointers (contract v3) =="
+SKEL=$(awk '/^### `superdoc\/meta\/TERMINOLOGY.md`/{f=1;next} /^### /{f=0} f' "$PB")
+printf '%s' "$SKEL" | grep -q 'Keep every entry short' && ok "rule text is inside the TERMINOLOGY skeleton" || bad "rule text missing from the TERMINOLOGY skeleton"
+printf '%s' "$SKEL" | grep -q 'about 200 characters' && printf '%s' "$SKEL" | grep -q 'trim it to this form instead of' && ok "  rule: ~200 chars, details on the linked page, amend by trimming" || bad "  rule: size guide / trim wording"
+printf '%s' "$SKEL" | grep -qF -- '- **Term** — what it is, in one line. See `superdoc/features/term.md`.' && ok "  skeleton example shows the pointer shape" || bad "  skeleton example line"
+printf '%s' "$SKEL" | grep -q '^\*Why:\*' && ok "  skeleton has its *Why:*" || bad "  skeleton *Why:*"
+grep -q 'entries are pointers: none over about 300 characters' "$PB" && ok "Part 8 gate: entries are pointers" || bad "Part 8 gate: TERMINOLOGY entries bullet"
+grep -q '\*\*TERMINOLOGY.md size\*\* (the specific case' "$PB" && ok "Part 9 audit: oversized-entry bullet" || bad "Part 9 audit: oversized-entry bullet"
+grep -q 'never delete information that exists nowhere else' "$PB" && ok "Part 10: trim moves detail to the page first" || bad "Part 10: trim wording"
+grep -q 'v2 → v3' "$PB" && grep -q 'leave the entries' <(tr '\n' ' ' < "$PB" | sed 's/  */ /g') && ok "Part 6: upgrade adds the rule, never rewrites entries" || bad "Part 6: upgrade sentence"
+grep -q 'v2 → v3' "$SD" && ok "SKILL: health-check offers the v2 → v3 upgrade" || bad "SKILL: upgrade offer"
+check "playbook line 3 names contract v3" "$(sed -n 3p "$PB")" '`superdoc: v3`'
+check "Part 6 marker example matches line 3" "$(grep -o '<!-- superdoc:start v[0-9]* -->' "$PB" | sort -u)" "<!-- superdoc:start v3 -->"
+check "Part 6 compare sentence names v3" "$(tr '\n' ' ' < "$PB" | grep -o 'the `superdoc: v[0-9]*` on line 3')" 'the `superdoc: v3` on line 3'
+tdoc=$T/termaudit; mkdir -p $tdoc/meta
+{ printf '# Terminology\n\n## Terms\n\n- **Short** — a one-liner. See `superdoc/features/short.md`.\n- **Long** — '; head -c 400 /dev/zero | tr '\0' 'x'; printf '\n'; } > $tdoc/meta/TERMINOLOGY.md
+audit_cmd=$(grep -o "awk '/^- .*TERMINOLOGY.md" "$PB" | head -1 | sed "s#<doc-root>#$tdoc#")
+hits=$(eval "$audit_cmd")
+check "Part 9 awk flags exactly the long entry" "$(printf '%s\n' "$hits" | sed 's/: [0-9]* chars//' | sed "s#$tdoc/##")" "meta/TERMINOLOGY.md:6"
+
+echo "== superdoc: force-load budget check (Step 1 snippet, Step 3, Part 8/9/10) =="
+grep -q 'force-load budget' <(tr '[:upper:]' '[:lower:]' < "$PB") && grep -q '^- \*\*Force-load budget:\*\*' "$PB" && ok "Part 9 audit: force-load budget bullet" || bad "Part 9 audit: force-load budget bullet"
+tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'never flagged for trimming' && ok "  verbatim installs counted, never flagged" || bad "  verbatim installs wording"
+grep -q '^- \[ \] Force-load budget:' "$PB" && ok "Part 8 gate: force-load budget box" || bad "Part 8 gate: force-load budget box"
+tr '\n' ' ' < "$PB" | sed 's/  */ /g' | grep -q 'Trimming a force-loaded file.*never delete information that exists nowhere else' && ok "Part 10: move-before-trim covers any force-loaded file" || bad "Part 10: move-before-trim wording"
+tr '\n' ' ' < "$SD" | sed 's/  */ /g' | grep -q 'force-load bloat.*Report findings. Do not fix.*Step 4 REPAIR on the named items, never automatically' && ok "SKILL Step 3: bloat is reported, cleanup offered, never automatic" || bad "SKILL Step 3: bloat wording"
+SNIP=$(awk '/^\*\*Run this with Bash as your first action/{f=1} f&&/^```bash/{g=1;next} g&&/^```/{exit} g' "$SD")
+mkfix() { # dir ; fixtures: CLAUDE.md + superdoc files with given sizes
+  mkdir -p "$1/superdoc/meta" "$1/superdoc/claude-instructions"
+  head -c "$2" /dev/zero | tr '\0' 'c' > "$1/CLAUDE.md"
+  printf '\n@superdoc/meta/TERMINOLOGY.md\n@superdoc/claude-instructions/changelog.md\n@superdoc/claude-instructions/documentation.md\n@superdoc/claude-instructions/documentation-version-policy.md\n' >> "$1/CLAUDE.md"
+  head -c "$3" /dev/zero | tr '\0' 't' > "$1/superdoc/meta/TERMINOLOGY.md"
+  head -c 5300 /dev/zero | tr '\0' 'l' > "$1/superdoc/claude-instructions/changelog.md"
+  head -c 2900 /dev/zero | tr '\0' 'd' > "$1/superdoc/claude-instructions/documentation.md"
+  head -c 2300 /dev/zero | tr '\0' 'v' > "$1/superdoc/claude-instructions/documentation-version-policy.md"
+}
+mkfix $T/fl_ok 4200 1000        # healthy shape: ~16 KB total
+mkfix $T/fl_big 4200 51000      # gamescope-ritz shape: TERMINOLOGY 51 KB
+out_ok=$(cd $T/fl_ok && bash -c "$SNIP" 2>&1); out_big=$(cd $T/fl_big && bash -c "$SNIP" 2>&1)
+check "budget: healthy tree prints sizes, no warning" "$(printf '%s\n' "$out_ok" | grep -c '^force-loaded: ')/$(printf '%s\n' "$out_ok" | grep -c '⚠')" "5/0"
+printf '%s\n' "$out_ok" | grep -q '^force-loaded total: 1[0-9]\{4\}B$' && ok "  healthy total is reported" || bad "  healthy total ($(printf '%s\n' "$out_ok" | grep total))"
+check "budget: over-budget tree flags exactly TERMINOLOGY and the total" "$(printf '%s\n' "$out_big" | grep '⚠' | sed 's/ is [0-9]*B.*//;s/ is [0-9]*B.*//;s/ force-loaded total.*/ total/' | tr '\n' '|')" "⚠ superdoc/meta/TERMINOLOGY.md|⚠ total|"
+dang=$T/fl_dang; mkfix $dang 500 1000; rm $dang/superdoc/claude-instructions/documentation.md
+out_d=$(cd $dang && bash -c "$SNIP" 2>&1); rc=$?
+check "budget: dangling ref does not crash the snippet" "$rc" "0"
+printf '%s\n' "$out_d" | grep -q 'force-loads superdoc/claude-instructions/documentation.md — that file does not exist' && printf '%s\n' "$out_d" | grep -q '^force-loaded total: ' && ok "  dangling ref flagged, total still printed" || bad "  dangling ref output ($out_d)"
+mkdir -p $T/fl_none; out_n=$(cd $T/fl_none && bash -c "$SNIP" 2>&1); rc=$?
+check "budget: absent CLAUDE.md does not crash" "$rc/$(printf '%s\n' "$out_n" | grep -c '⚠')" "0/0"
+printf '%s\n' "$out_n" | grep -q '^force-loaded total: 0B$' && ok "  absent CLAUDE.md totals 0B" || bad "  absent CLAUDE.md total ($out_n)"
 
 echo "== superdoc workers copy assets via Read/Write, not Bash on a plugin-root path (#5) =="
 ! grep -qF '$(cat .claude/teamlead/.state/plugin-root)' "$PB" && ok "playbook: no worktree-relative plugin-root lookup" || bad "playbook: worker told to cat the state file (missing in a worktree)"

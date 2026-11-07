@@ -4,6 +4,14 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.4.0 — 2026-11-07
+
+- superdoc (contract v2 → v3): `meta/TERMINOLOGY.md` entries are pointers, not documentation. The skeleton's standing text now says an entry is what the term is plus where to read more (one or two sentences, ~200 characters); details live on the linked page, and amending trims instead of appending. The file is force-loaded (in context all session, resent with every request, copied into every worker), and a real project had grown to 51 KB with single entries up to 3 KB.
+- superdoc gate and AUDIT: new Part 8 checkbox and a Part 9 awk command that lists entries over ~300 characters (line + length) and flags a file missing the rule. REPAIR: trimming an entry moves the detail to the linked page first and confirms the page holds it; nothing that exists only in the entry is deleted.
+- superdoc force-load budget: the HEALTH-CHECK now covers every force-loaded file (`CLAUDE.md` plus each `@`-ref target), not only TERMINOLOGY. SKILL.md Step 1 prints each file's size and the total and warns on a file over 8 KB or a total over 20 KB (correct with a dangling ref or no `CLAUDE.md`); Part 9 adds the same check plus a judgement pass for content not needed on every task, naming the page it should move to. The verbatim `claude-instructions/` installs count toward the total but are never flagged for trimming. Part 8 gains the matching box, and Part 10's move-before-trim rule covers any force-loaded file. Cleanup is offered to the user and runs as REPAIR on the named items, never automatically.
+- superdoc wording: `@` files load once at session start (and after `/clear` or compaction), stay in context and go out with every request, and every worker that loads `CLAUDE.md` carries its own copy. Replaces the loose "pasted into every turn" claims in the playbook and SKILL.md.
+- superdoc upgrade (marker v2 → v3, offered in HEALTH-CHECK): adds the rule text to an existing `TERMINOLOGY.md` and reports oversized entries; it does not rewrite entries unasked.
+
 ## 2.3.1 — 2026-11-03
 
 - workers: scratch files, test output, logs and temp builds go in `.tl-scratch/` inside the worker's own worktree, never in the session scratchpad under `/tmp` and never through a symlink out of the worktree (all six `agents/tl-*.md`, explicitly overriding Claude Code's generic "use the scratchpad" instruction; `TMPDIR` goes to `.tl-scratch/tmp`). A worker touching the lead's scratchpad is outside its allowed directories, so every access prompted the user and blocked the background worker. `/tmp` is RAM, too.
