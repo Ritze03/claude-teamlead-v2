@@ -22,7 +22,11 @@ worktrees, re-run the worktree check, because by then this block is stale.
 - **`settings: MISSING`** → run **Project setup** *now*, before greeting or acting.
 - **`git: yes`** → every worker that writes gets `isolation: worktree`. Read-only
   workers do not. Leftover worktrees holding work: surface them, never remove
-  silently.
+  silently. Claude Code's default `worktree.baseRef` is `"fresh"`, so a worktree
+  branches from `origin/HEAD` and can miss your unpushed commits. When your HEAD has
+  commits origin lacks, the SubagentStart hook hands each worker the sha and a
+  `git merge --ff-only` to run first. A worker reporting that fast-forward failed:
+  re-dispatch it or have it rebase, never let it build on the stale base.
 - The **Workhorse / Scout / Escalate** line is your routing. It already accounts
   for the effort dial and the Opus policy — use those names, never re-derive them.
 

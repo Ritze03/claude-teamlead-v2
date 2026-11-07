@@ -34,6 +34,25 @@ tl_board_call() {
   fi
 }
 
+# Stale-base guard. Claude Code's default worktree.baseRef is "fresh": a worker's worktree
+# branches from origin/HEAD and ignores local commits not yet pushed, so it can start on stale
+# code. A plugin cannot ship the "head" setting and a WorktreeCreate hook would replace the
+# worktree naming and cleanup, so tell the worker instead. If the lead's checkout (HEAD of
+# $TL_PROJECT, whichever branch that is) has commits origin/HEAD lacks, print SubagentStart
+# additionalContext carrying the sha and the fast-forward command. No remote, no origin/HEAD,
+# nothing ahead, or any git error: print nothing. Never fails the hook.
+tl_stale_base_note() {
+  local head msg
+  sbgit() { git -C "$TL_PROJECT" "$@" 2>/dev/null; }
+  head=$(sbgit rev-parse --verify --quiet 'HEAD^{commit}') || return 0
+  [ -n "$head" ] || return 0
+  sbgit rev-parse --verify --quiet 'refs/remotes/origin/HEAD^{commit}' >/dev/null || return 0
+  sbgit merge-base --is-ancestor "$head" refs/remotes/origin/HEAD && return 0
+  msg="The lead's checkout has commits origin lacks, so a fresh worktree may start on a stale base. Before anything else run: git merge-base --is-ancestor $head HEAD || git merge --ff-only $head
+If that cannot fast-forward, stop and report it to the lead instead of working."
+  jq -n --arg c "$msg" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$c}}' || true
+}
+
 # T65: is this SubagentStop a pause rather than the worker's final return?
 # Final = its last tool call is SubagentHandback, the harness tool a worker
 # delivers its report with. Only judged when the harness offers that tool (its
@@ -279,6 +298,9 @@ case "$ev" in
     # D12: the resume path — a fresh dispatch's row is already 'running' (or
     # has no worker yet) via PostToolUse, so this is a harmless no-op then.
     tl_board_call "$(tl_json .agent_id)" "" worker-start --id "$(tl_json .agent_id)"
+    # Last, and the only stdout this event prints: everything above is silent (board.py's
+    # stdout is discarded in tl_board_call), so the JSON stays the whole of stdout.
+    tl_stale_base_note || true
     ;;
   SubagentStop)
     at=$(tl_json .agent_type)

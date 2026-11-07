@@ -3656,7 +3656,7 @@ echo "== I5/D3/D4: hooks.json wires PostToolUse(Agent) -> record.sh =="
 check "hooks.json declares the PostToolUse Agent matcher" \
   "$(jq -e '.hooks.PostToolUse[0].matcher == "Agent"' "$H/hooks.json")" "true"
 check "record.sh's silent-stderr sites did not grow (no new board call swallows stderr)" \
-  "$(grep -c '2>/dev/null' "$H/record.sh")" 4
+  "$(grep -c '2>/dev/null' "$H/record.sh")" 5   # 4 + the stale-base guard's one git helper
 
 echo "== I5/D3/D4: PostToolUse(Agent) calls worker-start =="
 p5=$T/i5; mkdir -p "$p5/.claude/teamlead/.state"; : > "$p5/.claude/teamlead/.state/active"
@@ -4406,6 +4406,69 @@ ev '{"hook_event_name":"SubagentStart","cwd":"'$pbp'","agent_type":"tl-sonnet-hi
 ev '{"hook_event_name":"SubagentStop","cwd":"'$pbp'","agent_type":"tl-sonnet-high","agent_id":"sr3","agent_transcript_path":"'$T'/srtr","last_assistant_message":""}' "$H/record.sh" >/dev/null
 echo '{"hook_event_name":"UserPromptSubmit","cwd":"'$pbp'","prompt":"hi"}' | "$H/mode.sh" > "$T/srout" 2>&1
 grep -q 'SCOPE REQUEST: src/x/\*\*' "$T/srout" && ok "  marker found in the SubagentHandback input" || bad "  marker found in the SubagentHandback input"
+
+echo "== stale-base guard: SubagentStart tells a worker to fast-forward when local is ahead of origin =="
+sbo="$T/sb-origin.git"; git init -q --bare "$sbo"
+sbs="$T/sb-seed"; git init -q "$sbs"; git -C "$sbs" config user.email t@t.t; git -C "$sbs" config user.name t
+echo one > "$sbs/f.txt"; git -C "$sbs" add -A >/dev/null; git -C "$sbs" commit -qm one
+git -C "$sbs" push -q "$sbo" HEAD:refs/heads/main 2>/dev/null; git -C "$sbo" symbolic-ref HEAD refs/heads/main
+sbp="$T/sb"; git clone -q "$sbo" "$sbp" 2>/dev/null; git -C "$sbp" config user.email t@t.t; git -C "$sbp" config user.name t
+mkdir -p "$sbp/.claude/teamlead/.state"; : > "$sbp/.claude/teamlead/.state/active"
+sbev() { printf '{"hook_event_name":"SubagentStart","cwd":"%s","agent_type":"%s","agent_id":"%s"}' "$1" "${2:-teamlead:tl-sonnet-high}" "${3:-sb1}" | "$H/record.sh" >"$T/sbout" 2>"$T/sberr"; echo $?; }
+check "local equal to origin: exit 0" "$(sbev "$sbp")" 0
+[ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
+echo two > "$sbp/f.txt"; git -C "$sbp" commit -qam two
+sbsha=$(git -C "$sbp" rev-parse HEAD)
+check "local ahead of origin: exit 0" "$(sbev "$sbp")" 0
+jq -e . "$T/sbout" >/dev/null 2>&1 && ok "  output is valid JSON" || bad "  output is valid JSON"
+check "  hookEventName is SubagentStart" "$(jq -r .hookSpecificOutput.hookEventName "$T/sbout" 2>/dev/null)" SubagentStart
+sbctx=$(jq -r .hookSpecificOutput.additionalContext "$T/sbout" 2>/dev/null)
+case "$sbctx" in *"git merge-base --is-ancestor $sbsha HEAD || git merge --ff-only $sbsha"*) ok "  context carries the sha and the exact command";; *) bad "  context carries the sha and the exact command";; esac
+[ "$(printf '%s\n' "$sbctx" | wc -l)" -le 2 ] && ok "  context is at most two lines" || bad "  context is at most two lines"
+check "non-tl agent: exit 0" "$(sbev "$sbp" general-purpose)" 0
+[ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
+# Real stale worktree: branched from origin/main (what baseRef=fresh does), then run the printed command.
+sbw="$T/sb-wt"; git -C "$sbp" worktree add -q -b worktree-agent-sb1 "$sbw" origin/main 2>/dev/null
+[ "$(git -C "$sbw" rev-parse HEAD)" != "$sbsha" ] && ok "  fixture: the worktree starts stale" || bad "  fixture: the worktree starts stale"
+(cd "$sbw" && eval "$(printf '%s\n' "$sbctx" | sed -n 's/.*run: //p')") >/dev/null 2>&1
+check "  printed command fast-forwards the stale worktree" "$(git -C "$sbw" rev-parse HEAD)" "$sbsha"
+(cd "$sbw" && eval "$(printf '%s\n' "$sbctx" | sed -n 's/.*run: //p')") >/dev/null 2>&1; rc=$?
+check "  and is idempotent (ancestor check passes at once)" "$rc" 0
+# The existing behind-main check flags that stale-base branch once the worker returns, if not fast-forwarded.
+sbw2="$T/sb-wt2"; git -C "$sbp" worktree add -q -b worktree-agent-sb2 "$sbw2" origin/main 2>/dev/null
+echo w > "$sbw2/w.txt"; git -C "$sbw2" add -A >/dev/null; git -C "$sbw2" -c user.email=t@t.t -c user.name=t commit -qm work
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > "$sbp/.gitignore"; git -C "$sbp" add .gitignore; git -C "$sbp" commit -qm ignore
+python3 "$B" add --project "$sbp" --task w --agent tl-sonnet-high --owns w.txt >/dev/null
+python3 "$B" update --project "$sbp" --id 1 --state returned --branch worktree-agent-sb2 >/dev/null
+python3 "$B" check --project "$sbp" >"$T/sbchk" 2>&1; rc=$?
+check "board check fails on a stale-base returned branch" "$rc" 1
+grep -q "branch worktree-agent-sb2 is behind .* — rebase before merging" "$T/sbchk" && ok "  with the existing behind-main message" || bad "  with the existing behind-main message"
+# After the guard's fast-forward, the same branch is not flagged.
+sbw3="$T/sb-wt3"; git -C "$sbp" worktree add -q -b worktree-agent-sb3 "$sbw3" origin/main 2>/dev/null
+sbsha2=$(git -C "$sbp" rev-parse HEAD); git -C "$sbw3" merge -q --ff-only "$sbsha2" 2>/dev/null
+echo w3 > "$sbw3/w3.txt"; git -C "$sbw3" add -A >/dev/null; git -C "$sbw3" -c user.email=t@t.t -c user.name=t commit -qm work3
+python3 "$B" update --project "$sbp" --id 1 --branch worktree-agent-sb3 >/dev/null
+python3 "$B" check --project "$sbp" >"$T/sbchk" 2>&1; rc=$?
+check "  fast-forwarded branch passes the same check" "$rc" 0
+# No remote / no origin/HEAD: nothing to do.
+sbn="$T/sb-noremote"; git init -q "$sbn"; git -C "$sbn" config user.email t@t.t; git -C "$sbn" config user.name t
+echo x > "$sbn/x"; git -C "$sbn" add -A >/dev/null; git -C "$sbn" commit -qm x
+mkdir -p "$sbn/.claude/teamlead/.state"; : > "$sbn/.claude/teamlead/.state/active"
+check "no remote: exit 0" "$(sbev "$sbn")" 0
+[ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
+git -C "$sbn" remote add origin "$sbo"; git -C "$sbn" config remote.origin.followRemoteHEAD never   # git >= 2.48 would otherwise create origin/HEAD on fetch
+git -C "$sbn" fetch -q origin 2>/dev/null
+check "remote but no origin/HEAD: exit 0" "$(sbev "$sbn")" 0
+[ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
+# git failure: a broken HEAD must stay silent and exit 0.
+sbb="$T/sb-broken"; git clone -q "$sbo" "$sbb" 2>/dev/null
+mkdir -p "$sbb/.claude/teamlead/.state"; : > "$sbb/.claude/teamlead/.state/active"
+echo 'ref: refs/heads/does-not-exist-xyz' > "$sbb/.git/HEAD"; rm -f "$sbb/.git/refs/heads/main"
+check "git failure (unborn HEAD): exit 0" "$(sbev "$sbb")" 0
+[ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
+echo garbage > "$sbb/.git/HEAD"
+check "git failure (corrupt HEAD): exit 0" "$(sbev "$sbb")" 0
+[ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
