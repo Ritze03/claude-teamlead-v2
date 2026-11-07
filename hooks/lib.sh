@@ -114,3 +114,85 @@ tl_ensure_scratch_exclude() {
   printf '%s\n' ".tl-scratch/" >> "$ex" 2>/dev/null || true
   return 0
 }
+
+# ---- superdoc enforcement helpers (gate.sh check 8, restore.sh, superdoc-guard.sh) -------------
+# Everything superdoc does nothing unless CLAUDE.md carries the `superdoc:start` marker. An
+# unmarked superdoc/ is hand-written docs someone else owns, so nothing blocks there, and a repo
+# without superdoc pays one grep.
+tl_superdoc_wired() { grep -q 'superdoc:start' "$1/CLAUDE.md" 2>/dev/null; }
+
+tl_superdoc_lint() {
+  printf '%s' "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/skills/teamlead-superdoc/lint.sh"
+}
+
+# tl_timeout SECONDS CMD...: GNU `timeout` when there is one, else just run it.
+tl_timeout() {
+  local s=$1; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi
+}
+
+# Layer A: native git hooks. The primary cover for superdoc leaks, because git runs them for every
+# commit, merge commit and push, from Claude's Bash or a human's terminal, and nothing has to
+# parse shell text (see worktree-fence.sh for why shell text is not a reliable thing to fence on).
+# Each hook is a small generated stub that carries TL_HOOK_MARK; it is re-written when its content
+# differs (the plugin root changes with every installed version) and a hook WITHOUT the mark is
+# never touched. With core.hooksPath set git does not read $GIT_COMMON_DIR/hooks at all, so
+# nothing is installed. Every case that leaves a hook uninstalled prints ONE line saying which,
+# so the lead knows superdoc-guard.sh (Layer B) is the only cover there. Silent on success.
+TL_HOOK_MARK='# managed by teamlead'
+
+tl_superdoc_stub() {  # pre-commit|pre-merge-commit|pre-push -> the stub's text on stdout
+  local lint q
+  lint=$(tl_superdoc_lint); q=${lint//\'/\'\\\'\'}
+  printf '#!/bin/sh\n%s (superdoc leak check): regenerated at SessionStart, do not edit.\n' "$TL_HOOK_MARK"
+  printf "LINT='%s'\n" "$q"
+  printf '[ -f "$LINT" ] || { echo "teamlead: superdoc lint.sh not found, leak check skipped (plugin uninstalled?)" >&2; exit 0; }\n'
+  case $1 in
+    pre-push) cat <<'EOS'
+# stdin: <local ref> <local sha> <remote ref> <remote sha>; $1 is the remote name.
+rc=0
+while read -r lref lsha rref rsha; do
+  case $lsha in *[!0]*) ;; *) continue ;; esac          # all zeros: deleting a ref, nothing to scan
+  case $rsha in
+    *[!0]*) bash "$LINT" --range "$rsha..$lsha" >&2; r=$?
+            [ "$r" = 2 ] && { bash "$LINT" --push "$lsha" "$1" >&2; r=$?; } ;;   # remote sha not local
+    *)      bash "$LINT" --push "$lsha" "$1" >&2; r=$? ;;                          # new ref
+  esac
+  [ "$r" = 1 ] && rc=1
+done
+[ "$rc" = 0 ] || echo "teamlead: push blocked: the superdoc errors above are in commits being pushed (the value is never printed)." >&2
+exit $rc
+EOS
+      ;;
+    *) printf 'bash "$LINT" --staged >&2; r=$?\n[ "$r" = 1 ] && exit 1\nexit 0\n' ;;
+  esac
+}
+
+# Prints at most one line (nothing on success). Needs TL_PROJECT (the main checkout).
+tl_install_superdoc_hooks() {
+  tl_superdoc_wired "$TL_PROJECT" || return 0
+  local common hp hooks h want cur skipped=""
+  common=$(git -C "$TL_PROJECT" rev-parse --git-common-dir 2>/dev/null) || return 0
+  case "$common" in /*) ;; *) common="$TL_PROJECT/$common" ;; esac
+  hp=$(git -C "$TL_PROJECT" config --get core.hooksPath 2>/dev/null)
+  if [ -n "$hp" ]; then
+    echo "[teamlead] superdoc: core.hooksPath is set, so the pre-commit, pre-merge-commit and pre-push leak checks could not be installed. Only the Bash guard covers superdoc leaks here (agents' git commands, not a human's terminal)."
+    return 0
+  fi
+  hooks="$common/hooks"
+  mkdir -p "$hooks" 2>/dev/null || return 0
+  for h in pre-commit pre-merge-commit pre-push; do
+    want=$(tl_superdoc_stub "$h"; echo x); want=${want%x}
+    if [ -e "$hooks/$h" ]; then
+      if ! grep -qF "$TL_HOOK_MARK" "$hooks/$h" 2>/dev/null; then skipped+="$h "; continue; fi
+      cur=$(cat "$hooks/$h"; echo x); cur=${cur%x}
+      [ "$cur" = "$want" ] && continue
+    fi
+    printf '%s' "$want" > "$hooks/$h.tl-tmp.$$" 2>/dev/null && chmod +x "$hooks/$h.tl-tmp.$$" 2>/dev/null &&
+      mv -f "$hooks/$h.tl-tmp.$$" "$hooks/$h" 2>/dev/null || { rm -f "$hooks/$h.tl-tmp.$$"; skipped+="$h "; }
+  done
+  if [ -n "$skipped" ]; then
+    echo "[teamlead] superdoc: could not install the git hook(s): ${skipped% } (an existing hook is not managed by teamlead, or the folder is not writable). Those commands are covered only by the Bash guard (agents' git commands, not a human's terminal)."
+  fi
+  return 0
+}

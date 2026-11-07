@@ -15,6 +15,8 @@
 #   6. stage 5->6   — every step of the current phase boarded + merged, header never bumped
 #                      (the message names the phase and what follows Stage 7, #8)
 #   7. returned     — tasks sitting in 'returned' instead of being triaged
+#   8. superdoc     — doc findings in files that HEAD gained since the last Stop (independent of
+#                      board rows; wired projects only; shown once, see the check)
 #
 # Rule learned the hard way, four times over: a check that fires on a correct
 # state is worse than no check. Every condition here must be false during normal
@@ -337,6 +339,54 @@ fi
 if [ -f "$TL_STATE/board.json" ]; then
   nret=$(tl_state_count returned)
   [ "$nret" -gt 0 ] && problems+=$'\n'"- $nret task(s) are in 'returned' — check what came back and move each to 'merged' (with notes on how it was solved) or back to 'queued'. Waiting on the user's decision instead? Set it to 'blocked' with a note saying what you are waiting for (blocked rows are not flagged here); if it keeps a worktree, board.py hold it too"
+fi
+
+# 8. superdoc findings that arrived with a merge, shown once. Wired projects only (CLAUDE.md has
+# `superdoc:start`); independent of board rows, so it also sees a merge the lead never boarded.
+# State: $TL_STATE/superdoc-lint-head = the HEAD last checked. No state: record HEAD and say
+# nothing (old debt is not noise). A recorded commit that is no longer an ancestor of HEAD
+# (history rewritten, another branch checked out): reset to HEAD, nothing. Otherwise lint exactly
+# the files git says changed since then, and advance the state BEFORE showing anything, so a
+# finding fires once. No finding, or no doc file touched, prints nothing: this must be false on
+# every correct state. The Stop hook has 10s: lint runs under `timeout 8`, and on a timeout the
+# state stays where it was and the check stays quiet (it retries at the next Stop).
+if tl_superdoc_wired "$TL_PROJECT"; then
+  sd_head=$(git -C "$TL_PROJECT" rev-parse -q --verify HEAD 2>/dev/null) || sd_head=""
+  if [ -n "$sd_head" ]; then
+    sd_state="$TL_STATE/superdoc-lint-head"
+    sd_last=$(cat "$sd_state" 2>/dev/null) || sd_last=""
+    if [ "$sd_last" = "$sd_head" ]; then
+      :
+    elif [ -z "$sd_last" ] || ! git -C "$TL_PROJECT" merge-base --is-ancestor "$sd_last" "$sd_head" 2>/dev/null; then
+      mkdir -p "$TL_STATE" 2>/dev/null; printf '%s\n' "$sd_head" > "$sd_state" 2>/dev/null
+    else
+      sd_lint=$(tl_superdoc_lint)
+      # NUL-separated: a name with spaces or a leading dash stays one argument
+      sd_files=()
+      while IFS= read -r -d '' sd_f; do sd_files+=("$sd_f"); done \
+        < <(git -C "$TL_PROJECT" diff --name-only -z "$sd_last" "$sd_head" 2>/dev/null)
+      sd_out=""; sd_rc=0
+      if [ "${#sd_files[@]}" -gt 0 ] && [ -f "$sd_lint" ]; then
+        sd_out=$(cd "$TL_PROJECT" && tl_timeout 8 bash "$sd_lint" --files -- "${sd_files[@]}" 2>/dev/null)
+        sd_rc=$?
+      fi
+      if [ "$sd_rc" = 124 ]; then
+        :   # timed out: leave the state alone, say nothing
+      else
+        printf '%s\n' "$sd_head" > "$sd_state" 2>/dev/null
+        if [ -n "$sd_out" ]; then
+          sd_msg="- superdoc: the merge brought in doc findings (shown once, in files it touched). Lint output; it never prints a value:"$'\n'"$(printf '%s\n' "$sd_out" | sed 's/^/    /')"
+          if printf '%s\n' "$sd_out" | grep -q ': error: '; then
+            sd_msg+=$'\n'"  An error means a leak got past the commit hooks. Repair it now (placeholder in the file; anything useful moves to .claude/local/) and do not push until lint is clean. If the value is already in a commit, repairing the file does not remove it: tell the user that, and whether it was pushed. Rewriting history is theirs to decide."
+          fi
+          if printf '%s\n' "$sd_out" | grep -q ': warn: '; then
+            sd_msg+=$'\n'"  Warnings: fix them or leave them on your own judgement (dispatch a repair if it is worth it). The docs are the agents' job: do not ask the user about them."
+          fi
+          problems+=$'\n'"$sd_msg"
+        fi
+      fi
+    fi
+  fi
 fi
 
 [ -z "$problems" ] && exit 0
