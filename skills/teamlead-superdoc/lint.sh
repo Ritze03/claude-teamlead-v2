@@ -5,6 +5,8 @@
 #   lint.sh [--doc DIR] --files F...     all checks, report only findings in those files
 #   lint.sh [--doc DIR] --staged         leak checks on lines ADDED in the index
 #   lint.sh [--doc DIR] --range A..B     leak checks on lines added by EACH commit in A..B
+#   lint.sh [--doc DIR] --push REF REMOTE  same, for the commits of REF no remote-tracking ref of
+#                                        REMOTE has (a push of a new branch: old debt is not scanned)
 #   lint.sh [--doc DIR] --force-load     the force-load report (SKILL.md Step 1)
 #
 # Findings print as `path:line: error|warn: <kind>`. A leaked value is NEVER printed, in any
@@ -107,11 +109,12 @@ forceload() {
 
 usage() {
   cat <<'EOF'
-usage: lint.sh [--doc DIR] [--files F... | --staged | --range A..B | --force-load]
+usage: lint.sh [--doc DIR] [--files F... | --staged | --range A..B | --push REF REMOTE | --force-load]
   (no mode)      whole tree, all checks
   --files F...   all checks, report only findings in the given files
   --staged       leak checks on lines added in the index
   --range A..B   leak checks on lines added by each commit in A..B
+  --push REF REMOTE  the same for commits of REF that REMOTE's tracking refs lack (new-branch push)
   --force-load   the force-load size report
 exit: 0 no errors, 1 errors found, 2 usage error
 EOF
@@ -119,8 +122,8 @@ EOF
 usage_err() { printf 'superdoc-lint: %s\n' "$1" >&2; usage >&2; exit 2; }
 
 # ---- arguments ------------------------------------------------------------------------------------
-MODE=all; DOC=""; DOC_GIVEN=0; RANGE=""; FILES_IN=""
-setmode() { [ "$MODE" = all ] || usage_err "only one of --files, --staged, --range, --force-load"; MODE=$1; }
+MODE=all; DOC=""; DOC_GIVEN=0; RANGE=""; FILES_IN=""; PUSH_REF=""; PUSH_REMOTE=""
+setmode() { [ "$MODE" = all ] || usage_err "only one of --files, --staged, --range, --push, --force-load"; MODE=$1; }
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help) usage; exit 0 ;;
@@ -130,6 +133,7 @@ while [ $# -gt 0 ]; do
     --force-load) setmode force-load; shift ;;
     --range) [ $# -ge 2 ] || usage_err "--range needs A..B"; setmode range; RANGE=$2; shift 2 ;;
     --range=*) setmode range; RANGE=${1#--range=}; shift ;;
+    --push) [ $# -ge 3 ] || usage_err "--push needs REF and REMOTE"; setmode push; PUSH_REF=$2; PUSH_REMOTE=$3; shift 3 ;;
     --files)
       setmode files; shift
       while [ $# -gt 0 ]; do
@@ -221,8 +225,20 @@ function placeholder_home(name,    l, f) {
   return 0
 }
 # /home/<name>/ and /Users/<name>/ ; the char before the leading slash must not be a path char
-# (so `example.com/home/x/` and `a/home/x/` are not host paths).
+# (so `example.com/home/x/` and `a/home/x/` are not host paths). A bare /home/<name> with no
+# trailing slash (`cd /home/name`) counts too: same allowlist, same exclusions.
 function unixhome(s, root,    rest, seg, nm, re) {
+  rest = s
+  re = "(^|[^A-Za-z0-9._~%+/-])/" root "/[A-Za-z0-9_-][A-Za-z0-9._-]*"
+  while (match(rest, re)) {
+    seg = substr(rest, RSTART, RLENGTH)
+    rest = substr(rest, RSTART + RLENGTH)
+    sub(/^[^\/]/, "", seg)
+    nm = substr(seg, length(root) + 3)
+    if (placeholder_home(nm)) continue
+    sub(/\.+$/, "", nm)                         # "/home/name." at the end of a sentence
+    if (nm != "" && !placeholder_home(nm)) { emit("error", "home path"); return }
+  }
   rest = s
   re = "(^|[^A-Za-z0-9._~%+/-])/" root "/[^/ \t\"'`]+/"
   while (match(rest, re)) {
@@ -374,6 +390,13 @@ case $MODE in
   staged)
     git rev-parse --git-dir >/dev/null 2>&1 || usage_err "not a git repository"
     RECORDS=$(git -c core.quotepath=false diff --cached $GITDIFF_OPTS -- "$DOC" CLAUDE.md 2>/dev/null | diff_records | scan_records) ;;
+  push)
+    git rev-parse --git-dir >/dev/null 2>&1 || usage_err "not a git repository"
+    git rev-parse -q --verify "$PUSH_REF^{commit}" >/dev/null 2>&1 || usage_err "bad revision"
+    # commits of REF that no remote-tracking ref of REMOTE has. REMOTE is the remote's name (what
+    # git hands pre-push as $1); a URL or an unknown name falls back to all remote-tracking refs.
+    if git config --get "remote.$PUSH_REMOTE.url" >/dev/null 2>&1; then rglob="--remotes=$PUSH_REMOTE"; else rglob="--remotes"; fi
+    RECORDS=$(git -c core.quotepath=false log --reverse --no-merges -p $GITDIFF_OPTS --format=%x01%h "$PUSH_REF" --not "$rglob" -- "$DOC" CLAUDE.md 2>/dev/null | diff_records | scan_records) ;;
   range)
     git rev-parse --git-dir >/dev/null 2>&1 || usage_err "not a git repository"
     case $RANGE in *...*) usage_err "--range takes A..B (two dots)" ;; *..*) ;; *) usage_err "--range takes A..B" ;; esac

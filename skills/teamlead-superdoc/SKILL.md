@@ -34,6 +34,13 @@ chosen. Everything else about the docs is the agents' call.
 **You orchestrate; you do not read, inventory, or write docs yourself.** Every unit
 of real work goes to a worker. Stay inside the target project.
 
+**Tiers (stated here once; every step below follows it).** Reading and scouting are Sonnet.
+Writing and fixing superdoc entries is `tl-sonnet-medium`, the overview and rationale pages
+included. QC is `tl-sonnet-high`: it reads the diff against the code and re-runs `lint.sh`.
+There is no Opus QC. Opus is only an escalation after a Sonnet worker has actually failed
+(retry ladder), with the ceiling `tl-opus-medium`; it is never a first choice for a page
+because of what the page is about.
+
 ## Worker knowledge base
 
 Workers don't inherit this skill, so every dispatched superdoc worker must read the
@@ -99,7 +106,7 @@ health check. Compare the snippet's `superdoc marker: vN` with `superdoc: vM` on
 
 - **N ≥ M** → nothing to do; go to HEALTH-CHECK.
 - **N < M** → apply the upgrade **now, as the first thing, without offering or asking**.
-  Dispatch **one writing worker** (Sonnet) in a worktree like any other doc write; you do
+  Dispatch **one writing worker** (`tl-sonnet-medium`) in a worktree like any other doc write; you do
   not implement it. The brief names playbook Part 6, the installed `vN` and the target
   `vM`. Several versions behind: the worker applies each version's step in order (v2 → v3,
   then every later one) and re-stamps the marker to `vM`. An upgrade applies only what
@@ -142,12 +149,6 @@ returns, **MAP one worker per capability folder**, each scoped to its own folder
 writes never collide. Inside a folder every feature, backend or subsystem gets its own
 page, so a folder holds one page per capability (small single-topic pages; agents read
 only the one they need). A worker never folds a second capability into another's page.
-
-**Tier per capability:** reading/inventory → Sonnet · ordinary doc-writing
-(`features/*.md`, UI pages) → Sonnet · only `superdoc/architecture/overview.md` and
-genuinely architectural rationale → Opus. The feature-page boundary is blurry — when
-unsure, **take Opus**: a page that explains a design choice or a trade-off is architectural
-rationale, a page that only describes behaviour is ordinary writing.
 
 Workers emit: `architecture/overview.md` hub, `meta/TERMINOLOGY.md`,
 `ui/STYLING-GUIDE.md` if there's UI, one `features/*.md` per real capability with inline
@@ -201,11 +202,15 @@ scrubbed by the upgrade, the audit finds leaks and the repair phase fixes them.)
 ## Step 4 — REPAIR (automatic, after the audit)
 
 Runs right after Step 3's audit, in the same run, without offering or asking. The named
-items are the audit's findings. Dispatch workers against them, in place, **per-item tier**
-(reading → Sonnet, ordinary writing → Sonnet, architectural rationale → Opus; when unsure,
-Opus). Then run **QC after repair** — `tl-sonnet-high` by default, `tl-opus-high` only for
-architectural repairs. Only if the user literally asks for a report only (an audit with no
-changes) do you stop after Step 3.
+items are the audit's findings. Dispatch workers against them, in place, at the tiers above
+(`tl-sonnet-medium` writers), then run **QC after repair** (`tl-sonnet-high`). When the repair
+and its QC are done, record the audit (below). Only if the user literally asks for a report
+only (an audit with no changes) do you stop after Step 3, and record the audit there.
+
+**Record the audit** at the end of Step 4 (Step 3 for a report-only audit), from the main
+checkout: `git rev-parse HEAD > .claude/teamlead/.state/superdoc-audit`. SessionStart counts
+commits from that one and reminds you when it is more than 50 non-merge commits old; no record
+means the count starts at the next session.
 
 A leaked value is replaced with a placeholder automatically, after anything useful in it
 has moved to `.claude/local/` (untracked; playbook Parts 4a and 10). A secret is removed,
@@ -224,6 +229,31 @@ a privacy repair **carries the rule text itself** (the Privacy paragraph above p
 `.claude/local/` rule), not a pointer to it, and the **QC after repair re-runs the Part 9
 privacy scans on the result** (`lint.sh`, the token scan and the identity-values pass)
 instead of trusting the worker's report.
+
+## What enforces the rules between audits
+
+All of it acts only in a project whose `CLAUDE.md` carries `superdoc:start`; an unmarked
+`superdoc/` is someone else's hand-written docs and is never blocked.
+
+- **Native git hooks** (`pre-commit`, `pre-merge-commit`, `pre-push`), installed at session
+  start into the repo's common hooks folder. They run `lint.sh` and refuse a commit, merge
+  commit or push that adds a leak (absolute home path, email, private IP). This covers
+  terminal commits and pushes too. A leak added in one commit and removed in a later one
+  still blocks the push, because the push check reads each commit, not the net diff.
+- **Bash guard** (`hooks/superdoc-guard.sh`): the same check on an agent's `git commit`,
+  `git push` and `git merge`, for what the native hooks miss: `--no-verify`, projects where
+  they could not be installed, and fast-forward merges (git runs no hook for those). Best
+  effort: it reads shell text, so an unusual command can slip past it.
+- **Stop check** (`gate.sh`): after a merge, the doc files it touched are linted once and the
+  findings shown to you. Warnings are yours to fix or leave; errors mean a leak got past the
+  commit hooks: repair it now and do not push.
+- **Audit reminder** at session start when the last recorded audit is over 50 commits old.
+
+What this cannot cover: `git commit --no-verify` outside Claude (a terminal), a clone that has
+never had a session (no hooks installed yet), a project where the hooks could not be installed
+(`core.hooksPath` set, or a foreign hook of the same name) when a human pushes from a terminal,
+and edits made in a web editor. Warnings and staleness are not blocked at all: the audit is the
+cover for them.
 
 ## Why superdoc sits at the root
 

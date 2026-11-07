@@ -1140,6 +1140,249 @@ printf '%s' "$P9" | grep -q 'lint.sh. lists every entry over ~300 characters' &&
 printf '%s' "$P9" | grep -q 'Identity values of this machine' && ok "Part 9: the identity-values pass stays in the playbook (a script cannot know)" || bad "Part 9: identity pass"
 printf '%s' "$P9" | grep -q 'never quoting the value' && ok "Part 9: the never-quote-the-value rule is kept" || bad "Part 9: never quote"
 
+echo "== superdoc: bare home paths and --push (lint.sh) =="
+BH=$T/lbh; mklf $BH; (cd $BH && git init -q)
+bhc() { # label line want(0|1)
+  printf '# T\n%s\n' "$2" > $BH/superdoc/features/t.md
+  local n; n=$(lintin $BH 2>&1 | grep -c ': error: home path$'); check "lint bare home path: $1" "$n" "$3"
+}
+bhc "cd /home/NAME is an error" "cd /home/$SENT" 1
+bhc "/Users/NAME at a word boundary is an error" "open /Users/$SENT now" 1
+bhc "(/home/NAME) in parentheses is an error" "see (/home/$SENT)" 1
+bhc "/home/NAME. at the end of a sentence is an error" "it lives in /home/$SENT." 1
+bhc "/home/NAME/ with a slash still is" "cd /home/$SENT/x" 1
+bhc "the allowlist still applies (/home/user, /home/username)" "cd /home/user and /home/username" 0
+bhc "a placeholder is not a name (/home/<name>, /home/\$USER, /home/{u}, /home/...)" 'cd /home/<name> /home/$USER /home/{u} /home/...' 0
+bhc "a path character before the slash excludes it (example.com/home/NAME, a/home/NAME)" "see example.com/home/$SENT and a/home/$SENT" 0
+bhc "/home alone and /homes/NAME are not host paths" "cd /home/ and /homes/$SENT" 0
+bhc "superdoc-lint: allow skips the line" "cd /home/$SENT <!-- superdoc-lint: allow -->" 0
+check "lint bare home path: the value is never printed" "$(printf '# T\ncd /home/%s\n' $SENT > $BH/superdoc/features/t.md; lintin $BH 2>&1 | grep -c "$SENT")" "0"
+
+# --push REF REMOTE: only the commits no remote-tracking ref of REMOTE has
+PR=$T/lpr; PRR=$T/lpr-remote.git; gfix $PR; git init -q --bare $PRR; (cd $PR && git remote add origin $PRR)
+printf '# P\n' > $PR/CLAUDE.md; printf '# T\nold /home/olddebt/x\nclean\n' > $PR/superdoc/features/a.md
+(cd $PR && git add -A && git commit -qm base && git push -q origin HEAD:refs/heads/master >/dev/null 2>&1; git fetch -q origin)
+(cd $PR && git checkout -qb nb && printf 'new\n' >> $PR/superdoc/features/a.md && git commit -qam clean)
+check "lint --push: a new branch with a clean commit does not scan the old debt (exit 0, silent)" "$(lintin $PR --push nb origin 2>&1; echo rc=$?)" "rc=0"
+(cd $PR && printf 'cd /home/%s\n' $SENT >> superdoc/features/a.md && git commit -qam leak)
+pushout=$(lintin $PR --push nb origin 2>&1); pushrc=$?
+check "lint --push: a leaking commit on the new branch is found, with the commit, exit 1" "$pushrc/$(printf '%s\n' "$pushout" | grep -c '^superdoc/features/a.md:5: error: home path (commit ')/$(printf '%s\n' "$pushout" | grep -c "$SENT\|olddebt")" "1/1/0"
+check "lint --push: an unknown remote name falls back to all remote-tracking refs (still not the old debt)" "$(lintin $PR --push nb nosuchremote 2>&1 | grep -c ': error')" "1"
+lintin $PR --push nosuchref origin >/dev/null 2>&1; check "lint --push: a bad ref is exit 2" "$?" "2"
+lintin $PR --push nb >/dev/null 2>&1; check "lint --push: a missing REMOTE is exit 2" "$?" "2"
+
+echo "== superdoc enforcement: native git hooks (Layer A) =="
+# wired project, teamlead active, one clean commit
+sgmk() {
+  gfix "$1"; printf '# P\n<!-- superdoc:start v4 -->\n<!-- superdoc:end -->\n' > "$1/CLAUDE.md"
+  printf '# A\nclean\n' > "$1/superdoc/features/a.md"
+  mkdir -p "$1/.claude/teamlead/.state"; : > "$1/.claude/teamlead/.state/active"
+  (cd "$1" && git add CLAUDE.md superdoc && git commit -qm base)
+}
+sgrestore() { # dir [source]
+  printf '{"hook_event_name":"SessionStart","source":"%s","session_id":"s1","cwd":"%s"}' "${2:-startup}" "$1" | env -u CLAUDE_PROJECT_DIR "$H/restore.sh" 2>&1
+}
+sgleakline() { printf 'cd /home/%s\n' $SENT; }
+W=$T/sgw; sgmk $W
+out_r1=$(sgrestore $W)
+check "stubs: pre-commit, pre-merge-commit and pre-push are installed, executable, marked" "$(for h in pre-commit pre-merge-commit pre-push; do [ -x $W/.git/hooks/$h ] && grep -q '^# managed by teamlead' $W/.git/hooks/$h && printf y; done)" "yyy"
+check "stubs: installing prints nothing about superdoc" "$(printf '%s\n' "$out_r1" | grep -c 'superdoc')" "0"
+ino1=$(stat -c %i $W/.git/hooks/pre-push); out_r1b=$(sgrestore $W resume); ino2=$(stat -c %i $W/.git/hooks/pre-push)
+check "stubs: a second session start with the same plugin root rewrites nothing" "$ino1" "$ino2"
+mkdir -p $T/plugv2/skills/teamlead-superdoc; cp "$LINT" $T/plugv2/skills/teamlead-superdoc/lint.sh
+printf '%s\n' "$(printf '{"hook_event_name":"SessionStart","source":"startup","session_id":"s1","cwd":"%s"}' $W | env -u CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_ROOT=$T/plugv2 "$H/restore.sh" 2>&1 | grep -c 'superdoc')" > $T/sg_v2out
+check "stubs: a new plugin root (version change) re-writes all three, pointing at the new lint.sh; no message" "$(grep -c "$T/plugv2/skills/teamlead-superdoc/lint.sh" $W/.git/hooks/pre-commit $W/.git/hooks/pre-merge-commit $W/.git/hooks/pre-push | tr '\n' ' ' | sed "s#$W/.git/hooks/##g")/$(cat $T/sg_v2out)" "pre-commit:1 pre-merge-commit:1 pre-push:1 /0"
+sgrestore $W startup >/dev/null   # back to the real plugin root
+# foreign hook, core.hooksPath
+SF=$T/sgforeign; sgmk $SF; printf '#!/bin/sh\necho foreign-hook\n' > $SF/.git/hooks/pre-push; chmod +x $SF/.git/hooks/pre-push
+out_f=$(sgrestore $SF)
+check "stubs: a hook without the marker is never overwritten" "$(grep -c foreign-hook $SF/.git/hooks/pre-push)/$(grep -c 'managed by teamlead' $SF/.git/hooks/pre-push)" "1/0"
+check "stubs: the others are still installed, and ONE line names the hook that could not be" "$([ -x $SF/.git/hooks/pre-commit ] && printf y)/$(printf '%s\n' "$out_f" | grep -c '^\[teamlead\] superdoc: could not install the git hook(s): pre-push ')" "y/1"
+SH=$T/sghp; sgmk $SH; (cd $SH && git config core.hooksPath .githooks)
+out_h=$(sgrestore $SH)
+check "stubs: core.hooksPath set installs nothing and says so in one line" "$(ls $SH/.git/hooks | grep -c '^pre-[a-z-]*$')/$(printf '%s\n' "$out_h" | grep -c '^\[teamlead\] superdoc: core.hooksPath is set')" "0/1"
+# fail open
+SO=$T/sgopen; sgmk $SO; mkdir -p $T/plugv3
+printf '{"hook_event_name":"SessionStart","source":"startup","session_id":"s1","cwd":"%s"}' $SO | env -u CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_ROOT=$T/plugv3 "$H/restore.sh" >/dev/null 2>&1
+printf 'cd /home/%s\n' $SENT >> $SO/superdoc/features/a.md
+out_o=$(cd $SO && git commit -qam 'leak but no lint.sh' 2>&1); rc_o=$?
+check "stubs: lint.sh gone (plugin uninstalled) fails OPEN with a stderr note: the commit goes through" "$rc_o/$(printf '%s\n' "$out_o" | grep -c 'lint.sh not found, leak check skipped')" "0/1"
+# unwired: nothing installed, nothing blocks, even with an unmarked superdoc/ holding a leak
+UW=$T/sguw; sgmk $UW; printf '# P\n' > $UW/CLAUDE.md; (cd $UW && git commit -qam unwire)
+out_u=$(sgrestore $UW)
+printf 'cd /home/%s\n' $SENT >> $UW/superdoc/features/a.md
+out_uc=$(cd $UW && git commit -qam 'unmarked docs are not ours' 2>&1); rc_uc=$?
+check "unwired (no superdoc:start): no hooks installed, no message, the commit is not blocked" "$(ls $UW/.git/hooks | grep -c '^pre-[a-z-]*$')/$(printf '%s\n' "$out_u" | grep -c 'superdoc')/$rc_uc" "0/0/0"
+
+# a real commit
+n0=$(cd $W && git rev-list --count HEAD)
+sgleakline >> $W/superdoc/features/a.md
+out_c=$(cd $W && git add superdoc && git commit -qm leak 2>&1); rc_c=$?
+check "commit with a seeded leak is blocked: names file:line:kind, prints no value, the commit does not exist" "$([ $rc_c -ne 0 ] && echo blocked)/$(printf '%s\n' "$out_c" | grep -c '^superdoc/features/a.md:3: error: home path$')/$(printf '%s\n' "$out_c" | grep -c "$SENT")/$(cd $W && git rev-list --count HEAD)" "blocked/1/0/$n0"
+printf '# A\nclean\nmore\n' > $W/superdoc/features/a.md
+(cd $W && git add superdoc && git commit -qm clean >/dev/null 2>&1); check "a clean commit goes through" "$(cd $W && git rev-list --count HEAD)" "$((n0+1))"
+# from a linked worktree: hooks live in the common dir
+(cd $W && git worktree add -q $T/sgw-wt -b wtb >/dev/null 2>&1)
+sgleakline >> $T/sgw-wt/superdoc/features/a.md
+out_wt=$(cd $T/sgw-wt && git add superdoc && git commit -qm leak 2>&1); rc_wt=$?
+check "commit from a linked worktree is blocked by the hook in the common dir" "$([ $rc_wt -ne 0 ] && echo blocked)/$(printf '%s\n' "$out_wt" | grep -c '^superdoc/features/a.md:[0-9]*: error: home path$')" "blocked/1"
+(cd $T/sgw-wt && git reset -q && git checkout -q -- superdoc); printf 'wt\n' >> $T/sgw-wt/superdoc/features/a.md
+(cd $T/sgw-wt && git commit -qam 'clean in a worktree' >/dev/null 2>&1); check "  ... and a clean commit there goes through" "$(cd $T/sgw-wt && git log --oneline | grep -c 'clean in a worktree')" "1"
+
+# a real non-fast-forward merge
+base_w=$(cd $W && git rev-parse HEAD)
+(cd $W && git checkout -qb feat && sgleakline >> superdoc/features/a.md && git commit -qa --no-verify -m featleak && git checkout -q master)
+printf 'x\n' > $W/src.txt; (cd $W && git add src.txt && git commit -qm diverge)
+head_m=$(cd $W && git rev-parse HEAD)
+out_m=$(cd $W && git merge feat -m merge 2>&1); rc_m=$?
+(cd $W && git merge --abort >/dev/null 2>&1; git reset -q --hard)
+check "a real non-ff merge that brings in a leak is blocked (pre-merge-commit), value not printed, HEAD unmoved" "$([ $rc_m -ne 0 ] && echo blocked)/$(printf '%s\n' "$out_m" | grep -c ': error: home path')/$(printf '%s\n' "$out_m" | grep -c "$SENT")/$([ "$(cd $W && git rev-parse HEAD)" = "$head_m" ] && echo same)" "blocked/1/0/same"
+(cd $W && git checkout -q -b okb $base_w && printf 'c\n' > superdoc/features/c.md && git add superdoc && git commit -qm okc && git checkout -q master)
+(cd $W && git merge okb -m okmerge >/dev/null 2>&1); check "a real non-ff merge of a clean branch is allowed" "$(cd $W && git log -1 --format=%p | wc -w | tr -d ' ')" "2"
+# git runs no hook for a fast-forward: why superdoc-guard.sh exists
+(cd $W && git checkout -q -b fff && sgleakline >> superdoc/features/c.md && git commit -qa --no-verify -m ffleak && git checkout -q master && git reset -q --hard HEAD)
+(cd $W && git checkout -q -B ffm master && git merge -q --ff-only fff >/dev/null 2>&1); check "a fast-forward merge runs no native hook (so it is not blocked there: the Bash guard covers it)" "$(cd $W && git log -1 --format=%s)" "ffleak"
+(cd $W && git checkout -q master && git branch -qD ffm)
+
+# a real push to a local bare remote
+PW=$T/sgp; PWR=$T/sgp-remote.git; sgmk $PW; git init -q --bare $PWR; (cd $PW && git remote add origin $PWR)
+sgrestore $PW >/dev/null
+(cd $PW && git push -q origin HEAD:refs/heads/master >/dev/null 2>&1); r0=$(cd $PWR && git rev-parse master 2>/dev/null)
+check "a clean push is allowed" "$([ -n "$r0" ] && echo pushed)" "pushed"
+(cd $PW && git fetch -q origin && git branch -q -u origin/master)
+sgleakline >> $PW/superdoc/features/a.md; (cd $PW && git commit -qa --no-verify -m leak)
+printf '# A\nclean\n' > $PW/superdoc/features/a.md; (cd $PW && git commit -qa -m 'removed again' >/dev/null 2>&1)
+out_p=$(cd $PW && git push origin master 2>&1); rc_p=$?
+check "add-then-remove across commits still blocks the push (each commit is read, not the net diff); the remote is unchanged; no value printed" "$([ $rc_p -ne 0 ] && echo blocked)/$(printf '%s\n' "$out_p" | grep -c ': error: home path (commit ')/$([ "$(cd $PWR && git rev-parse master)" = "$r0" ] && echo same)/$(printf '%s\n' "$out_p" | grep -c "$SENT")" "blocked/1/same/0"
+(cd $PW && git reset -q --hard origin/master && printf 'ok\n' >> superdoc/features/a.md && git commit -qam ok >/dev/null 2>&1)
+(cd $PW && git push -q origin master >/dev/null 2>&1); check "a clean push after resetting the leak away is allowed" "$([ "$(cd $PWR && git rev-parse master)" = "$(cd $PW && git rev-parse HEAD)" ] && echo pushed)" "pushed"
+# old debt on the remote, then new branches
+PD=$T/sgd; PDR=$T/sgd-remote.git; sgmk $PD; git init -q --bare $PDR; (cd $PD && git remote add origin $PDR)
+sgleakline >> $PD/superdoc/features/a.md; (cd $PD && git commit -qa -m olddebt --no-verify && git push -q --no-verify origin HEAD:refs/heads/master >/dev/null 2>&1 && git fetch -q origin)
+sgrestore $PD >/dev/null
+(cd $PD && git checkout -qb nb1 && printf 'more\n' > superdoc/features/b.md && git add superdoc && git commit -qm clean >/dev/null 2>&1)
+out_nb=$(cd $PD && git push origin nb1 2>&1); rc_nb=$?
+check "a NEW branch does not block on old debt that the remote already has" "$rc_nb/$([ -n "$(cd $PDR && git rev-parse -q --verify refs/heads/nb1)" ] && echo pushed)" "0/pushed"
+(cd $PD && git checkout -qb nb2 && printf 'cd /home/%s\n' $SENT > superdoc/features/b.md && git add superdoc && git commit -qm newleak --no-verify)
+out_nb2=$(cd $PD && git push origin nb2 2>&1); rc_nb2=$?
+check "  ... but a new branch whose own commit leaks is blocked" "$([ $rc_nb2 -ne 0 ] && echo blocked)/$(printf '%s\n' "$out_nb2" | grep -c ': error: home path (commit ')/$(printf '%s\n' "$out_nb2" | grep -c "$SENT")/$([ -z "$(cd $PDR && git rev-parse -q --verify refs/heads/nb2)" ] && echo absent)" "blocked/1/0/absent"
+out_del=$(cd $PD && git push origin --delete nb1 2>&1); check "  ... and deleting a remote branch is not scanned" "$?" "0"
+
+echo "== superdoc enforcement: the Bash guard (Layer B) =="
+sgguard() { # dir command -> hook output; the hook is fed the real PreToolUse shape
+  jq -n --arg c "$2" --arg d "$1" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}' | env -u CLAUDE_PROJECT_DIR "$H/superdoc-guard.sh" 2>&1
+}
+sgverdict() { printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null; }
+check "hooks.json: exactly one Bash PreToolUse matcher, running superdoc-guard.sh" "$(jq -r '[.hooks.PreToolUse[]|select(.matcher=="Bash")]|map(.hooks[].command)|join(",")' "$H/hooks.json")" '${CLAUDE_PLUGIN_ROOT}/hooks/superdoc-guard.sh'
+[ -x "$H/superdoc-guard.sh" ] && ok "superdoc-guard.sh is executable" || bad "superdoc-guard.sh is not executable"
+G=$T/sgg; sgmk $G    # wired, NO native hooks installed (restore never ran): the guard is the only cover
+sgleakline >> $G/superdoc/features/a.md; (cd $G && git add superdoc)
+g1=$(sgguard $G 'git commit --no-verify -m leak')
+check "guard: git commit --no-verify with a staged leak is denied" "$(sgverdict "$g1")" "deny"
+check "  the reason names file:line:kind and never the value" "$(printf '%s' "$g1" | jq -r .hookSpecificOutput.permissionDecisionReason | grep -c '^superdoc/features/a.md:3: error: home path$')/$(printf '%s' "$g1" | grep -c "$SENT")" "1/0"
+check "  the reason is a message to the agent, not a question to the user" "$(printf '%s' "$g1" | jq -r .hookSpecificOutput.permissionDecisionReason | grep -ci 'would you\|do you want\|ask the user')" "0"
+check "guard: the deny JSON has the shape board-fence.sh uses (PreToolUse event name)" "$(printf '%s' "$g1" | jq -r .hookSpecificOutput.hookEventName)" "PreToolUse"
+check "guard: git -C DIR commit, from another cwd, is denied" "$(sgverdict "$(sgguard $T "git -C $G commit --no-verify -m x")")" "deny"
+check "guard: cd DIR && git commit, from another cwd, is denied" "$(sgverdict "$(sgguard $T "cd $G && git commit --no-verify -m x")")" "deny"
+check "guard: a chained command (git add . && git commit) is parsed too" "$(sgverdict "$(sgguard $G 'git add -A && git commit --no-verify -m x')")" "deny"
+check "guard: staged-only leak, command is git commit -m with a message mentioning push" "$(sgverdict "$(sgguard $G 'git commit -m "docs: do not git push yet"')")" "deny"
+check "guard: unrelated Bash is silent (ls, git status, git log, grep commit)" "$(for c in 'ls -la' 'git status' 'git log --oneline' 'grep -rn commit .' 'echo git push'; do sgguard $G "$c"; done | wc -c | tr -d ' ')" "0"
+(cd $G && git reset -q && git checkout -q -- superdoc)
+check "guard: nothing staged, git commit is silent" "$(sgguard $G 'git commit -m nothing' | wc -c | tr -d ' ')" "0"
+sgleakline >> $G/superdoc/features/a.md   # tracked, modified, NOT staged
+check "guard: git commit -am sees what -a will stage (unstaged tracked leak) and denies" "$(sgverdict "$(sgguard $G 'git commit -am x')")/$(sgverdict "$(sgguard $G 'git commit -m x -a')")/$(sgverdict "$(sgguard $G 'git commit -ma')")" "deny/deny/"
+check "guard: the temporary index is cleaned up" "$(ls $G/.git | grep -c 'tl-guard')" "0"
+(cd $G && git checkout -q -- superdoc)
+printf 'fine\n' >> $G/superdoc/features/a.md; (cd $G && git add superdoc)
+check "guard: a clean staged commit is silent" "$(sgguard $G 'git commit --no-verify -m clean' | wc -c | tr -d ' ')" "0"
+(cd $G && git commit -qm clean >/dev/null 2>&1)
+# merges: a fast-forward is where git runs no hook
+(cd $G && git checkout -qb ffleak && sgleakline >> superdoc/features/a.md && git commit -qa -m ffleak --no-verify && git checkout -q master)
+g_ff=$(sgguard $G 'git merge ffleak')
+check "guard: a fast-forward merge of a leaking branch is denied (no native hook exists for it)" "$(sgverdict "$g_ff")/$(printf '%s' "$g_ff" | jq -r .hookSpecificOutput.permissionDecisionReason | grep -c ': error: home path (commit ')/$(printf '%s' "$g_ff" | grep -c "$SENT")" "deny/1/0"
+check "  git merge --no-ff -m x BRANCH and git merge --squash BRANCH likewise" "$(sgverdict "$(sgguard $G 'git merge --no-ff -m x ffleak')")/$(sgverdict "$(sgguard $G 'git merge --squash ffleak')")" "deny/deny"
+check "  git merge --abort and an unknown ref are silent" "$(sgguard $G 'git merge --abort'; sgguard $G 'git merge nosuchbranch')" ""
+(cd $G && git checkout -qb okff && printf 'ok\n' > superdoc/features/z.md && git add superdoc && git commit -qm ok --no-verify && git checkout -q master)
+check "guard: merging a clean branch is silent" "$(sgguard $G 'git merge okff' | wc -c | tr -d ' ')" "0"
+# pushes: with and without an upstream
+GP=$T/sggp; GPR=$T/sggp-remote.git; sgmk $GP; git init -q --bare $GPR; (cd $GP && git remote add origin $GPR && git push -q origin HEAD:refs/heads/master >/dev/null 2>&1 && git fetch -q origin)
+sgleakline >> $GP/superdoc/features/a.md; (cd $GP && git commit -qa -m leak --no-verify)
+check "guard: git push of a new branch (no upstream) scans its own commits and denies" "$(sgverdict "$(sgguard $GP 'git push origin HEAD')")/$(sgverdict "$(sgguard $GP 'git push')")" "deny/deny"
+(cd $GP && git branch -q -u origin/master)
+check "guard: git push with an upstream scans @{u}..HEAD and denies; git push origin master too" "$(sgverdict "$(sgguard $GP 'git push')")/$(sgverdict "$(sgguard $GP 'git push origin master --no-verify')")" "deny/deny"
+check "guard: deleting a remote branch is silent" "$(sgguard $GP 'git push origin --delete old' | wc -c | tr -d ' ')" "0"
+(cd $GP && git reset -q --hard origin/master)
+check "guard: nothing to push is silent" "$(sgguard $GP 'git push' | wc -c | tr -d ' ')" "0"
+# not wired, and what it cannot parse
+check "guard: an unwired project is never touched (leak staged, unmarked CLAUDE.md)" "$(printf 'cd /home/%s\n' $SENT >> $UW/superdoc/features/a.md; (cd $UW && git add superdoc); sgguard $UW 'git commit --no-verify -m x' | wc -c | tr -d ' ')" "0"
+check "guard: an unresolvable cd target, a variable, a missing dir all pass silently" "$(sgguard $G 'cd "$SOMEWHERE" && git commit --no-verify -m x'; sgguard $G 'git -C /nonexistent/dir commit -m x'; sgguard /nonexistent 'git commit -m x')" ""
+check "guard: not Bash (another tool name) is ignored" "$(jq -n --arg d $G '{tool_name:"Read",cwd:$d,tool_input:{command:"git commit"}}' | "$H/superdoc-guard.sh" 2>&1)" ""
+check "guard: malformed stdin passes silently" "$(printf 'git commit {not json' | "$H/superdoc-guard.sh" 2>&1; echo rc=$?)" "rc=0"
+check "guard: the sentinel never appears in any guard output above" "$( { sgguard $G 'git merge ffleak'; sgguard $GP 'git push origin HEAD'; } | grep -c "$SENT")" "0"
+
+echo "== superdoc enforcement: findings once, on merge (gate.sh check 8) =="
+sgstop() { printf '{"hook_event_name":"Stop","cwd":"%s","stop_hook_active":false}' "$1" | env -u CLAUDE_PROJECT_DIR "$H/gate.sh" >"$T/sgout" 2>&1; echo $?; }
+S=$T/sgs; sgmk $S
+printf '# O\nold /mnt/%s/debt\n' olddebt > $S/superdoc/features/old.md; (cd $S && git add superdoc && git commit -qm olddebt)
+check "gate: first run (no state file) is silent and records HEAD" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')/$([ "$(cat $S/.claude/teamlead/.state/superdoc-lint-head)" = "$(cd $S && git rev-parse HEAD)" ] && echo head)" "0/0/head"
+check "gate: no new commit is silent" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
+(cd $S && git checkout -qb b1 && printf '# C\nclean\n' > superdoc/features/c.md && git add superdoc && git commit -qm c --no-verify && git checkout -q master && git merge -q --no-ff -m m1 b1)
+check "gate: a clean merge is silent, and old debt in a file the merge did not touch is not reported" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
+printf 'x\n' > $S/src.txt; (cd $S && git add src.txt && git commit -qm nondoc)
+check "gate: a commit that touches no doc file is silent" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
+(cd $S && git checkout -qb b2 && printf '# B\nsee /mnt/%s/x\n' $SENT > superdoc/features/b.md && git add superdoc && git commit -qm b --no-verify && git checkout -q master && git merge -q --no-ff -m m2 b2)
+rc_g=$(sgstop $S)
+check "gate: a merge that brings a warning fires: blocks, names file:line:kind, tells the agent it is theirs to judge, never asks the user" "$rc_g/$(grep -c '^ *superdoc/features/b.md:2: warn: host path$' $T/sgout)/$(grep -c 'do not ask the user' $T/sgout)/$(grep -c "$SENT" $T/sgout)" "2/1/1/0"
+check "  the touched file's findings only: old debt in the untouched file is not in it" "$(grep -c 'old.md' $T/sgout)" "0"
+check "  a warning-only finding carries no 'repair now, do not push' text" "$(grep -c 'got past the commit hooks' $T/sgout)" "0"
+check "  it fires ONCE: the next Stop is silent and the state moved to HEAD" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')/$([ "$(cat $S/.claude/teamlead/.state/superdoc-lint-head)" = "$(cd $S && git rev-parse HEAD)" ] && echo head)" "0/0/head"
+(cd $S && git checkout -qb b3 && printf '# E\n' > superdoc/features/e.md && sgleakline >> superdoc/features/e.md && git add superdoc && git commit -qm e --no-verify && git checkout -q master && git merge -q --no-ff -m m3 b3)
+rc_e=$(sgstop $S)
+check "gate: an error in the merged range says a leak got past the commit hooks: repair now, do not push, and the history rewrite is the user's" "$rc_e/$(grep -c '^ *superdoc/features/e.md:2: error: home path$' $T/sgout)/$(grep -c 'got past the commit hooks' $T/sgout)/$(grep -c 'do not push' $T/sgout)/$(grep -c "Rewriting history is theirs to decide" $T/sgout)/$(grep -c "$SENT" $T/sgout)" "2/1/1/1/1/0"
+check "  and it fires once" "$(sgstop $S)" "0"
+printf '%s\n' deadbeefdeadbeefdeadbeefdeadbeefdeadbeef > $S/.claude/teamlead/.state/superdoc-lint-head
+check "gate: a recorded commit that is not an ancestor resets to HEAD and says nothing" "$(sgstop $S)/$(cat $T/sgout | wc -c | tr -d ' ')/$([ "$(cat $S/.claude/teamlead/.state/superdoc-lint-head)" = "$(cd $S && git rev-parse HEAD)" ] && echo head)" "0/0/head"
+(cd $S && git checkout -qb b4 && printf '# D\nsee /mnt/%s/x\n' $SENT > superdoc/features/d.md && git add superdoc && git commit -qm d --no-verify && git checkout -q master && git merge -q --no-ff -m m4 b4)
+mkdir -p $T/sgfake; printf '#!/bin/sh\nexit 124\n' > $T/sgfake/timeout; chmod +x $T/sgfake/timeout
+last_before=$(cat $S/.claude/teamlead/.state/superdoc-lint-head)
+rc_to=$(printf '{"hook_event_name":"Stop","cwd":"%s","stop_hook_active":false}' $S | env -u CLAUDE_PROJECT_DIR PATH="$T/sgfake:$PATH" "$H/gate.sh" >"$T/sgout" 2>&1; echo $?)
+check "gate: a lint timeout is quiet and leaves the state unadvanced" "$rc_to/$(cat $T/sgout | wc -c | tr -d ' ')/$([ "$(cat $S/.claude/teamlead/.state/superdoc-lint-head)" = "$last_before" ] && echo unmoved)" "0/0/unmoved"
+check "  the next Stop retries and shows the finding" "$(sgstop $S)/$(grep -c '^ *superdoc/features/d.md:2: warn: host path$' $T/sgout)" "2/1"
+check "gate: stop_hook_active still short-circuits" "$(printf '{"hook_event_name":"Stop","cwd":"%s","stop_hook_active":true}' $S | env -u CLAUDE_PROJECT_DIR "$H/gate.sh" >/dev/null 2>&1; echo $?)" "0"
+US=$T/sgus; sgmk $US; printf '# P\n' > $US/CLAUDE.md; (cd $US && git commit -qam unwire)
+sgstop $US >/dev/null; (cd $US && git checkout -qb x && printf 'cd /home/%s\n' $SENT > superdoc/features/a.md && git commit -qam x --no-verify && git checkout -q master && git merge -q --no-ff -m mx x)
+check "gate: an unwired project is silent and records no state" "$(sgstop $US)/$(cat $T/sgout | wc -c | tr -d ' ')/$(ls $US/.claude/teamlead/.state | grep -c superdoc-lint-head)" "0/0/0"
+
+echo "== superdoc enforcement: audit reminder (restore.sh) =="
+R=$T/sgrem; sgmk $R
+out_a1=$(sgrestore $R)
+check "reminder: first run writes HEAD silently" "$(printf '%s\n' "$out_a1" | grep -c 'last audit')/$([ "$(cat $R/.claude/teamlead/.state/superdoc-audit)" = "$(cd $R && git rev-parse HEAD)" ] && echo head)" "0/head"
+for i in $(seq 1 50); do (cd $R && git commit -q --allow-empty --no-verify -m "c$i"); done
+check "reminder: exactly 50 commits since the audit is silent" "$(sgrestore $R | grep -c 'last audit')" "0"
+(cd $R && git checkout -qb side && git commit -q --allow-empty --no-verify -m s1 && git checkout -q master && git merge -q --no-ff --no-verify -m merged side)
+check "reminder: a merge commit is not counted (50 commits + one on a side branch = 51, not 52)" "$(sgrestore $R | grep -c '51 commits old')" "1"
+out_a2=$(sgrestore $R startup)
+check "reminder: over N prints ONE line for the lead: how old, run /teamlead superdoc, and never to ask the user" "$(printf '%s\n' "$out_a2" | grep -c '^\[teamlead\] superdoc: the last audit is 51 commits old\. Run /teamlead superdoc (audit, then repair) when the current work allows\.')/$(printf '%s\n' "$out_a2" | grep 'last audit' | grep -c 'do not ask the user')" "1/1"
+check "reminder: also on resume and clear, not on compact" "$(sgrestore $R resume | grep -c 'last audit')/$(sgrestore $R clear | grep -c 'last audit')/$(sgrestore $R compact | grep -c 'last audit')" "1/1/0"
+(cd $R && git rev-parse HEAD > .claude/teamlead/.state/superdoc-audit)
+check "reminder: recording the audit (the skill's own command) silences it" "$(sgrestore $R | grep -c 'last audit')" "0"
+printf '%s\n' deadbeefdeadbeefdeadbeefdeadbeefdeadbeef > $R/.claude/teamlead/.state/superdoc-audit
+check "reminder: a recorded commit that is not an ancestor is replaced by HEAD, silently" "$(sgrestore $R | grep -c 'last audit')/$([ "$(cat $R/.claude/teamlead/.state/superdoc-audit)" = "$(cd $R && git rev-parse HEAD)" ] && echo head)" "0/head"
+RU=$T/sgremu; sgmk $RU; printf '# P\n' > $RU/CLAUDE.md; (cd $RU && git commit -qam unwire); sgrestore $RU >/dev/null
+check "reminder: an unwired project writes no state and prints nothing" "$(ls $RU/.claude/teamlead/.state | grep -c superdoc-audit)" "0"
+grep -q 'git rev-parse HEAD > .claude/teamlead/.state/superdoc-audit' "$SD" && ok "SKILL.md: the lead records the audit with git rev-parse HEAD > .claude/teamlead/.state/superdoc-audit" || bad "SKILL.md: audit record command"
+check "SKILL.md: the audit is recorded at the end of Step 4 (Step 3 for a report-only audit)" "$(grep -c 'end of Step 4 (Step 3 for a report-only audit)' "$SD")" "1"
+
+echo "== superdoc SKILL.md: tiers (no Opus tier), enforcement section =="
+check "SKILL.md: the old per-capability Opus tier paragraph and the Step 4 tier list are gone" "$(grep -c 'Tier per capability\|architectural rationale → Opus\|when unsure, \*\*take Opus\|tl-opus-high' "$SD")" "0"
+check "SKILL.md: every remaining mention of Opus is the escalation rule (one place, ceiling tl-opus-medium)" "$(grep -ci 'opus' "$SD")/$(grep -c 'tl-opus-medium' "$SD")/$(grep -c 'There is no Opus QC' "$SD")" "2/1/1"
+check "SKILL.md: tiers stated once: writers tl-sonnet-medium, QC tl-sonnet-high" "$(grep -c '^\*\*Tiers (stated here once' "$SD")/$(grep -c 'is `tl-sonnet-medium`' "$SD")/$(grep -c 'QC is `tl-sonnet-high`' "$SD")" "1/1/1"
+check "SKILL.md: Step 1b dispatches its writing worker at tl-sonnet-medium" "$(grep -c 'one writing worker\*\* (`tl-sonnet-medium`)' "$SD")" "1"
+ENFS=$(awk '/^## What enforces the rules between audits/{f=1;next} /^## /{f=0} f' "$SD")
+for want in '--no-verify. outside Claude' 'never had a session' 'could not be installed' 'web editor' 'fast-forward' 'superdoc:start'; do
+  printf '%s' "$ENFS" | grep -q -e "$want" && ok "  SKILL.md enforcement section covers: $want" || bad "  SKILL.md enforcement section covers: $want"
+done
+
 echo "== superdoc workers copy assets via Read/Write, not Bash on a plugin-root path (#5) =="
 ! grep -qF '$(cat .claude/teamlead/.state/plugin-root)' "$PB" && ok "playbook: no worktree-relative plugin-root lookup" || bad "playbook: worker told to cat the state file (missing in a worktree)"
 ! grep -qE '^cp |^PR=' "$PB" && ok "playbook: no Bash cp of plugin assets" || bad "playbook: still has a Bash cp/PR= for plugin assets"

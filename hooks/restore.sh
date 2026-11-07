@@ -80,4 +80,33 @@ case "$src" in
     ;;
 esac
 
+# superdoc, wired projects only (CLAUDE.md carries `superdoc:start`; anything else is a repo
+# that pays one grep here).
+if tl_superdoc_wired "$TL_PROJECT"; then
+  # Layer A of the leak guard: native git hooks (see lib.sh). Silent unless one cannot be installed.
+  tl_install_superdoc_hooks
+
+  # Audit reminder. Findings only fire where a script can decide; staleness it cannot, so a
+  # periodic audit is the cover. N = 50 non-merge commits (this repo runs ~43 a month, so roughly
+  # a month of work). The state is the commit of the last audit (the superdoc skill records it):
+  # local and per clone, which is fine for a reminder. No file, or a commit that is not an
+  # ancestor of HEAD (rewritten history, another branch): start counting from here, silently.
+  case "$src" in
+    startup|resume|clear)
+      sd_head=$(git -C "$TL_PROJECT" rev-parse -q --verify HEAD 2>/dev/null)
+      if [ -n "$sd_head" ]; then
+        sd_last=$(cat "$TL_STATE/superdoc-audit" 2>/dev/null)
+        if [ -z "$sd_last" ] || ! git -C "$TL_PROJECT" merge-base --is-ancestor "$sd_last" "$sd_head" 2>/dev/null; then
+          mkdir -p "$TL_STATE" 2>/dev/null && printf '%s\n' "$sd_head" > "$TL_STATE/superdoc-audit" 2>/dev/null
+        else
+          sd_n=$(git -C "$TL_PROJECT" rev-list --count --no-merges "$sd_last..$sd_head" 2>/dev/null) || sd_n=0
+          if [ "${sd_n:-0}" -gt 50 ]; then
+            echo "[teamlead] superdoc: the last audit is $sd_n commits old. Run /teamlead superdoc (audit, then repair) when the current work allows. It is the agents' job: do not ask the user."
+          fi
+        fi
+      fi
+      ;;
+  esac
+fi
+
 "$HERE/state.sh" "$TL_PROJECT"
