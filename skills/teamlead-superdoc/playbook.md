@@ -399,6 +399,19 @@ them anonymized, like a filed bug report.
 - If a source you are reading contains such a value, describe it generically; do not copy it.
   Logs, command output (prompts, `ssh`/`scp` lines, mount paths, `uname`, `ip a`) and text the
   user pasted in chat are the usual source: write `<client>`, `<server>`, `<host>`, not the name.
+- **Local details have a home: `.claude/local/`.** Agents do need things like how to reach a
+  test machine, and if the docs are the only place to put it, it ends up there. The real
+  values go in a file under `.claude/local/` (untracked); the page says generically that
+  they exist and where (`see .claude/local/<topic>.md`), never the values. Secrets (tokens,
+  passwords, keys) go nowhere in the repo, not even there. Untracked means git ignores it:
+  add `.claude/local/` to the repo's `.gitignore` (committed, so every clone is covered;
+  `.git/info/exclude` would protect only this one clone) unless `git check-ignore -q
+  .claude/local/x` already says it is ignored, for example when `.claude/` is ignored whole.
+  The directory is per checkout. A worker in a git worktree writing `.claude/local/` inside
+  that worktree loses it with the worktree, so the lead puts the **main checkout's absolute**
+  `.claude/local/` path in the repair row's `owns` (the worker fence allows an absolute
+  `owns` entry; it is how any out-of-worktree write is granted) and the worker writes the
+  real values there. Reports never carry the values: they name file, line and kind only.
 
 ## Part 5 — CLAUDE.md wiring
 
@@ -570,9 +583,13 @@ re-check.
       subsystems, and no page is over about 12 KB unless it is one genuinely single topic
       (Part 9 lists both).
 - [ ] Force-load budget: no force-loaded file (`CLAUDE.md` plus every `@`-ref target) over
-      8 KB, total under 20 KB, and nothing in them that isn't needed on every task (Part 9).
-- [ ] `TERMINOLOGY.md` entries are pointers: none over about 300 characters, details live
-      on the linked pages (the Part 9 command lists offenders).
+      8 KB, except `TERMINOLOGY.md` (judged by entry length, next box) and the verbatim
+      installs (never trimmed); the counted total (verbatim installs left out) under
+      20 KB, or, when the glossary's entries are all short, the Part 9 note answered; and
+      nothing in them that isn't needed on every task (Part 9).
+- [ ] `TERMINOLOGY.md` entries are pointers: none over about 300 characters, wrapped lines
+      counted (an entry runs to the next entry or heading), details live on the linked
+      pages (the Part 9 command lists offenders). The file has no size limit of its own.
 
 ## Part 9 — AUDIT (read-only phase)
 
@@ -611,19 +628,31 @@ audit found.)
 - **Force-load budget:** force-loaded = `CLAUDE.md` plus every `@`-ref target in it
   (TERMINOLOGY plus everything under `claude-instructions/`). It sits in context for the
   whole session and is resent with every request, in every worker. Report each file's
-  size and the total (`wc -c`; SKILL.md Step 1 prints the same): flag any single file over
-  8 KB and a total over 20 KB (a healthy tree is around 15 KB). Then read each
-  force-loaded file and flag content not needed on every task — reference material,
-  feature detail, history, rationale — and name the linked page it should move to.
-  `documentation.md` and `documentation-version-policy.md` are verbatim installs: they
-  count toward the total but are never flagged for trimming, since the project doesn't own
-  their wording.
-- **TERMINOLOGY.md size** (the specific case of the above): list every entry over ~300
-  characters (the 200 in the skeleton is the guide; 300 is the threshold, so normal
-  entries aren't flagged) as a finding with line and length:
-  `awk '/^- \*\*/ && length($0)>300 {print FILENAME":"FNR": "length($0)" chars"}' <doc-root>/meta/TERMINOLOGY.md`
-  (`length` counts bytes under some awks; treat near-threshold hits as approximate). Also
-  flag the file if it lacks the short-entry rule: `grep -q 'Keep every entry short' <doc-root>/meta/TERMINOLOGY.md`.
+  size and the counted total (`wc -c`; SKILL.md Step 1 prints the same, labelling each file):
+  flag any single file over 8 KB, except `TERMINOLOGY.md` (judged by entry length, next
+  bullet), and a counted total over 20 KB. **Counted** means `CLAUDE.md`, `TERMINOLOGY.md`
+  and project-owned files. `documentation.md` and `documentation-version-policy.md` are
+  verbatim installs: list them in the size report, marked as such, but leave them out of
+  the total and never flag them for trimming, since the project doesn't own their wording
+  (a healthy tree counts around 10 KB). Then read each force-loaded file and flag content
+  not needed on every task — reference material, feature detail, history, rationale — and
+  name the linked page it should move to.
+- **TERMINOLOGY.md entry length** (the specific case of the above; the file's size is not
+  flagged, its entries are): list every entry over ~300 characters (the 200 in the skeleton
+  is the guide; 300 is the threshold, so normal entries aren't flagged) as a finding, with
+  the line it starts on and its summed length. An entry is its `- **` line plus every
+  following line up to the next entry or heading, so a hard-wrapped entry counts whole:
+  `awk 'function flush(){if(n>300)print s": "n" chars"} /^- \*\*/{flush();n=0;s=FILENAME":"FNR;on=1} /^#/{flush();n=0;on=0} on{n+=length($0)} END{flush()}' <doc-root>/meta/TERMINOLOGY.md`
+  (`length` counts bytes under some awks, and newlines are not counted; treat near-threshold
+  hits as approximate). Also flag the file if it lacks the short-entry rule:
+  `grep -q 'Keep every entry short' <doc-root>/meta/TERMINOLOGY.md`.
+- **Total over budget, every entry short** (a note, not a finding to cut): the glossary can
+  be complete and still push the counted total past 20 KB. Ask yourself, not the user,
+  whether every term has to be known on every task. A term only one feature uses moves to
+  that feature's page, which is a repair you make yourself (Part 10). Never delete a term
+  just to meet a number, and never split the file into a core list and a linked list: the
+  "ask before acting on an undefined term" rule only works if the force-loaded list is
+  complete.
 
 - **Page size and scope** (one page per capability, Part 2): list every page over about
   12 KB: `find <doc-root> -type f -name '*.md' -size +12288c -exec wc -c {} \;`
@@ -653,6 +682,11 @@ widen the scope beyond them. Decide any judgement call yourself from this playbo
   target page and confirm it really holds the content (or add it there, or create the
   page) *before* you cut the original down to what-it-is plus the link. Never trim the
   verbatim installs. When an entry's detail has no page yet, it gets its own new page.
+  For the Part 9 "total over budget, every entry short" note: move a term that only one
+  feature uses to that feature's page (leave a plain link where it was needed), the same
+  move-first way. Never delete a term just to meet a number, and never split the glossary
+  into a core list and a linked list: the "ask before acting on an undefined term" rule
+  needs the force-loaded list to be complete.
 - **Splitting a page** (one flagged for covering several capabilities, or over about 12 KB
   with more than one topic): create one new page per capability and move the content into
   them **verbatim**. Fix every link and `@`-ref that pointed at the moved content, add the new
@@ -660,9 +694,18 @@ widen the scope beyond them. Decide any judgement call yourself from this playbo
   (compare headings and facts of the original against the new pages) *before* cutting the
   original down to its own single topic.
 - **Privacy leak** (a Part 9 finding): replace the value with a placeholder (`<client>`,
-  `<server>`, `<host>`, `$HOME`, or a generic description), automatically. Removing it from
-  the file does not remove it from git history: when the file was already committed, report
-  that to the lead, and whether it was already pushed. Rewriting history or force-pushing is
+  `<server>`, `<host>`, `$HOME`, or a generic description), automatically. **Move before
+  you replace**, like any trim: a real value that is useful to future agents (how to reach a
+  test machine, a local path, a device name) first goes to `.claude/local/<topic>.md`
+  (Part 4a: confirm it is git-ignored, and write it through the main checkout's absolute
+  path the lead put in your row's `owns`), and only then does the page get the placeholder
+  plus a generic pointer to that file. A **secret** (token, password, key, `.env` value) is
+  never copied anywhere: remove it, and say in the report that one was found. Removing a
+  value from the file does not remove it from git history: when the file was already
+  committed, report that to the lead, and whether it was already pushed. The lead then
+  tells the user the value is in history, whether the repo is public (`gh repo view --json
+  visibility`, or the remote's host), and that any exposed credential must be rotated first,
+  because a history rewrite does not undo exposure. Rewriting history or force-pushing is
   the user's decision, never done automatically.
 - Re-run the full Part 8 gate after repairing before you report done.
 - Keep edits to shared pages (module-map rows, `README.md` index lines) small and

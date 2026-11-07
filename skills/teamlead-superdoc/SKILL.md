@@ -73,24 +73,55 @@ test -f CLAUDE.md && grep -q 'superdoc:start' CLAUDE.md && echo "CLAUDE.md: wire
 # Installed contract version: the vN on the guarded marker, or "none" (also when CLAUDE.md is absent).
 echo "superdoc marker: $(grep -om1 'superdoc:start v[0-9]*' CLAUDE.md 2>/dev/null | sed 's/.*start //' | grep . || echo none)"
 git check-ignore -q "$DOC" 2>/dev/null && echo "⚠ GITIGNORED — superdoc must be committed or the knowledge dies at the next clone" || echo "git: superdoc is tracked"
+# One @-ref pattern for both loops below, so they cannot drift. A match cannot follow a
+# backtick, so an `@superdoc/...` written inside a code span (prose, not a force-load) is
+# ignored; the sed drops the one character the pattern captures in front of the @.
+REF='(^|[^`])@'"$DOC"'/[^ )`]+'
+refs() { grep -oE "$REF" CLAUDE.md 2>/dev/null | sed 's/^[^@]*@//'; }
+# A glossary is judged by entry length, not file size: sum each "- **" entry (its wrapped
+# lines too) up to the next entry or heading and print entries over ~300 characters.
+LONG='function flush(){if(n>300)print s": "n" chars"} /^- \*\*/{flush();n=0;s=FILENAME":"FNR;on=1} /^#/{flush();n=0;on=0} on{n+=length($0)} END{flush()}'
 # A dangling @-ref loads NOTHING and says nothing about it — the docs look wired
 # while the agent silently gets none of them.
-grep -oE "@$DOC/"'[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | while read -r f; do
+refs | while read -r f; do
   test -f "$f" || echo "⚠ CLAUDE.md force-loads $f — that file does not exist"
 done
 # Force-load budget: CLAUDE.md plus every @-ref target sits in context for the whole
 # session, goes out with every request, and every worker carries its own copy.
-total=0
-for f in CLAUDE.md $(grep -oE "@$DOC/"'[^ )`]+' CLAUDE.md 2>/dev/null | sed 's/^@//' | sort -u); do
+# Counted toward the 20 KB total: CLAUDE.md, the glossary, project-owned files. Verbatim
+# installs are listed but not counted (nobody may trim them). The glossary has no 8 KB
+# flag; its entries are checked instead.
+total=0; vtotal=0; flagged=0; longn=0; gloss=0
+for f in CLAUDE.md $(refs | sort -u); do
   test -f "$f" || continue
-  b=$(wc -c < "$f"); total=$((total + b)); echo "force-loaded: $f ${b}B"
-  if [ "$b" -gt 8192 ]; then echo "⚠ $f is ${b}B (over 8 KB): force-loaded files are paid for all session"; fi
+  b=$(wc -c < "$f")
+  case "$f" in
+    */claude-instructions/documentation.md|*/claude-instructions/documentation-version-policy.md)
+      vtotal=$((vtotal + b)); echo "force-loaded: $f ${b}B (verbatim install: listed, not counted, never trimmed)" ;;
+    */meta/TERMINOLOGY.md)
+      total=$((total + b)); gloss=1; echo "force-loaded: $f ${b}B (glossary: judged by entry length, not file size)"
+      ents=$(awk "$LONG" "$f"); longn=$(printf '%s' "$ents" | grep -c .)
+      if [ "$longn" -gt 0 ]; then
+        echo "⚠ $f has $longn entries over ~300 characters (an entry is what the term is plus a link):"
+        printf '%s\n' "$ents" | head -10 | sed 's/^/    /'
+      fi ;;
+    *)
+      total=$((total + b)); echo "force-loaded: $f ${b}B"
+      if [ "$b" -gt 8192 ]; then flagged=$((flagged + 1)); echo "⚠ $f is ${b}B (over 8 KB): force-loaded files are paid for all session"; fi ;;
+  esac
 done
 echo "force-loaded total: ${total}B"
-if [ "$total" -gt 20480 ]; then echo "⚠ force-loaded total is ${total}B (over 20 KB)"; fi
+if [ "$vtotal" -gt 0 ]; then echo "verbatim installs: ${vtotal}B (listed above, not in the total)"; fi
+if [ "$total" -gt 20480 ]; then
+  if [ "$gloss" = 1 ] && [ "$longn" = 0 ] && [ "$flagged" = 0 ]; then
+    echo "note: force-loaded total is ${total}B (over 20 KB) with every glossary entry short: ask whether every term must be known on every task (playbook Part 9)"
+  else echo "⚠ force-loaded total is ${total}B (over 20 KB)"; fi
+fi
 ```
 
 A `⚠` from the size check is a HEALTH-CHECK finding (Step 3), not something to fix now.
+A `note:` (total over 20 KB while every glossary entry is short) is not a `⚠`: the
+repair is the judgement pass in playbook Part 9, never a cut to meet a number.
 
 **If it reports `⚠ GITIGNORED`, fix that first.** The failure is silent: everything
 works locally and the knowledge vanishes for anyone who clones. Un-ignore it before
@@ -178,8 +209,11 @@ stale content, broken structure, absent Why-notes, unwired CLAUDE.md, and any
 `@`-ref in `CLAUDE.md` pointing at a file that no longer exists, and **force-load
 bloat**: any force-loaded file (`CLAUDE.md` plus every `@`-ref target) over 8 KB, a total
 over 20 KB, or content in them that isn't needed on every task (playbook Part 9 has the
-judgement pass; the verbatim `claude-instructions/` installs count toward the total but
-are never flagged for trimming). The audit phase is read-only: its workers write nothing
+judgement pass). Two accounting rules: `meta/TERMINOLOGY.md` is judged by entry length
+(entries over ~300 characters are the finding), not by the 8 KB file flag; and the verbatim
+`claude-instructions/` installs are listed but left out of the 20 KB total and never
+flagged for trimming. A total over budget with every glossary entry short is a note, not a
+`⚠`. The audit phase is read-only: its workers write nothing
 (the Step 1b upgrade has already run before it) and report findings, privacy leaks first.
 **Then, in the same run, go straight to Step 4: dispatch the repairs for the findings. No
 offer, no question.** That covers force-load bloat and oversized TERMINOLOGY entries, stale
@@ -210,10 +244,23 @@ Opus). Then run **QC after repair** — `tl-sonnet-high` by default, `tl-opus-hi
 architectural repairs. Only if the user literally asks for a report only (an audit with no
 changes) do you stop after Step 3.
 
-A leaked value is replaced with a placeholder automatically. **Never rewrite git history or
-force-push**: when a leaked value was already committed, repairing the file does not remove
-it from history, so tell the user that and whether it was pushed, and leave the decision to
-them. Trimming never loses information (playbook Part 10: move to the linked page first).
+A leaked value is replaced with a placeholder automatically, after anything useful in it
+has moved to `.claude/local/` (untracked; playbook Parts 4a and 10). A secret is removed,
+never copied anywhere. Real values written there go to the **main checkout's absolute**
+`.claude/local/` path, so put that path in the repair row's `owns` (a worker's own worktree
+copy would vanish with it). **Never rewrite git history or force-push**: when a leaked
+value was already committed, repairing the file does not remove it from history, so tell
+the user that, whether it was pushed, whether the repo is public (`gh repo view --json
+visibility`, or the remote), and that any exposed credential must be rotated first, because
+a history rewrite does not undo exposure; the decision stays with them. Trimming never
+loses information (playbook Part 10: move to the linked page first).
+
+**Do not trust "read Part 4a".** A privacy-repair worker was once told to read it and
+admitted it had not; its edits passed only because the lead grepped them. So the brief for
+a privacy repair **carries the rule text itself** (the Privacy paragraph above plus the
+`.claude/local/` rule), not a pointer to it, and the **QC after repair re-runs the Part 9
+privacy scans on the result** (the path/email/IP/token regex and the identity-values pass)
+instead of trusting the worker's report.
 
 ## Why superdoc sits at the root
 
