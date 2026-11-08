@@ -100,8 +100,10 @@ lists the stuck ids so you can see what you are closing.
 kept until the user says delete it): mark it with `board.py hold <row> --reason "…"
 --project "$PWD"` (row `queued`/`blocked`/`returned`; `release <row>` undoes it)
 instead of answering the gate with "deliberately skipping". A hold silences the
-gate for that worktree only until the row is re-dispatched or merged, or the
-worktree gets a new commit or edit — then the gate flags it again. A worker
+gate for that worktree until the row is re-dispatched or merged, or the worktree
+is removed; new commits and edits do not lift it (the gate shows a one-line note
+once when it sees new work). Add `--until-change` to have it lapse on a new commit
+or edit instead. A worker
 resumed with `SendMessage` can find its worktree gone (finished workers' worktrees
 may be auto-removed): check `git worktree list` first, else dispatch fresh and point
 the brief at the held path to read the partial work.

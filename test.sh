@@ -4269,7 +4269,8 @@ grep -q '  return    agent=teamlead:tl-sonnet-low  id=tw3' $LT && ok "unreadable
 echo "== #4/#9: a worktree kept on purpose is held, not re-flagged every turn =="
 # The flaw class: check 3 cannot tell "kept on purpose" from "forgotten", so it fires
 # every turn on a correct state. `board.py hold` is the acknowledgement; it lapses on
-# any state change (row state, re-dispatch, new commit or edit in the worktree).
+# a row state change or re-dispatch, and, only with --until-change (#16), on a new
+# commit or edit in the worktree.
 hp=$T/h4; mkdir -p "$hp/.claude/teamlead/.state"; : > "$hp/.claude/teamlead/.state/active"
 git -C "$hp" init -q; git -C "$hp" config user.email t@t.t; git -C "$hp" config user.name t
 echo a > "$hp/a"; git -C "$hp" add a; git -C "$hp" commit -qm init
@@ -4300,17 +4301,51 @@ check "held: turn 3 is silent" "$(ev "$HGATE" "$H/gate.sh")" 0
 grep -q 'left work behind' $T/out && bad "  nothing about left-behind work" || ok "  nothing about left-behind work"
 python3 "$B" status --project $hp >"$T/hstat" 2>&1
 grep -q 'held.*agent-h1.*paused by the user' "$T/hstat" && ok "  board.py status still lists it, with the reason" || bad "  board.py status still lists it, with the reason (got: $(cat $T/hstat))"
-# a hold lapses when the worktree changes under it: someone worked there again
+# #16: a default hold survives new work in the worktree. The gate shows ONE note (a
+# systemMessage on exit 0, never a block), once per hold, and the hold stays good.
 echo more > "$hp/.claude/worktrees/agent-h1/more.txt"
-check "an edit in the held worktree lapses the hold: flagged again" "$(ev "$HGATE" "$H/gate.sh")" 2
-grep -q 'agent-h1 — uncommitted changes.*hold on row 1 lapsed' $T/out && ok "  and says why" || bad "  and says why (got: $(grep agent-h1 $T/out))"
-python3 "$B" hold 1 --reason "paused by the user" --project $hp >/dev/null 2>&1
-check "  re-holding it silences it again" "$(ev "$HGATE" "$H/gate.sh")" 0
+check "#16 an edit in a default-held worktree does not block" "$(ev "$HGATE" "$H/gate.sh")" 0
+grep -q 'agent-h1.*row 1.*new commits or edits since the hold' $T/out && ok "  a one-line note says so" || bad "  a one-line note says so (got: $(cat $T/out))"
+grep -q 'systemMessage' $T/out && ok "  as a systemMessage, not a block" || bad "  as a systemMessage (got: $(cat $T/out))"
+check "  the hold is still on the row, marked noted" "$(hjq 1 "t['held'].get('noted')")" True
+check "  next turn: silent" "$(ev "$HGATE" "$H/gate.sh")" 0
+[ -s $T/out ] && bad "  next turn prints nothing (got: $(cat $T/out))" || ok "  next turn prints nothing"
 git -C "$hp/.claude/worktrees/agent-h1" add -A; git -C "$hp/.claude/worktrees/agent-h1" commit -qm "more work"
-check "a commit in the held worktree lapses the hold" "$(ev "$HGATE" "$H/gate.sh")" 2
-grep -q '1 commit(s) not in .*hold on row 1 lapsed' $T/out && ok "  and says so" || bad "  and says so (got: $(grep agent-h1 $T/out))"
+check "#16 a new commit in a default-held worktree does not block" "$(ev "$HGATE" "$H/gate.sh")" 0
+[ -s $T/out ] && bad "  and the note is not repeated (got: $(cat $T/out))" || ok "  and the note is not repeated"
+python3 "$B" status --project $hp >"$T/hstat" 2>&1
+grep -q 'held.*agent-h1.*new work since the hold' "$T/hstat" && ok "  board.py status flags the new work" || bad "  board.py status flags the new work (got: $(cat $T/hstat))"
+check "  held: not lapsed" "$(python3 "$B" held --project $hp | python3 -c "import json,sys;print([v['lapsed'] for v in json.load(sys.stdin).values()])")" "[None]"
+# when the turn is blocked anyway (an unheld finding), the note rides along in the block, once
+python3 "$B" add --project $hp --task "h1n work" --agent tl-sonnet-low --owns h4/n >/dev/null
+hn=$(python3 -c "import json;print(max(t['id'] for t in json.load(open('$HJ'))['tasks']))")
+hwt h1n; python3 "$B" update --project $hp --id $hn --state queued --worker h1n --branch worktree-agent-h1n >/dev/null
+python3 "$B" hold $hn --reason "r" --project $hp >/dev/null 2>&1
+hwt h1m; echo y > "$hp/.claude/worktrees/agent-h1m/y.txt"
+echo z > "$hp/.claude/worktrees/agent-h1n/z.txt"
+check "#16 with another finding the turn is blocked" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'note (shown once)' $T/out && grep -q 'agent-h1n' $T/out && ok "  and carries the note for the held worktree" || bad "  and carries the note (got: $(cat $T/out))"
+check "  next turn: still blocked by the real finding" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'note (shown once)' $T/out && bad "  but without the note again" || ok "  but without the note again"
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h1m"; git -C "$hp" branch -D worktree-agent-h1m >/dev/null 2>&1
+git -C "$hp" worktree remove --force "$hp/.claude/worktrees/agent-h1n"; git -C "$hp" branch -D worktree-agent-h1n >/dev/null 2>&1
+python3 "$B" update --project $hp --id $hn --state merged >/dev/null 2>&1
+check "  worktrees removed: silent again" "$(ev "$HGATE" "$H/gate.sh")" 0
+# --until-change keeps the older behaviour: the hold lapses on a new commit or edit
+python3 "$B" hold 1 --reason "paused by the user" --until-change --project $hp >/dev/null 2>&1
+check "--until-change is stored on the hold" "$(hjq 1 "t['held'].get('until_change')")" True
+check "  held and unchanged: silent" "$(ev "$HGATE" "$H/gate.sh")" 0
+echo more2 > "$hp/.claude/worktrees/agent-h1/more2.txt"
+check "an edit in an --until-change worktree lapses the hold: flagged again" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q 'agent-h1 — uncommitted changes.*hold on row 1 lapsed' $T/out && ok "  and says why" || bad "  and says why (got: $(grep agent-h1 $T/out))"
+python3 "$B" hold 1 --reason "paused by the user" --until-change --project $hp >/dev/null 2>&1
+check "  re-holding it silences it again" "$(ev "$HGATE" "$H/gate.sh")" 0
+git -C "$hp/.claude/worktrees/agent-h1" add -A; git -C "$hp/.claude/worktrees/agent-h1" commit -qm "more work 2"
+check "a commit in an --until-change worktree lapses the hold" "$(ev "$HGATE" "$H/gate.sh")" 2
+grep -q '2 commit(s) not in .*hold on row 1 lapsed' $T/out && ok "  and says so" || bad "  and says so (got: $(grep agent-h1 $T/out))"
 python3 "$B" hold 1 --project $hp >/dev/null 2>&1
-check "  re-held" "$(ev "$HGATE" "$H/gate.sh")" 0
+check "  re-held (default)" "$(ev "$HGATE" "$H/gate.sh")" 0
+check "  a default hold has no until_change flag" "$(hjq 1 "'until_change' in t['held']")" False
 # re-dispatch: the row goes running under a new worker; the hold is gone, the worktree is flagged again
 python3 "$B" worker-start --id h1b --board 1 --branch worktree-agent-h1b --project $hp >/dev/null 2>&1
 check "re-dispatch drops the hold from the row" "$(hjq 1 "'held' in t")" False

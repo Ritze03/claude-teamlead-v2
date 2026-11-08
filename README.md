@@ -31,7 +31,7 @@ impossible to break rather than merely discouraged:
 - **Outstanding** — dispatched workers that never returned? Blocked once.
 - **Reconcile** — the ledger says a worker returned but the board still says `running`?
   Blocked once. That gap is where work used to evaporate.
-- **Worktrees** — uncommitted or unmerged worker branches? Blocked once. Only `.claude/worktrees/agent-*` worktrees and ones whose branch a board row names are checked; a hand-made worktree with no row is ignored. A worktree you keep on purpose is marked with `board.py hold`.
+- **Worktrees** — uncommitted or unmerged worker branches? Blocked once. Only `.claude/worktrees/agent-*` worktrees and ones whose branch a board row names are checked; a hand-made worktree with no row is ignored. A worktree you keep on purpose is marked with `board.py hold`; the hold survives new commits (one note when it sees new work) and ends when the row is re-dispatched or merged or the worktree is removed (`--until-change` makes it lapse on a new commit or edit instead).
 - **Board format** — an invented format silently breaks every check, so it is checked.
 - **Worker fence** — a worker can only write inside its own worktree. Claude Code already
   refuses writes into the shared checkout; this closes everywhere else on disk. The lead can
