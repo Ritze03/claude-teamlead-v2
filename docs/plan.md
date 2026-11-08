@@ -327,6 +327,11 @@ prose.
 > enforced separately by `plan-fence.sh` (PreToolUse on `Edit|Write|MultiEdit`), which refuses
 > the plan file's own 3→4 and 4→5 header bumps without a Go recorded since the last bump. See
 > `docs/enforcement.md`.
+>
+> The stage 4→5 fresh-context offer is enforced too (issue #18): `mode.sh` marks
+> `.state/plan-offer-pending` when a Go is recorded at stage 4; until the user says `here` or
+> `/teamlead plan continue`, `record.sh` denies the dispatch of a `plan:` row's worker and
+> `board-fence.sh` denies `board_add` of `plan:` rows, both naming the offer text.
 
 **The lead writes the plan file itself.** Deliberate carve-out from "never do the work
 yourself" — dispatching a worker per one-line edit during a live conversation is unusable
