@@ -135,6 +135,7 @@ teamlead — 2 open task(s), 1 worker(s) out
 | `/teamlead plan continue` | Resume the active plan from where it left off; the way back in after a `/clear`. |
 | `/teamlead brainstorm <agents> <iterations> <topic>` | N thinkers over M rounds, then an Opus verify. |
 | `/teamlead superdoc` | Set up / audit the agent-facing docs in `superdoc/`. |
+| `/teamlead superdoc map` | Print the doc link graph (pages, links in and out) and its findings: dangling links, orphan pages. |
 
 ## Dials
 

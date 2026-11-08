@@ -4,6 +4,16 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.9.0 — 2026-11-08
+
+A script maps the superdoc link graph, so a rename, move or delete starts from a list instead of a grep, and dangling links and orphan pages are caught mechanically (#19).
+
+- `skills/teamlead-superdoc/map.py` (Python 3, stdlib only), exposed as `/teamlead superdoc map`: reads the doc tree plus `CLAUDE.md` and prints the structure per folder (each page with its links out and in), then one finding per line: `DANGLING  path:line -> target#anchor  (file missing|anchor missing)` (anchors matched against the target's headings with GitHub-style slugs, duplicate headings `-1`, `-2`, and explicit `<a name>` / `id=` anchors), `ORPHAN    path  (no inbound links)`, and a last `OK|FAIL  N pages, M links, D dangling, O orphan` line. Links in code fences and code spans and `http(s)`/`mailto` links are ignored. A `README.md` index link, a `CLAUDE.md` link or an `@<doc>/page.md` force-load line counts as inbound; `CLAUDE.md` and the doc-root or repo-root `README.md` are never orphans.
+- Flags: `--check` (findings and summary only: what hooks and agents run), `--links-to PAGE` and `--links-from PAGE` (`path:line -> target`, for the list a rename starts from), `--doc DIR`. Exit 1 only on a dangling link (orphans are warnings), exit 2 on a usage error, exit 0 with a one-line note when the project has no superdoc. The doc root comes from `lint.sh --print-doc-root` (one copy of that logic); works from any subdirectory or linked worktree.
+- The rule: after any edit under the doc root or to `CLAUDE.md`, run `map.py --check` and fix every `DANGLING` before handing back or committing. In the superdoc SKILL.md (new "link graph" section, and the Stop-check list), the playbook (audit bullet and checklist item) and the worker-brief self-check in `skills/teamlead/SKILL.md`; the lead can open the map first to navigate instead of reading the hub page and grepping.
+- Stop gate (`gate.sh` check 8, no new hook): when a doc `.md` or `CLAUDE.md` is among the files a merge changed, `map.py --check` runs too (same `timeout 4`, same once-only state) and the `DANGLING` lines that start in or point at a changed file are shown, capped at 40. A page deleted or renamed by the merge therefore shows the links in untouched files that now dangle; old debt elsewhere is not re-reported.
+- test: fixture tree (valid link, missing file, missing anchor, duplicate-heading slug, punctuation slug, explicit anchor, code fence and span, external URL, orphan, README and `@`-ref inbound, encoded spaces), `--links-to` / `--links-from`, exit codes, subdirectory and linked worktree, and the gate showing dangling links once, for a deleted page, and capped.
+
 ## 2.8.0 — 2026-11-08
 
 A kept worktree stays kept, the lead may do small read-only checks itself, and the second Go's fresh-context offer is enforced (#16, #17, #18).

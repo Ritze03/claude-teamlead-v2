@@ -73,7 +73,8 @@ tools:
 *first* — they can change the split, `owns`, or the wording. You already know what
 exists: glance at `superdoc/architecture/overview.md` (the hub — "where to look
 for X"), `superdoc/README.md` if present, and the reference list in `CLAUDE.md`
-to find them, then **read the pages that matter yourself** — before *any* dispatch
+to find them (in a superdoc project `python3 "$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/map.py"`
+prints every page with its links in and out, a cheaper way to navigate than the hub plus grep), then **read the pages that matter yourself** — before *any* dispatch
 whose worker will touch (write or change) something. Not a glance: you can't give
 proper instructions from pages you haven't read. The brief names those pages and
 passes on the constraints and conventions that matter. Only when you can't tell
@@ -365,7 +366,9 @@ re-deriving your context is not.** Write briefs that are thorough, not short.
    discover that the docs exist or re-investigate what they already settle.
 5. **Return format** — what you need back. Workers report in full to you; ask for
    the specifics you will need (paths, values, diffs, exact error text).
-6. **Self-check** — the concrete command or criteria to verify before returning.
+6. **Self-check** — the concrete command or criteria to verify before returning. A task that edits
+   `superdoc/` or `CLAUDE.md` adds: run `python3 <plugin-root>/skills/teamlead-superdoc/map.py --check`
+   (literal path) and fix every `DANGLING` before returning.
 
 **Never point a worker at files in your own session scratchpad** (`/tmp/claude-*/…/scratchpad`):
 a worker cannot read them without a permission prompt, and a background worker blocks
@@ -521,6 +524,7 @@ does not cover the body.
 | `/teamlead plan continue` | Resume the active plan from its recorded stage — the way back in after a `/clear`; see the `teamlead-plan` skill. |
 | `/teamlead brainstorm <agents> <iterations> <topic>` | See the `teamlead-brainstorm` skill. |
 | `/teamlead superdoc` | See the `teamlead-superdoc` skill. Also reachable as `/superdoc` or by saying "init superdoc" — aliases, not separate commands. |
+| `/teamlead superdoc map` | Print the doc link graph and its findings (dangling links, orphans): `map.py`, see the `teamlead-superdoc` skill. Run it yourself, no worker. |
 | `/teamlead settings` | Open the dial picker for both dials — the same `AskUserQuestion` call as first-run setup. Every dial is already answered by the time this is run; re-ask them all. |
 | `/teamlead effort [level]` | Set the effort dial. No argument re-opens the picker. |
 | `/teamlead opus [mode]` | Set the Opus Usage dial. No argument re-opens the picker. |
@@ -691,6 +695,7 @@ COMMANDS
   /teamlead plan continue           resume the active plan (after /clear)
   /teamlead brainstorm <n> <r> <t>  n agents over r rounds on topic t, then an Opus verify
   /teamlead superdoc                set up / audit the agent-facing docs in superdoc/
+  /teamlead superdoc map            the doc link graph: dangling links, orphans
 
 DIALS (asked once per project, change anytime; no argument re-opens the picker)
   /teamlead settings               re-open the picker for both dials at once

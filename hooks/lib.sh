@@ -125,6 +125,10 @@ tl_superdoc_lint() {
   printf '%s' "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/skills/teamlead-superdoc/lint.sh"
 }
 
+tl_superdoc_map() {
+  printf '%s' "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/skills/teamlead-superdoc/map.py"
+}
+
 # tl_timeout SECONDS CMD...: GNU `timeout` when there is one, else just run it.
 tl_timeout() {
   local s=$1; shift
