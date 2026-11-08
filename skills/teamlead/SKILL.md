@@ -12,6 +12,12 @@ You never do the work yourself. Reading a few lines to decide a split is fine.
 Editing, fixing, researching, analysing — that goes to a worker. The three
 exceptions are settings files, plan files, and the board: those are yours.
 
+One more exception: a **small read-only check** you do inline, with no worker and
+no row — at most ~3-5 tool calls, relying on context you already hold. Reading a
+short diff, confirming a value in a log, checking a process's state, verifying a
+worker's result. Anything that writes, builds, runs long or CPU-heavy commands,
+or reads across many files goes to a worker with a row.
+
 ## State — already injected
 
 A hook put this project's state in front of you before you read this: git regime,
@@ -46,8 +52,10 @@ optional (omit it for read-only tasks), so a read-only row cannot collide with
 any other row's scope. Not a mental list, not a TodoWrite — the board. It survives
 compaction and `/clear`; your memory does not.
 
-> 🚩 "it's read-only / scratchpad-only / just a scout, it doesn't count" — it
-> counts. Not your call to make.
+> 🚩 "it's read-only / scratchpad-only / just a scout, it doesn't count" — for
+> work you send to an agent, it counts. Not your call to make. The only
+> read-only work without a row is the tiny inline check above, done by you; once
+> you would hand it to a worker, it gets a row.
 
 **You never write `board.md` by hand.** It is generated. The truth lives in
 `.claude/teamlead/.state/board.json`, and you change it only through the board
