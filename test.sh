@@ -2552,6 +2552,50 @@ printf '# T\n\n> **Stage 5** — x\n' > $bff
 check "a worker's board_add at stage 5: still refused (worker, not stage)" \
   "$(bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$bfp'","tool_name":"'$RB'__board_add","tool_input":{},"agent_id":"w1"}')" deny
 
+echo "== second Go: the fresh-context offer is enforced (issue #18) =="
+og=$T/offer; mkdir -p $og/.claude/teamlead/plan $og/.claude/teamlead/.state
+: > $og/.claude/teamlead/.state/active
+ogf=$og/.claude/teamlead/plan/topic.md; ogs=$og/.claude/teamlead/.state
+printf '# T\n\n> **Stage 4** — x\n' > $ogf
+echo "$ogf" > $ogs/active-plan
+printf '%s\n' '{"next_id":3,"tasks":[{"id":1,"task":"build","state":"queued","plan":"I1","owns":[],"blocked_by":[]},{"id":2,"task":"scout","state":"queued","plan":null,"owns":[],"blocked_by":[]}]}' > $ogs/board.json
+ogsay(){ jq -n --arg p "$1" --arg c "$og" '{hook_event_name:"UserPromptSubmit",cwd:$c,prompt:$p}' | "$H/mode.sh" >/dev/null; }
+ogout(){ jq -n --arg c "$og" --arg b "$1" '{hook_event_name:"PreToolUse",cwd:$c,tool_name:"Agent",tool_input:{subagent_type:"teamlead:tl-sonnet-high",description:"w",prompt:("do it\n"+$b+"\nmore")}}' | "$H/record.sh"; }
+ogdisp(){ out=$(ogout "$1"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
+ogadd(){ bfdecide '{"hook_event_name":"PreToolUse","cwd":"'$og'","tool_name":"'$RB'__board_add","tool_input":{"tasks":'"$1"'}}'; }
+ogmark(){ [ -f $ogs/plan-offer-pending ] && echo set || echo none; }
+ogsay "Go"
+check "a Go at stage 4 sets plan-offer-pending" "$(ogmark)" set
+check "pending: dispatch for a plan: row refused" "$(ogdisp 'board: 1')" deny
+r=$(ogout 'board: 1' | jq -r .hookSpecificOutput.permissionDecisionReason)
+grep -qF 'To build this on a fresh context: `/clear`, then `/teamlead plan continue`.' <<<"$r" && grep -qF 'Or say "here" to continue in this session.' <<<"$r" && grep -q STOP <<<"$r" \
+  && ok "  refusal carries the byte-exact offer and says to stop" || bad "  refusal text"
+check "  and a refused dispatch is not recorded in the ledger" "$(cat $ogs/events.log 2>/dev/null | grep -c dispatch)" 0
+check "pending: dispatch for a non-plan row unaffected" "$(ogdisp 'board: 2')" allow
+check "pending: dispatch with no board marker (scout) unaffected" "$(ogdisp 'no row')" allow
+check "pending: board_add of a plan: row denied" "$(ogadd '[{"task":"b","plan":"I2"}]')" deny
+check "pending: board_add without plan: allowed" "$(ogadd '[{"task":"scout"}]')" allow
+ogsay "I said here earlier, and here is a quote"
+ogsay "here we go"
+check "prompts merely containing 'here' leave the mark" "$(ogmark)" set
+check "  so the dispatch is still refused" "$(ogdisp 'board: 1')" deny
+printf '# T\n\n> **Stage 5** — x\n' > $ogf
+ogsay " Here "
+check "'here' (trim, case-insensitive) clears the mark" "$(ogmark)" none
+check "  and the plan: dispatch is allowed" "$(ogdisp 'board: 1')" allow
+check "  and board_add of a plan: row is allowed" "$(ogadd '[{"task":"b","plan":"I2"}]')" allow
+printf '# T\n\n> **Stage 4** — x\n' > $ogf
+ogsay "Go"
+check "a Go at stage 4 re-arms the mark" "$(ogmark)" set
+ogsay "/teamlead plan continue"
+check "'/teamlead plan continue' clears the mark" "$(ogmark)" none
+check "  and the plan: dispatch is allowed" "$(ogdisp 'board: 1')" allow
+printf '# T\n\n> **Stage 3** — x\n' > $ogf
+ogsay "Go"
+check "a Go at stage 3 does not set the mark" "$(ogmark)" none
+: > $ogs/plan-offer-pending; rm -f $ogs/active-plan
+check "no active plan: a stale mark never refuses a dispatch" "$(ogdisp 'board: 1')" allow
+
 echo "== gate.sh: plan-mode checks — footer, plan-lint, stage 5->6, returned (D1, D9) =="
 gtp=$T/gtgate; mkdir -p $gtp/.claude/teamlead/plan $gtp/.claude/teamlead/.state
 : > $gtp/.claude/teamlead/.state/active

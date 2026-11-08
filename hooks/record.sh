@@ -228,6 +228,20 @@ case "$ev" in
     # Installed as a plugin the type is NAMESPACED ("teamlead:tl-sonnet-low"),
     # so a bare tl-* test silently matches nothing and the ledger stays empty.
     case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    # Second Go not yet answered: no plan-step worker until the user says "here" or runs
+    # `/teamlead plan continue` (mode.sh lifts the mark). A scout/QC brief has no plan: row.
+    if [ -f "$TL_STATE/plan-offer-pending" ] && [ -f "$TL_STATE/active-plan" ]; then
+      bid=$(tl_json .tool_input.prompt | grep -oE '^board: [0-9]+$' | head -1 | awk '{print $2}')
+      if [ -n "$bid" ] && jq -e --argjson id "$bid" '[.tasks[]? | select(.id == $id and ((.plan // "") != ""))] | length > 0' \
+           "$TL_STATE/board.json" >/dev/null 2>&1; then
+        jq -n --arg r "teamlead: the second Go is not answered yet, so no plan-step worker may start. Print this byte-exact, on its own paragraph, then STOP and dispatch nothing until the user says \"here\" or a fresh session runs /teamlead plan continue:
+
+To build this on a fresh context: \`/clear\`, then \`/teamlead plan continue\`.
+Or say \"here\" to continue in this session." \
+          '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+        exit 0
+      fi
+    fi
     desc=$(tl_json .tool_input.description | tr '\n' ' ' | cut -c1-100)
     tl_event "dispatch  agent=$at  prompt=$(tl_json .prompt_id)  desc=$desc"
     ;;

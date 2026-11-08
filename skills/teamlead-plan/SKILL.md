@@ -809,6 +809,11 @@ nothing about clearing. In this order:
    to be picked up again via `/teamlead plan continue`. Never run `/clear`
    yourself.
 
+This is enforced: the second Go sets a mark, and until the user's `here` (or
+`/teamlead plan continue`) the hooks refuse `board_add` of `plan:` rows and any
+`tl-*` dispatch for a row that carries a `plan:` step, quoting the offer above.
+Scouts and QC rows are unaffected.
+
 ## `/teamlead plan continue`
 
 The general "pick the plan back up" command — after the fresh-context handoff

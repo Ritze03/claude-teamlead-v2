@@ -16,6 +16,10 @@
 #    overlap checks need the real owns. board_update stays open throughout
 #    (closing out a task that WAS already on the board is fine).
 #
+# 3. board_add of plan steps while the second Go's fresh-context offer is unanswered
+#    ($TL_STATE/plan-offer-pending, set by mode.sh, lifted by "here" or `/teamlead plan
+#    continue`). record.sh refuses the matching dispatch; this stops the row earlier.
+#
 # Reading is allowed — only writes are refused.
 set -uo pipefail
 in=$(cat)
@@ -42,6 +46,10 @@ case "$tool" in
     proj="${CLAUDE_PROJECT_DIR:-$(j .cwd)}"
     [ -n "$proj" ] || exit 0
     ap="$proj/.claude/teamlead/.state/active-plan"
+    if [ -f "$ap" ] && [ -f "$proj/.claude/teamlead/.state/plan-offer-pending" ] &&
+       jq -e '[.tool_input.tasks[]? | select((.plan // "") != "")] | length > 0' <<<"$in" >/dev/null 2>&1; then
+      deny "board-fence: the second Go is not answered yet. Print the offer byte-exact, then STOP until the user says \"here\" or runs /teamlead plan continue: To build this on a fresh context: \`/clear\`, then \`/teamlead plan continue\`. Or say \"here\" to continue in this session."
+    fi
     if [ -f "$ap" ]; then
       plan=$(cat "$ap" 2>/dev/null)
       if [ -n "$plan" ] && [ -f "$plan" ]; then

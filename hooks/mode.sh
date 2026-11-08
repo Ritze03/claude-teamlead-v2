@@ -22,6 +22,16 @@ TL_BOARD="$TL_DIR/board.md"; TL_EVENTS="$TL_STATE/events.log"
 # leading/trailing whitespace the client adds around a typed slash command.
 p=$(tl_json .prompt | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
+# The second Go's fresh-context offer (skills/teamlead-plan "The second Go") is enforced by
+# $TL_STATE/plan-offer-pending: set below when a Go is recorded at stage 4, checked by record.sh
+# (Agent dispatch of a plan: row) and board-fence.sh (board_add of a plan: row). It is lifted by
+# the user's "here" or by `/teamlead plan continue`: exact whole-prompt matches like the Go
+# check, so a subagent result or file diff that merely quotes "here" never lifts it.
+case "$p" in
+  "here"|"/teamlead plan continue"|"/teamlead:teamlead plan continue"|"/teamlead:teamlead-plan continue")
+    rm -f "$TL_STATE/plan-offer-pending" ;;
+esac
+
 case "$p" in
   "/teamlead stop"|"/teamlead:teamlead stop")
     [ -f "$TL_STATE/active" ] || exit 0
@@ -61,6 +71,7 @@ if [ "$p" = "go" ] && [ -f "$TL_STATE/active-plan" ]; then
       # F21/D7: "first Go" is judged BEFORE the append below adds this one.
       first_go=1; [ -s "$TL_STATE/plan-go" ] && first_go=0
       printf '%s %s\n' "$stage" "$(tl_now)" >> "$TL_STATE/plan-go"
+      [ "$stage" = 4 ] && : > "$TL_STATE/plan-offer-pending"
       # watch-plan.sh:72 marks plan-touched on the first user save it sees. No
       # mark by the first recorded Go means the user typed Go having only ever
       # seen the lead's own edits — worth one nudge, not a repeat on every Go.
