@@ -10,7 +10,7 @@ Two front ends over the same core:
   MCP   board.py --mcp                (the agent, as tool calls)
 
 Commands: add, update, remove, list, status, check, render, clean, drop,
-          forget, hold, release, held, ledger, worker-start, worker-stop.
+          forget, hold, release, held, held-noted, ledger, worker-start, worker-stop.
   Read-only: list, status, check, held, ledger.  Everything else writes and goes
   through _cli_write_project: refused for a worker (cwd in an agent worktree of
   the project whose board it is) and for a blank/valueless --project.
@@ -691,17 +691,21 @@ def op_remove(db, id, **_):
     return {"id": id, "removed": True, "state": t["state"], "touched": touched}
 
 
-def op_hold(db, id, worktree=None, reason=None, repo=None, **_):
+def op_hold(db, id, worktree=None, reason=None, repo=None, until_change=False, **_):
     """#4/#9: the lead's acknowledgement that a worktree is kept ON PURPOSE — work
     paused for the user, or an unmerged commit kept until the user says delete it.
     Without one, the Stop gate cannot tell that from neglect and re-flags it every
     turn, which trains the lead to answer it with "deliberately skipping".
 
     Stored on the row as `held`, with the row's state and worker and the
-    worktree's fingerprint at that moment. The gate honours it only while all
-    three still match, so it can never become a permanent mute: re-dispatch (new
-    worker), a state change (merged, queued, ...) or any new commit/edit in the
-    worktree lapses it and the gate flags the worktree again. `held` works for
+    worktree's fingerprint at that moment. The gate honours it only while the
+    row's state and worker still match, so it can never become a permanent mute:
+    re-dispatch (new worker) or a state change (merged, queued, ...) lapses it,
+    and so does removing the worktree. New commits or edits do NOT lapse it (#16:
+    a kept diagnostic build that is extended between tests is still kept); the gate
+    shows one note, once per hold, when it sees new work (`noted`, set by
+    `held-noted`). `until_change` stores the older behaviour as a flag: the hold
+    also lapses on any new commit/edit (the fingerprint differs). `held` works for
     every state a kept worktree can sit in — queued, blocked, returned. Refused
     for running (its worker is out; the gate skips it anyway) and merged (a
     merged row's worktree is a leftover for D7, never something to keep)."""
@@ -731,7 +735,20 @@ def op_hold(db, id, worktree=None, reason=None, repo=None, **_):
     t["held"] = {"worktree": path, "reason": reason or "", "state": t["state"],
                  "worker": t.get("worker"), "fingerprint": _wt_fingerprint(path),
                  "since": now()}
+    if until_change:
+        t["held"]["until_change"] = True
     t["updated"] = now()
+    return t
+
+
+def op_held_noted(db, id, **_):
+    """#16: the Stop gate has shown the one-line "new work in a held worktree" note
+    for row `id`; remember it so it is not shown again for this hold. A row that
+    is not held is a no-op."""
+    t = next((t for t in db["tasks"] if t["id"] == int(id)), None)
+    if t is None or not t.get("held"):
+        return None
+    t["held"]["noted"] = True
     return t
 
 
@@ -759,21 +776,27 @@ def _lapse_holds(db) -> None:
 
 
 def held_worktrees(db) -> dict:
-    """{worktree path: {row, reason, lapsed}} for every hold whose worktree still
-    exists. `lapsed` is None while the hold is good, else why it no longer
-    applies (the worktree changed since). Read by the Stop gate and `status`; the
-    row's state/worker half of validity is _lapse_holds' job at write time."""
+    """{worktree path: {row, reason, lapsed, until_change, changed, note_due}} for every
+    hold whose worktree still exists. `lapsed` is None while the hold is good, else
+    why it no longer applies (the row changed, or, for an --until-change hold only,
+    the worktree did). `changed`: the worktree has new work since the hold.
+    `note_due`: a default hold that is changed and was not yet reported (the gate
+    shows one line, then calls `held-noted`). Read by the Stop gate and `status`;
+    the row's state/worker half of validity is _lapse_holds' job at write time."""
     out = {}
     for t in db["tasks"]:
         h = t.get("held")
         if not h or not os.path.isdir(h.get("worktree", "")):
             continue
         lapsed = None
+        changed = _wt_fingerprint(h["worktree"]) != h.get("fingerprint")
         if t["state"] != h.get("state") or t.get("worker") != h.get("worker"):
             lapsed = "the row changed state or was re-dispatched"
-        elif _wt_fingerprint(h["worktree"]) != h.get("fingerprint"):
+        elif changed and h.get("until_change"):
             lapsed = "the worktree changed since (new commit or edit)"
-        out[h["worktree"]] = {"row": t["id"], "reason": h.get("reason", ""), "lapsed": lapsed}
+        out[h["worktree"]] = {"row": t["id"], "reason": h.get("reason", ""), "lapsed": lapsed,
+                              "until_change": bool(h.get("until_change")), "changed": changed,
+                              "note_due": changed and not lapsed and not h.get("noted", False)}
     return out
 
 
@@ -1402,7 +1425,9 @@ def main(argv):
             print(f"  abandoned worker ids (started, never stopped): {', '.join(lg['abandoned'])}")
         for path, h in held_worktrees(db).items():
             print(f"  held #{h['row']}: {path}" + (f" — {h['reason']}" if h["reason"] else "")
-                  + (f"  (hold lapsed: {h['lapsed']})" if h["lapsed"] else ""))
+                  + ("  [until-change]" if h["until_change"] else "")
+                  + (f"  (hold lapsed: {h['lapsed']})" if h["lapsed"] else "")
+                  + ("  (new work since the hold)" if h["changed"] and not h["lapsed"] else ""))
         probs = validate(db) + check_git(db, proj) + check_plan(db, proj)
         for p_ in probs:
             print(f"  ! {p_}")
@@ -1411,17 +1436,25 @@ def main(argv):
         rid = pos[0] if pos else kw.get("id")
         if rid is None:
             print(f"usage: board.py {cmd} <row> "
-                  + ("[--worktree <path>] [--reason <why>]" if cmd == "hold" else ""),
+                  + ("[--worktree <path>] [--reason <why>] [--until-change]" if cmd == "hold" else ""),
                   file=sys.stderr)
             return 1
         if cmd == "hold":
             res = mutate(op_hold, project=proj, id=rid, worktree=kw.get("worktree"),
-                         reason=kw.get("reason"), repo=_main_checkout(proj))
+                         reason=kw.get("reason"), repo=_main_checkout(proj),
+                         until_change=kw.get("until_change") == "true")
             print(json.dumps(res, indent=2))
         else:
             res = mutate(op_release, project=proj, id=rid)
             print(json.dumps(res) if res else f"task {rid} was not held")
-    elif cmd == "held":                         # for the Stop gate: {worktree: {row, reason, lapsed}}
+    elif cmd == "held-noted":                   # the Stop gate showed a hold's new-work note (#16)
+        proj = _cli_write_project(proj, hook_ok=True)
+        rid = pos[0] if pos else kw.get("id")
+        if rid is None:
+            print("usage: board.py held-noted <row>", file=sys.stderr)
+            return 1
+        print(json.dumps(mutate(op_held_noted, project=proj, id=rid)))
+    elif cmd == "held":                         # for the Stop gate: {worktree: {row, reason, lapsed, ...}}
         print(json.dumps(held_worktrees(load(proj))))
     elif cmd == "ledger":
         print(json.dumps(ledger(proj), indent=2))
@@ -1459,7 +1492,7 @@ def main(argv):
     else:
         print(f"unknown command {cmd}")
         print("commands: add, update, remove, list, status, check, render, clean, "
-              "drop, forget, hold, release, held, ledger, worker-start, worker-stop")
+              "drop, forget, hold, release, held, held-noted, ledger, worker-start, worker-stop")
         return 1
     return 0
 

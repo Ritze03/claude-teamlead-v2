@@ -4,6 +4,15 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.8.0 — 2026-11-08
+
+A kept worktree stays kept, the lead may do small read-only checks itself, and the second Go's fresh-context offer is enforced (#16, #17, #18).
+
+- A hold survives new commits and edits (#16): `board.py hold` used to lapse as soon as the worktree got a commit or edit, so a deliberately kept build that a worker extends between tests was flagged again after each commit and the lead had to re-hold it. Now a hold ends only when the row is re-dispatched or merged (state or worker changes, as before) or the worktree is removed. `hold --until-change` opts back into the old behaviour (stored as `until_change` on the hold). When a default-held worktree has new work since the hold, the Stop gate shows one line once per hold (a `systemMessage`, or appended to the block when the turn is blocked for another reason; never a block by itself) and records it with the new `board.py held-noted <row>` (hook-callable, like `worker-start`). `board.py status` and `held` show `new work since the hold`, `until-change`, and `changed` / `note_due`. The gate's left-behind-work message and the SKILL.md, README and `docs/enforcement.md` text describe the new lapse rules.
+- Small read-only checks inline (#17): `skills/teamlead/SKILL.md` lets the lead do a small read-only check itself (about 3-5 tool calls, relying on context it already holds, such as verifying a worker's result). Writes, builds, heavy commands and wide reads still go to a worker; the red flag is reworded to cover only delegated read-only work.
+- The second Go's fresh-context offer is enforced (#18): after a Go at stage 4, `mode.sh` sets `.state/plan-offer-pending`. `record.sh` refuses `tl-*` dispatches whose `board: N` row has a plan step, and `board-fence.sh` refuses `board_add` of `plan:` rows, until the user's prompt is exactly `here` or `/teamlead plan continue`. The deny reason carries the exact offer text for the fresh-context choice.
+- test: hold tests cover the default (a hold survives a commit and an edit, one note once, with and without another finding), the `--until-change` lapse, and release on merge and re-dispatch.
+
 ## 2.7.0 — 2026-11-07
 
 superdoc stops relying on the agent to remember the rules between audits: a script decides what a script can decide, and a leak is blocked before it is committed or pushed (#14, #15). Staleness a script cannot judge stays with the periodic audit.

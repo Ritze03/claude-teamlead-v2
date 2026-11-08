@@ -92,14 +92,24 @@ if git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   main=$(git -C "$TL_PROJECT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
   # Worktrees the lead marked as kept on purpose (`board.py hold`, #4/#9): row,
   # and why the hold stopped applying ("" while it is good). A good hold is not a
-  # finding — without it this check re-fired every turn on a correct state.
+  # finding — without it this check re-fired every turn on a correct state. A hold
+  # survives new commits and edits (#16); only --until-change holds lapse on them.
+  # A default hold whose worktree got new work gets ONE note (held_notes), never a
+  # block; held-noted records that it was shown. Fields: path, row, note_due 0/1, and
+  # last, because it may be empty, the lapse reason.
   declare -A held_row=() held_lapsed=()
-  while IFS=$'\t' read -r hp_ hr_ hl_; do
-    [ -n "$hp_" ] && { held_row[$hp_]=$hr_; held_lapsed[$hp_]=$hl_; }
+  held_notes=""
+  while IFS=$'\t' read -r hp_ hr_ hn_ hl_; do
+    [ -n "$hp_" ] || continue
+    held_row[$hp_]=$hr_; held_lapsed[$hp_]=$hl_
+    if [ "$hn_" = 1 ]; then
+      held_notes+="${held_notes:+$'\n'}  held worktree $hp_ (row $hr_) has new commits or edits since the hold; it stays held, this is the only mention. Merge or release it when it is done."
+      python3 "$BOARD_PY" held-noted "$hr_" --project "$TL_PROJECT" >/dev/null 2>&1 || true
+    fi
   done < <(python3 "$BOARD_PY" held --project "$TL_PROJECT" 2>/dev/null | python3 -c "
 import json,sys
 try:
-    for p,h in json.load(sys.stdin).items(): print(p,h['row'],h['lapsed'] or '',sep='\t')
+    for p,h in json.load(sys.stdin).items(): print(p,h['row'],int(h['note_due']),h['lapsed'] or '',sep='\t')
 except Exception: pass" 2>/dev/null)
   # Board rows by branch and by worker id, merged rows first so an open row wins when
   # several name the same worktree. Used to scope this check and to name the row to hold.
@@ -155,7 +165,7 @@ except Exception: pass" 2>/dev/null)
   done < <(git -C "$TL_PROJECT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
   # One holdable row among the findings: print the command ready to run.
   hrow_arg="<row>"; [ "$(wc -w <<<"$hold_rows")" = 1 ] && hrow_arg=${hold_rows// /}
-  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"${dirty}  Kept on purpose (paused work, a commit awaiting the user's decision)? Acknowledge it once, instead of answering this gate every turn: python3 $BOARD_PY hold $hrow_arg --reason \"…\" --project \"\$PWD\" (use the board row shown above; it must be queued, blocked or returned). It stays quiet until the row is re-dispatched or merged or the worktree gets a new commit or edit. Not kept? Merge it, or remove the worktree (removing one with unmerged commits needs the user's OK)."
+  [ -n "$dirty" ] && problems+=$'\n'"- finished worker(s) left work behind:"$'\n'"${dirty}  Kept on purpose (paused work, a commit awaiting the user's decision)? Acknowledge it once, instead of answering this gate every turn: python3 $BOARD_PY hold $hrow_arg --reason \"…\" --project \"\$PWD\" (use the board row shown above; it must be queued, blocked or returned). It stays quiet, also across new commits and edits (add --until-change to have it lapse on those), until the row is re-dispatched or merged or the worktree is removed. Not kept? Merge it, or remove the worktree (removing one with unmerged commits needs the user's OK)."
 fi
 
 # Plan mode. The header line `> **Stage N** —…` in the active plan file is the one
@@ -411,7 +421,13 @@ if tl_superdoc_wired "$TL_PROJECT"; then
   fi
 fi
 
-[ -z "$problems" ] && exit 0
+# The held-worktree note (#16) never blocks by itself: with no problem it goes out as a
+# systemMessage on exit 0; when the turn is blocked anyway it rides along.
+if [ -z "$problems" ]; then
+  [ -n "${held_notes:-}" ] && jq -n --arg m "Teamlead:${held_notes}" '{systemMessage:$m}'
+  exit 0
+fi
+[ -n "${held_notes:-}" ] && problems+=$'\n'"- note (shown once):"$'\n'"$held_notes"
 tl_block "Teamlead — before this turn ends:$problems
 
 Resolve these, or say plainly which you are deliberately skipping and why. This check fires once per turn."
