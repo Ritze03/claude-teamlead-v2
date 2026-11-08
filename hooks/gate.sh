@@ -365,7 +365,9 @@ fi
 # then true, and old debt on a line near a typo fix is not re-reported). Each is dropped from the
 # other so nothing shows twice. The Stop hook has 10s: each lint call runs under `timeout 4`, and
 # on a timeout the state stays where it was and the check stays quiet (it retries at the next
-# Stop). The output is capped at 40 lines, like superdoc-guard.sh.
+# Stop). The output is capped at 40 lines, like superdoc-guard.sh. When a doc .md or CLAUDE.md is
+# among the changed files, `map.py --check` also runs (same timeout, same state) and its DANGLING
+# lines that start in or point at a changed file are shown too, capped separately at 40 (#19).
 if tl_superdoc_wired "$TL_PROJECT"; then
   sd_head=$(git -C "$TL_PROJECT" rev-parse -q --verify HEAD 2>/dev/null) || sd_head=""
   if [ -n "$sd_head" ]; then
@@ -400,6 +402,22 @@ if tl_superdoc_wired "$TL_PROJECT"; then
         sd_out=$(printf '%s\n' "$sd_err" | grep -E ': error: |^fix: |^note: '
                  printf '%s\n' "$sd_warn" | grep -E ': warn: |^hint: ')
       fi
+      # Links (#19): when a doc .md or CLAUDE.md changed, map.py --check over the whole tree; shown
+      # are the DANGLING lines whose linking file or target is among the changed files (a deleted or
+      # renamed page, a lost heading), not old debt elsewhere. Same timeout and once-only state.
+      sd_map=""; sd_mapper=$(tl_superdoc_map); sd_md=0
+      for sd_f in ${sd_files[@]+"${sd_files[@]}"}; do case "$sd_f" in *.md) sd_md=1 ;; esac; done
+      if [ "$sd_md" = 1 ] && [ "$sd_rc" != 124 ] && [ -f "$sd_mapper" ]; then
+        sd_map=$(cd "$TL_PROJECT" && tl_timeout 4 python3 "$sd_mapper" --check 2>/dev/null)
+        [ $? = 124 ] && sd_rc=124
+        sd_map=$(printf '%s\n' "$sd_map" | SD_CHANGED=$(printf '%s\n' "${sd_files[@]}") awk '
+          BEGIN { n = split(ENVIRON["SD_CHANGED"], a, "\n"); for (i = 1; i <= n; i++) ch[a[i]] = 1 }
+          /^DANGLING / && match($0, / -> /) {
+            l = substr($0, 1, RSTART - 1); sub(/^DANGLING +/, "", l); sub(/:[0-9]+$/, "", l)
+            r = substr($0, RSTART + 4); sub(/  \(.*\)$/, "", r); sub(/#.*/, "", r)
+            if (l in ch || r in ch) print
+          }')
+      fi
       if [ "$sd_rc" = 124 ]; then
         :   # timed out: leave the state alone, say nothing
       else
@@ -415,6 +433,12 @@ if tl_superdoc_wired "$TL_PROJECT"; then
             sd_msg+=$'\n'"  Warnings: fix them or leave them on your own judgement (dispatch a repair if it is worth it). The docs are the agents' job: do not ask the user about them."
           fi
           problems+=$'\n'"$sd_msg"
+        fi
+        if [ -n "$sd_map" ]; then
+          sd_mn=$(printf '%s\n' "$sd_map" | wc -l)
+          sd_mm="- superdoc: the merge left dangling links (shown once; the link's file or anchor is gone). Fix them now (retarget or remove the link), then re-run \`python3 $sd_mapper --check\`:"$'\n'"$(printf '%s\n' "$sd_map" | head -n 40 | sed 's/^/    /')"
+          [ "$sd_mn" -gt 40 ] && sd_mm+=$'\n'"    ... and $((sd_mn - 40)) more line(s) not shown; \`python3 $sd_mapper --check\` lists them all"
+          problems+=$'\n'"$sd_mm"
         fi
       fi
     fi

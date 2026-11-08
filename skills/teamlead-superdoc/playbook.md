@@ -564,6 +564,10 @@ re-check.
       every finding fixed: it decides what a script can (leaks, line references, dangling
       `@`-refs, force-load size, glossary entry length, pages missing from the README) and never
       prints a leaked value. The boxes below cover what it cannot.
+- [ ] `map.py --check` run (`python3 <plugin-root>/skills/teamlead-superdoc/map.py --check`) with
+      no `DANGLING` left, and every `ORPHAN` linked from where it belongs or deleted. Run it
+      again after any edit under the doc root or to `CLAUDE.md`, and before a rename, move or
+      delete use `map.py --links-to PAGE` for the list of links to fix.
 - [ ] Every `path:symbol` written anywhere in `superdoc/` resolves: the path exists and the
       symbol is actually in it (grep it, don't eyeball it).
 - [ ] Every relative link written anywhere in `superdoc/` resolves to a file that exists.
@@ -613,6 +617,10 @@ audit found.)
   pages missing from `README.md`. Loopback, documentation ranges, `example.*` addresses and
   placeholder homes (`/home/user`, `$HOME`, `<name>`) are never findings. A line carrying
   `superdoc-lint: allow` is skipped: for a true false positive only, never for a real value.
+- **Link graph:** `python3 <plugin-root>/skills/teamlead-superdoc/map.py --check` lists
+  `DANGLING` links (a missing file or a `#anchor` no heading matches) and `ORPHAN` pages (nothing
+  links to them). Both are audit findings; fix dangling links by retargeting or removing them,
+  and give an orphan a link from its folder's `README.md` or delete it.
 - Run the full Part 8 gate against the existing `superdoc/` and `CLAUDE.md`.
 - Grep every referenced `path`/`symbol` and every relative link; list what doesn't
   resolve.

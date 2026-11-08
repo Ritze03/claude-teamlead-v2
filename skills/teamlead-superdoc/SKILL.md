@@ -91,6 +91,35 @@ Part 9, lists its checks). A `⚠` from the size check is a HEALTH-CHECK finding
 A `note:` (total over 20 KB while every glossary entry is short) is not a `⚠`: the
 repair is the judgement pass in playbook Part 9, never a cut to meet a number.
 
+### `/teamlead superdoc map` — the link graph (`map.py`)
+
+`map.py` (Python 3, stdlib only) maps how the pages link to each other. Run it yourself, no
+worker, from any subdirectory or linked worktree (`CLAUDE_PLUGIN_ROOT` is not set in your
+shell; resolve the path as above, and workers get it as the literal path in their brief):
+
+```bash
+MAP="$(cat .claude/teamlead/.state/plugin-root)/skills/teamlead-superdoc/map.py"
+python3 "$MAP"                      # structure per folder (each page: out / in), then findings
+python3 "$MAP" --check              # findings and the summary line only
+python3 "$MAP" --links-to PAGE      # path:line -> target of every link that points at PAGE
+python3 "$MAP" --links-from PAGE    # every link PAGE contains
+```
+
+Findings, one per line: `DANGLING  path:line -> target#anchor  (file missing|anchor missing)`
+(anchors are GitHub-style heading slugs), `ORPHAN    path  (no inbound links)`, and a last
+`OK|FAIL  N pages, M links, D dangling, O orphan` line. Exit 1 only when something dangles;
+orphans are warnings. `CLAUDE.md` and the README.md at the doc root are never orphans, a
+`README.md` index or `CLAUDE.md` link counts as inbound, and so does an `@<doc>/page.md`
+force-load line. Links in code fences and code spans, and `http(s)`/`mailto` links, are ignored.
+
+- **Before a rename, move or delete**: `--links-to PAGE` is the list of links to fix; do not grep.
+- **To navigate**: open the map first and jump to the pages it shows, instead of reading the hub
+  page and grepping (it costs less context).
+- **Documentation discipline: after any edit under the doc root or to `CLAUDE.md`, run
+  `map.py --check` and fix every `DANGLING` it reports before handing back or committing.**
+  An `ORPHAN` is yours to judge: link the page from its folder's `README.md` or the page that
+  should point to it, or delete it if nothing needs it. Say so in every superdoc worker brief.
+
 **If it reports `⚠ GITIGNORED`, fix that first.** The failure is silent: everything
 works locally and the knowledge vanishes for anyone who clones. Un-ignore it before
 writing a single page.
@@ -248,6 +277,9 @@ All of it acts only in a project whose `CLAUDE.md` carries `superdoc:start`; an 
   findings shown to you. Warnings (any line of a touched file) are yours to fix or leave;
   errors are reported only for lines added in the merge, so old debt near a typo fix is not
   re-reported. An error means a leak got past the commit hooks: repair it now and do not push.
+  When a doc `.md` or `CLAUDE.md` was among the changed files, the same check also runs
+  `map.py --check` and shows the `DANGLING` lines that start in or point at a changed file
+  (a deleted or renamed page, a lost heading), once, capped at 40 lines.
 - **Audit reminder** at session start when the last recorded audit is over 50 non-merge
   commits old.
 

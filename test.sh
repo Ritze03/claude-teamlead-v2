@@ -415,7 +415,7 @@ only_f=$(comm -13 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
 # Pin the set itself too, so a command added to BOTH copies still gets looked at here.
 check "the shared set is exactly the commands that exist today" \
   "$(tr '\n' ' ' < "$T/cs-table")" \
-  "/teamlead /teamlead board /teamlead board clean /teamlead board drop /teamlead brainstorm /teamlead effort /teamlead help /teamlead opus /teamlead plan /teamlead plan continue /teamlead settings /teamlead status /teamlead stop /teamlead superdoc "
+  "/teamlead /teamlead board /teamlead board clean /teamlead board drop /teamlead brainstorm /teamlead effort /teamlead help /teamlead opus /teamlead plan /teamlead plan continue /teamlead settings /teamlead status /teamlead stop /teamlead superdoc /teamlead superdoc map "
 # F5: README.md carries a THIRD hand-written copy of the same list (## Commands plus
 # ## Dials) and had no test at all. It is the project's front door, so a command that
 # exists only there — or only not there — is a user-visible lie. Same extractor, same
@@ -4658,6 +4658,85 @@ check "git failure (unborn HEAD): exit 0" "$(sbev "$sbb")" 0
 echo garbage > "$sbb/.git/HEAD"
 check "git failure (corrupt HEAD): exit 0" "$(sbev "$sbb")" 0
 [ ! -s "$T/sbout" ] && ok "  and prints nothing" || bad "  and prints nothing"
+
+echo "== superdoc map: link graph (map.py, #19) =="
+MAP="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/map.py"
+mapin() { local d=$1; shift; (cd "$d" && python3 "$MAP" "$@"); }   # run map.py from inside a fixture dir
+MP=$T/mpf; gfix $MP; mkdir -p $MP/superdoc/meta $MP/superdoc/features/sub
+printf '# P\n<!-- superdoc:start v4 -->\nHub: [docs](superdoc/README.md); not a link: `[x](nope.md)`\n@superdoc/meta/TERMINOLOGY.md\n<!-- superdoc:end -->\n' > $MP/CLAUDE.md
+printf '# Index\n\n- [a](features/a.md)\n- [b](features/b.md)\n- [gone](features/gone.md)\n- [deep](features/sub/deep.md)\n' > $MP/superdoc/README.md
+cat > $MP/superdoc/features/a.md <<'EOF'
+# A
+## Dup
+## Dup
+## With: Punct & Stuff!
+<a name="expl"></a>
+Good: [b](b.md) [sec](b.md#bsec) [dup1](#dup-1) [dup0](#dup) [slug](#with-punct--stuff) [expl](#expl) [up](../README.md#index)
+Bad anchor: [bad](b.md#nosuch)
+Ignored: [ext](https://example.org/x.md) [mail](mailto:a@example.org) `[code](ghost2.md)`
+```
+[fenced](ghost.md)
+```
+EOF
+printf '# B\n## Bsec\n' > $MP/superdoc/features/b.md
+printf '# O\nnothing links here\n' > $MP/superdoc/features/orphan.md
+printf '# T\n' > $MP/superdoc/meta/TERMINOLOGY.md
+printf '# Deep\n[a](../a.md)\n' > $MP/superdoc/features/sub/deep.md
+out_m=$(mapin $MP); rc_m=$?
+check "map: exit 1 with dangling links" "$rc_m" "1"
+check "map: a link to a missing file is DANGLING (file missing), with path:line and the resolved target" "$(printf '%s\n' "$out_m" | grep -c '^DANGLING  superdoc/README.md:5 -> superdoc/features/gone.md  (file missing)$')" "1"
+check "map: a link to a heading that is not there is DANGLING (anchor missing)" "$(printf '%s\n' "$out_m" | grep -c '^DANGLING  superdoc/features/a.md:7 -> superdoc/features/b.md#nosuch  (anchor missing)$')" "1"
+check "map: exactly those two are dangling (valid link, dup slugs -1, punctuation slug, explicit <a name>, external, mailto, code fence and code span are not)" "$(printf '%s\n' "$out_m" | grep -c '^DANGLING')" "2"
+check "map: a page nothing links to is an ORPHAN" "$(printf '%s\n' "$out_m" | grep '^ORPHAN' | tr '\n' '|')" "ORPHAN    superdoc/features/orphan.md  (no inbound links)|"
+check "map: summary line counts pages, links, dangling and orphans, and says FAIL" "$(printf '%s\n' "$out_m" | tail -n 1)" "FAIL      7 pages, 14 links, 2 dangling, 1 orphan"
+check "map: a README index link, a CLAUDE.md link and an @-ref count as inbound (b.md, README.md, TERMINOLOGY.md are not orphans; CLAUDE.md never is)" "$(printf '%s\n' "$out_m" | grep -c '^ORPHAN.*\(b.md\|README.md\|TERMINOLOGY.md\|CLAUDE.md\)')" "0"
+check "map: the structure lists each page per folder with out: and in:" "$(printf '%s\n' "$out_m" | grep -c '^superdoc/features/$')/$(printf '%s\n' "$out_m" | grep -c '^  b.md  out: -  in: superdoc/README.md, superdoc/features/a.md$')" "1/1"
+out_c=$(mapin $MP --check); rc_c=$?
+check "map --check: findings and summary only (no structure), same exit code" "$(printf '%s\n' "$out_c" | grep -c '  out: ')/$(printf '%s\n' "$out_c" | wc -l | tr -d ' ')/$rc_c" "0/4/1"
+check "map: works from a subdirectory of the repo" "$(cd $MP/superdoc/features/sub && python3 "$MAP" --check | tail -n 1)" "FAIL      7 pages, 14 links, 2 dangling, 1 orphan"
+check "map --links-to: path:line -> target of each link that points at the page, a self-link is not one; the page may be given repo-, doc- or cwd-relative" "$(mapin $MP --links-to superdoc/features/b.md | tr '\n' '|')/$(mapin $MP --links-to features/b.md | wc -l | tr -d ' ')/$(cd $MP/superdoc/features && python3 "$MAP" --links-to b.md | wc -l | tr -d ' ')" "superdoc/README.md:4 -> superdoc/features/b.md|superdoc/features/a.md:6 -> superdoc/features/b.md|superdoc/features/a.md:6 -> superdoc/features/b.md#bsec|superdoc/features/a.md:7 -> superdoc/features/b.md#nosuch  (anchor missing)|/4/4"
+check "map --links-from: every link the page contains, path:line form; a missing target is marked" "$(mapin $MP --links-from superdoc/README.md | tr '\n' '|')" "superdoc/README.md:3 -> superdoc/features/a.md|superdoc/README.md:4 -> superdoc/features/b.md|superdoc/README.md:5 -> superdoc/features/gone.md  (file missing)|superdoc/README.md:6 -> superdoc/features/sub/deep.md|"
+check "map --links-to: a page nothing links to prints nothing, exit 0" "$(mapin $MP --links-to superdoc/features/orphan.md; echo rc=$?)" "rc=0"
+check "map --links-to: the @-ref of CLAUDE.md is listed as such" "$(mapin $MP --links-to superdoc/meta/TERMINOLOGY.md)" "CLAUDE.md:4 -> superdoc/meta/TERMINOLOGY.md  (@-ref)"
+mapin $MP --bogus >/dev/null 2>&1; check "map: an unknown flag is exit 2" "$?" "2"
+# fix the two dangling links: exit 0, OK; the orphan alone stays a warning
+sed -i '/gone.md/d' $MP/superdoc/README.md; sed -i '/Bad anchor/d' $MP/superdoc/features/a.md
+out_o=$(mapin $MP --check); rc_o=$?
+check "map: only an orphan left is a warning: exit 0, OK line names it" "$rc_o/$(printf '%s\n' "$out_o" | tail -n 1)" "0/OK        7 pages, 12 links, 0 dangling, 1 orphan"
+printf -- '- [o](features/orphan.md)\n' >> $MP/superdoc/README.md
+check "map: linking the orphan from the README index clears it" "$(mapin $MP --check | tail -n 2 | tr '\n' '|')" "OK        7 pages, 13 links, 0 dangling, 0 orphan|"
+printf 'x\n' > $MP/superdoc/features/with\ space.md; printf -- '- [sp](features/sub/sp.md)\n' >> $MP/superdoc/README.md; printf '[s](../with%%20space.md) [t](<../with space.md>)\n' > $MP/superdoc/features/sub/sp.md
+check "map: percent-encoded and <angle> targets with spaces resolve (no dangling)" "$(mapin $MP --check | grep -c '^DANGLING')" "0"
+NS=$T/mpn; mkdir -p $NS; (cd $NS && git init -q); printf '# P\n' > $NS/CLAUDE.md
+check "map: a project with no superdoc: one note, exit 0" "$(mapin $NS; echo rc=$?)" "map: no superdoc in this project, nothing to map
+rc=0"
+check "map: outside a git repo with no superdoc: the same, exit 0" "$(mkdir -p $T/mpnogit && cd $T/mpnogit && python3 "$MAP"; echo rc=$?)" "map: no superdoc in this project, nothing to map
+rc=0"
+# a linked worktree: the repo root is the worktree's own
+(cd $MP && git add -A && git commit -qm base && git worktree add -q -b mpwt $T/mpwt 2>/dev/null)
+check "map: a linked worktree maps its own tree" "$(mapin $T/mpwt --check | tail -n 1)" "OK        9 pages, 16 links, 0 dangling, 0 orphan"
+
+echo "== superdoc map: gate shows dangling links once (gate.sh check 8, #19) =="
+GM=$T/mpg; sgmk $GM
+printf '# I\n[a](features/a.md)\n[old](features/old-gone.md)\n' > $GM/superdoc/README.md; (cd $GM && git add superdoc && git commit -qm readme)
+sgstop $GM >/dev/null
+sgmerge $GM bmp1 superdoc/features/c.md '# C\n[a](a.md)\n[ghost](ghost.md)\n[sec](a.md#nosuch)\n'
+rc_mg=$(sgstop $GM)
+check "gate map: a merge that brings dangling links blocks and names each (file:line -> target, reason) once" "$rc_mg/$(grep -c '^ *DANGLING  superdoc/features/c.md:3 -> superdoc/features/ghost.md  (file missing)$' $T/sgout)/$(grep -c '^ *DANGLING  superdoc/features/c.md:4 -> superdoc/features/a.md#nosuch  (anchor missing)$' $T/sgout)" "2/1/1"
+check "  old debt in a file the merge did not touch (README -> old-gone.md) is not shown" "$(grep -c 'old-gone' $T/sgout)" "0"
+check "  it fires ONCE: the next Stop is silent" "$(sgstop $GM)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
+(cd $GM && git checkout -qb bmp2 && printf '# I\n[a](features/a.md)\n' > superdoc/README.md && git rm -q superdoc/features/a.md && git commit -qm del --no-verify && git checkout -q master && git merge -q --no-ff -m m-bmp2 bmp2)
+rc_md=$(sgstop $GM)
+check "gate map: deleting a page shows the links that now dangle, in files the merge did not touch (c.md, README.md)" "$rc_md/$(grep -c '^ *DANGLING  superdoc/README.md:2 -> superdoc/features/a.md  (file missing)$' $T/sgout)/$(grep -c '^ *DANGLING  superdoc/features/c.md:2 -> superdoc/features/a.md  (file missing)$' $T/sgout)" "2/1/1"
+check "  and fires once" "$(sgstop $GM)" "0"
+lk=(); for i in $(seq 1 60); do lk+=("[l$i](nofile$i.md)\n"); done
+sgmerge $GM bmp3 superdoc/features/many.md "# M\n$(printf '%s' "${lk[@]}")"
+rc_mc=$(sgstop $GM)
+check "gate map: the DANGLING output is capped at 40 lines, with how many more" "$rc_mc/$(grep -c '^ *DANGLING  superdoc/features/many.md' $T/sgout)/$(grep -c 'and 20 more line(s) not shown' $T/sgout)" "2/40/1"
+(cd $GM && printf '# C\nclean\n' > superdoc/features/c.md && printf '# M\nclean\n' > superdoc/features/many.md && printf '# I\n' > superdoc/README.md && git add superdoc && git commit -qm clean --no-verify)
+sgstop $GM >/dev/null
+sgmerge $GM bmp4 superdoc/features/ok.md '# Ok\n[c](c.md)\n' superdoc/README.md '# I\n[c](features/c.md)\n[m](features/many.md)\n[ok](features/ok.md)\n'
+check "gate map: a merge with no dangling link is silent" "$(sgstop $GM)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
