@@ -4,6 +4,13 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.9.1 — 2026-11-09
+
+A fresh superdoc install no longer starts with an orphan hub (#20).
+
+- superdoc: the Part 5 `CLAUDE.md` block in the playbook listed the reference docs as code spans (`` `superdoc/architecture/overview.md` ``), which `map.py` blanks, so `map.py --check` reported `ORPHAN    superdoc/architecture/overview.md  (no inbound links)` right after a greenfield install. The block now writes the hub, the capability folder, `STYLING-GUIDE.md` and `README.md` as real markdown links (the `@` force-load lines are unchanged). The marker stays `v4`: only the template text changed, no installed file needs a migration step. Projects installed earlier keep their code-span lines until the block is next replaced (any `/superdoc` re-wire) or edited by hand.
+- test: a fixture whose `CLAUDE.md` is the Part 5 block, extracted from the playbook, runs `map.py --check` with no orphan and exit 0.
+
 ## 2.9.0 — 2026-11-08
 
 A script maps the superdoc link graph, so a rename, move or delete starts from a list instead of a grep, and dangling links and orphan pages are caught mechanically (#19).

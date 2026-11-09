@@ -4715,6 +4715,16 @@ rc=0"
 # a linked worktree: the repo root is the worktree's own
 (cd $MP && git add -A && git commit -qm base && git worktree add -q -b mpwt $T/mpwt 2>/dev/null)
 check "map: a linked worktree maps its own tree" "$(mapin $T/mpwt --check | tail -n 1)" "OK        9 pages, 16 links, 0 dangling, 0 orphan"
+# #20: the playbook's Part 5 CLAUDE.md block must link the hub for real (a code span is blanked by map.py -> ORPHAN)
+HUB=$T/mph; gfix $HUB; mkdir -p $HUB/superdoc/architecture $HUB/superdoc/features $HUB/superdoc/ui
+sed -n '/^<!-- superdoc:start v4 -->$/,/^<!-- superdoc:end -->$/p' "$PB" | sed '/^<!-- superdoc:end -->$/q' | sed 's/<capability>/features/g' > $HUB/CLAUDE.md
+printf '# Hub\n' > $HUB/superdoc/architecture/overview.md; printf '# F\n' > $HUB/superdoc/features/a.md
+printf '# S\n' > $HUB/superdoc/ui/STYLING-GUIDE.md; printf '# R\n' > $HUB/superdoc/README.md
+mkdir -p $HUB/superdoc/meta $HUB/superdoc/claude-instructions; printf '# T\n' > $HUB/superdoc/meta/TERMINOLOGY.md
+printf '# D\n' > $HUB/superdoc/claude-instructions/documentation.md; printf '# V\n' > $HUB/superdoc/claude-instructions/documentation-version-policy.md
+out_h=$(mapin $HUB --check); rc_h=$?
+check "map: the Part 5 template links the hub (no ORPHAN for overview.md), no dangling, exit 0 (#20)" "$rc_h/$(printf '%s\n' "$out_h" | grep -c 'overview.md')/$(printf '%s\n' "$out_h" | grep -c '^DANGLING')" "0/0/0"
+check "map: the Part 5 template block was extracted (guard against a vacuous pass)" "$(grep -c 'superdoc/architecture/overview.md' $HUB/CLAUDE.md)" "1"
 
 echo "== superdoc map: gate shows dangling links once (gate.sh check 8, #19) =="
 GM=$T/mpg; sgmk $GM

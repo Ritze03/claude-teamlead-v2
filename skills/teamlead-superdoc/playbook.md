@@ -430,11 +430,14 @@ a restatement.
 
 Reference docs — plain links, read the one relevant to your task on demand:
 
-- **`superdoc/architecture/overview.md`** — codebase navigation map (module map, data flow,
-  "where to look for X"). **Start here to navigate the code.**
-- Per-<capability> behaviour — `superdoc/<capability>/`
-- Styling rules — `superdoc/ui/STYLING-GUIDE.md` (only if this project has a UI)
-- `superdoc/README.md` — the docs table of contents (only once it exists, see Part 2)
+- **[superdoc/architecture/overview.md](superdoc/architecture/overview.md)** — codebase
+  navigation map (module map, data flow, "where to look for X"). **Start here to navigate
+  the code.**
+- Per-<capability> behaviour — [superdoc/<capability>/](superdoc/<capability>/)
+- Styling rules — [superdoc/ui/STYLING-GUIDE.md](superdoc/ui/STYLING-GUIDE.md) (only if this
+  project has a UI)
+- [superdoc/README.md](superdoc/README.md) — the docs table of contents (only once it
+  exists, see Part 2)
 
 ## Always in context (force-loaded, mandatory)
 
@@ -450,8 +453,10 @@ optional, on-demand read.
 - One `@` line per file under `superdoc/claude-instructions/` this project has — force-load
   all of them, nothing else.
 
-Path base: `CLAUDE.md` uses repo-root-relative paths (`@superdoc/...`, `` `superdoc/...` ``);
-links *inside* docs are docs-relative. Precedence: `CLAUDE.md` is authoritative for
+Path base: `CLAUDE.md` uses repo-root-relative paths (`@superdoc/...` and the link targets
+above, written as real markdown links, never code spans: `map.py` ignores code spans, so a hub
+named only in one gets no inbound link and is reported ORPHAN); links *inside* docs are
+docs-relative. Precedence: `CLAUDE.md` is authoritative for
 rules, docs are the reference — reconcile to `CLAUDE.md` on conflict. `@`-budget:
 force-load a file only if its absence would let the agent do the wrong thing on *any*
 task.
