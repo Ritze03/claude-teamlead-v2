@@ -1045,6 +1045,38 @@ tpc "a real home next to a placeholder" "/home/you/x and /home/$SENT/y" "error: 
 mklf $T/bin; printf '# T\nsecret /home/%s/x\0\001\002 binary\n' $SENT > $T/bin/superdoc/features/b.bin; printf 'x\n' > $T/bin/superdoc/features/ok.md
 check "lint: binary files are skipped" "$(lintin $T/bin 2>&1)" ""
 
+# --- project allow list: <doc root>/meta/leak-allow.txt (exact whole-value entries with a reason) ----
+mkla() { # dir ; the fixture body of the allow-list tests
+  mklf $1
+  printf '# T\nlibfoo 10.4.2.1 released\nother 10.4.2.2\ncd /home/Ritze/x\ncd /home/Ritze03/x\ncd /home/xRitze/x\ncd /home/Ritze.bak/x\nmail bob@%s.io and eve@%s.io\n/mnt/nas/x /mnt/nas2/y\n' $SENT $SENT > $1/superdoc/features/a.md
+  printf '# leak allow list\n\n10.4.2.1  # version string of libfoo, not an IP\nRitze\t# the public GitHub handle\nbob@%s.io # a public contact\nnas # NAS is a placeholder here\n' $SENT > $1/superdoc/meta/leak-allow.txt
+}
+LA=$T/la; mkla $LA
+out_la=$(lintin $LA 2>&1)
+check "leak-allow: exact IP entry suppresses that IP, a different IP is still flagged" "$(printf '%s\n' "$out_la" | grep 'a.md:[23]:' | sed 's/^[^:]*://; s/: error.*//' | tr '\n' ' ')" "3 "
+check "leak-allow: Ritze entry suppresses /home/Ritze/ only; Ritze03, xRitze and Ritze.bak stay flagged" "$(printf '%s\n' "$out_la" | grep 'a.md:[4-7]:' | sed 's/^[^:]*://; s/: error.*//' | tr '\n' ' ')" "5 6 7 "
+check "leak-allow: exact email entry suppresses it, another address at the same domain is still flagged" "$(printf '%s\n' "$out_la" | grep -c 'a.md:8: error: email')" "1"
+check "leak-allow: host-path name entry is exact (/mnt/nas allowed, /mnt/nas2 still warns)" "$(printf '%s\n' "$out_la" | grep 'a.md:9:' | sed 's/^[^:]*://')" "9: warn: host path"
+check "leak-allow: the allow file's own reasoned values are not findings, and no warning" "$(printf '%s\n' "$out_la" | grep -c '^superdoc/meta/leak-allow.txt:')" "0"
+check "leak-allow: no value is printed (sentinel, entries)" "$(printf '%s\n' "$out_la" | grep -c "$SENT\|Ritze\|10.4.2")" "0"
+printf '%s\n' "$out_la" | grep -q '^note: .*false positive.*superdoc/meta/leak-allow.txt.*Never add a real personal value' && ok "leak-allow: the error output carries the one-line how-to (exact value + reason, never a real value)" || bad "leak-allow: hint line ($out_la)"
+check "leak-allow: without the file nothing extra is allowed (10.4.2.1 flagged)" "$(rm $LA/superdoc/meta/leak-allow.txt; lintin $LA 2>&1 | grep -c 'a.md:[23]: error: private IP')" "2"
+# an entry without a reason is not honoured, and lint warns
+printf '10.4.2.1\nRitze #   \n# comment only\n\n10.4.2.2  # has a reason\n' > $LA/superdoc/meta/leak-allow.txt
+out_nr=$(lintin $LA 2>&1)
+check "leak-allow: entries without a (non-empty) # reason are not honoured; one with a reason is" "$(printf '%s\n' "$out_nr" | grep 'a.md:[2345]: error' | sed 's/^[^:]*://; s/: error.*//' | tr '\n' ' ')" "2 4 5 "
+check "leak-allow: an entry without a reason is a warning at its line in the allow file (value not printed)" "$(printf '%s\n' "$out_nr" | grep '^superdoc/meta/leak-allow.txt:' | grep -v 'private IP' | tr '\n' ' ')" "superdoc/meta/leak-allow.txt:1: warn: leak-allow entry has no # reason (not honoured) superdoc/meta/leak-allow.txt:2: warn: leak-allow entry has no # reason (not honoured) "
+# other modes load the same file: --files, --staged, --range
+GLA=$T/lga; mkla $GLA; printf '<!-- superdoc:start v4 -->\n' > $GLA/CLAUDE.md
+(cd $GLA && git init -q && git config user.email t@t.t && git config user.name t && git config commit.gpgsign false)
+(cd $GLA && git add -A && git commit -qm base)
+printf 'more 10.4.2.1 and 10.4.2.9\n' >> $GLA/superdoc/features/a.md; printf '# T\ncd /home/Ritze/y\n' > $GLA/superdoc/features/b.md
+(cd $GLA && git add -A)
+check "leak-allow --staged: honours the working-tree allow file (the exact values are silent, 10.4.2.9 is not)" "$(lintin $GLA --staged 2>&1 | grep 'b.md\|a.md:1[0-9]' | sed 's/^[^:]*://' | tr '\n' ' ')" "10: error: private IP "
+check "leak-allow --files: the same (the gate's mode)" "$(lintin $GLA --files superdoc/features/b.md superdoc/features/a.md 2>&1 | grep -c 'a.md:10: error: private IP')/$(lintin $GLA --files superdoc/features/b.md 2>&1 | grep -c 'error')" "1/0"
+(cd $GLA && git commit -qm leaks)
+check "leak-allow --range: the same (commit-time and the gate's range pass)" "$(lintin $GLA --range HEAD~1..HEAD 2>&1 | grep ': error: ' | sed 's/^[^:]*://; s/ (commit.*//')" "10: error: private IP"
+
 # --- exit codes, usage, silence ------------------------------------------------------------------
 mklf $T/wo; printf '# T\n/mnt/nas/x\n' > $T/wo/superdoc/features/w.md
 out_wo=$(lintin $T/wo 2>&1); check "lint: warnings only: exit 0, still printed" "$?/$(printf '%s\n' "$out_wo" | grep -c ': warn: host path')" "0/1"

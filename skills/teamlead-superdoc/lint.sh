@@ -19,6 +19,14 @@
 #
 # The scanned set is the doc tree plus CLAUDE.md, text files only. A line containing
 # `superdoc-lint: allow` is skipped (for true false positives only, never for a real value).
+#
+# Project allow list: <doc root>/meta/leak-allow.txt (committed with the docs, so every entry is
+# public). One value per line, then a mandatory reason:   10.4.2.1  # version of libfoo, not an IP
+# A finding is suppressed iff the exact value the detector flagged (the email address, the IP or
+# IP/N, the home-folder or username name, the host-path name) equals an entry, case-sensitive:
+# `Ritze` never silences `Ritze03`, `xRitze` or `Ritze.bak`. No substrings, no patterns. An entry
+# without a `# reason` is not honoured and lint warns. The working-tree file is read in every
+# mode (also --staged, --range, --push); a missing file adds nothing. Never list a real personal value.
 set -u
 
 # ---- ALLOWLIST: never a finding. Edit here, nowhere else. ---------------------------------
@@ -215,11 +223,30 @@ if [ "$MODE" = print-doc-root ]; then printf '%s\n' "$DOC"; exit 0; fi
 # ---- the leak scanner (one awk, reads files or tab-separated records) -----------------------------------
 # Record input (--staged/--range): path TAB line TAB commit TAB text. File input: FILENAME/FNR.
 # Output: sev TAB path TAB line TAB kind TAB commit. It prints kinds only, never text.
+# ---- project allow list: <doc root>/meta/leak-allow.txt -> LEAK_ALLOW (honoured values, newline-
+# separated, read by awk through ENVIRON so backslashes survive) and LA_RECORDS (a warn per entry
+# with no reason). Never prints a value. Blank lines and full-line # comments are ignored.
+LAF="$DOC/meta/leak-allow.txt"; LEAK_ALLOW=""; LA_RECORDS=""
+if [ -f "$LAF" ]; then
+  _la=$(LC_ALL=C awk -v F="$LAF" '
+    { sub(/\r$/, "") }
+    /^[ \t]*(#|$)/ { next }
+    { line = $0; sub(/^[ \t]+/, "", line); reason = ""
+      if (match(line, /[ \t]#/)) { reason = substr(line, RSTART + 2); line = substr(line, 1, RSTART - 1) }
+      sub(/[ \t]+$/, "", line); gsub(/[ \t]+/, "", reason)
+      if (line == "" || index(line, "\t")) next
+      if (reason == "") printf "W\t%d\n", NR; else printf "A\t%s\n", line }' "$LAF")
+  LEAK_ALLOW=$(printf '%s\n' "$_la" | awk -F'\t' '$1 == "A" { print $2 }')
+  LA_RECORDS=$(printf '%s\n' "$_la" | awk -F'\t' -v f="$LAF" '$1 == "W" { printf "warn\t%s\t%s\tleak-allow entry has no # reason (not honoured)\t\n", f, $2 }')
+fi
+export LEAK_ALLOW
+
 IFS= read -r -d '' LEAK_AWK <<'AWK'
 function setof(str, arr,    n, t, i) { n = split(str, t, " "); for (i = 1; i <= n; i++) arr[tolower(t[i])] = 1 }
 BEGIN {
   setof(ALLOW_HOME_NAMES, HOMEOK); setof(ALLOW_EMAIL_DOMAINS, EDOM); setof(ALLOW_EMAIL_PLACEHOLDER_DOMAINS, EPDOM); setof(ALLOW_EMAIL_TLDS, ETLD)
   setof(ALLOW_EMAIL_LOCAL_HAS, ELOC); setof(ALLOW_IPS, IPOK); setof(ALLOW_IP_PREFIXES, IPPFX)
+  n = split(ENVIRON["LEAK_ALLOW"], t, "\n"); for (i = 1; i <= n; i++) if (t[i] != "") XA[t[i]] = 1   # project allow list: exact values
   setof(ALLOW_CIDRS, CIDROK); setof(ALLOW_HOST_PATH_NAMES, OPTOK); setof(DENY_EMAIL_TLDS, EXTDENY)
   n = split(LINEREF_EXTS, t, " "); alt = ""
   for (i = 1; i <= n; i++) alt = alt (i > 1 ? "|" : "") t[i]
@@ -253,9 +280,9 @@ function unixhome(s, root, ncomp,    rest, seg, nm, re, parts) {
     rest = substr(rest, RSTART + RLENGTH)
     sub(/^[^\/]/, "", seg)
     split(seg, parts, "/"); nm = parts[ncomp + 2]
-    if (placeholder_home(nm)) continue
+    if (placeholder_home(nm) || nm in XA) continue
     sub(/\.+$/, "", nm)                         # "/home/name." at the end of a sentence
-    if (nm != "" && !placeholder_home(nm)) { emit("error", "home path"); return }
+    if (nm != "" && !placeholder_home(nm) && !(nm in XA)) { emit("error", "home path"); return }
   }
   rest = s
   re = "(^|[^A-Za-z0-9._~%+/-])/" root "/[^/ \t\"'`]+/"
@@ -264,7 +291,7 @@ function unixhome(s, root, ncomp,    rest, seg, nm, re, parts) {
     rest = substr(rest, RSTART + RLENGTH - 1)
     sub(/^[^\/]/, "", seg)
     split(seg, parts, "/"); nm = parts[ncomp + 2]
-    if (!placeholder_home(nm)) { emit("error", "home path"); return }
+    if (!placeholder_home(nm) && !(nm in XA)) { emit("error", "home path"); return }
   }
 }
 function winhome(s,    rest, seg, nm, re) {
@@ -274,7 +301,7 @@ function winhome(s,    rest, seg, nm, re) {
     seg = substr(rest, RSTART, RLENGTH)
     rest = substr(rest, RSTART + RLENGTH - 1)
     nm = seg; sub(/^.*[Uu]sers[\\\/]+/, "", nm); sub(/[\\\/]$/, "", nm)
-    if (!placeholder_home(nm)) { emit("error", "home path"); return }
+    if (!placeholder_home(nm) && !(nm in XA)) { emit("error", "home path"); return }
   }
 }
 function emails(s,    rest, acc, seg, pre, post, tokpre, after, at, loc, dom, n, lab, tld, first, ld, ll, k, ok) {
@@ -291,6 +318,7 @@ function emails(s,    rest, acc, seg, pre, post, tokpre, after, at, loc, dom, n,
     at = index(seg, "@"); loc = substr(seg, 1, at - 1); dom = substr(seg, at + 1)
     if (tolower(loc) == ALLOW_EMAIL_SSH_USER && (post == ":" || post == "/")) continue
     n = split(dom, lab, "."); tld = tolower(lab[n]); first = lab[1]
+    if (seg in XA) continue                      # exact address on the project allow list
     if (tld !~ /^[a-z][a-z]+$/) continue          # pkg@1.2.3, lodash@4.17.21: no alphabetic TLD
     if (first !~ /[A-Za-z]/) continue            # pkg@1.2.3-beta.rc, user@10.0.0.1: first label is all digits
     if (first ~ /^[0-9]x$/) continue             # icon@2x.png
@@ -326,10 +354,10 @@ function ips(s,    rest, acc, tok, pre, post, post2, postrest, lb, n, p, i, bad,
     for (i = 1; i <= 4; i++) if (length(p[i]) > 3 || p[i] + 0 > 255 || (length(p[i]) > 1 && substr(p[i], 1, 1) == "0")) bad = 1
     if (bad) continue                            # 999.1.1.1
     if (post == "/" && match(postrest, /^\/[0-9]+/)) {
-      cand = tok substr(postrest, 1, RLENGTH); if (cand in CIDROK) continue
+      cand = tok substr(postrest, 1, RLENGTH); if (cand in CIDROK || cand in XA) continue
       if (p[4] + 0 == 0 && substr(postrest, 2, RLENGTH - 1) + 0 <= 32 && substr(postrest, RLENGTH + 1, 1) !~ /[0-9A-Za-z_]/) continue   # 10.0.1.0/24: a network block, not a host
     }
-    if (tok in IPOK) continue
+    if (tok in IPOK || tok in XA) continue   # XA: project allow list, exact address
     a = p[1] + 0; b = p[2] + 0
     if (a == 0 || a == 127 || a >= 224) continue # 0.0.0.0, loopback, multicast/broadcast
     for (k in IPPFX) if (index(tok ".", k) == 1) bad = 1
@@ -344,7 +372,7 @@ function hostpaths(s,    rest, seg, nm, re) {
   while (match(rest, re)) {
     seg = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
     nm = seg; sub(/.*\//, "", nm)
-    if (!(tolower(nm) in OPTOK)) { emit("warn", "host path"); return }
+    if (!(tolower(nm) in OPTOK) && !(nm in XA)) { emit("warn", "host path"); return }
   }
 }
 {
@@ -491,6 +519,7 @@ EOF
 esac
 
 # ---- report ---------------------------------------------------------------------------------------------
+[ -n "$LA_RECORDS" ] && RECORDS="$RECORDS"$'\n'"$LA_RECORDS"
 FLSET=""
 if [ "$FILTER" = 1 ]; then FLSET=$(printf 'CLAUDE.md\n'; refs | sort -u); fi
 printf '%s\n' "$RECORDS" | awk -F'\t' -v FILTER="$FILTER" -v FILES="$FILES_SET" -v FLSET="$FLSET" -v DOC="$DOC" '
@@ -514,6 +543,7 @@ printf '%s\n' "$RECORDS" | awk -F'\t' -v FILTER="$FILTER" -v FILES="$FILES_SET" 
       if (index(kind, "line reference")) hl = 1
       else if (index(kind, "host path") || index(kind, "public IP")) hh = 1
       else if (index(kind, "dangling")) hd = 1
+      else if (index(kind, "leak-allow")) hk = 1
       else if (index(kind, "force-loaded")) hf = 1
       else if (index(kind, "TERMINOLOGY")) ht = 1
       else if (index(kind, "not listed")) hr = 1
@@ -524,11 +554,13 @@ printf '%s\n' "$RECORDS" | awk -F'\t' -v FILTER="$FILTER" -v FILES="$FILES_SET" 
     for (i = 1; i <= nw; i++) print W[i]
     if (ne) {
       print "fix: replace each flagged value with a placeholder ($HOME, <host>, <user>, <ip>, ...) and move anything future agents need to .claude/local/ (untracked; never put a secret there or anywhere in the repo)."
+      print "note: a false positive (a version string read as an IP, a public handle)? Add the exact flagged value with a reason to " DOC "/meta/leak-allow.txt as `value  # why it is not a leak`; it matches that whole value only. Never add a real personal value there (real email, private username, private IP or host): remove it from the doc instead; when unsure, do not add it and treat the value as real."
       print "note: `superdoc-lint: allow` on a line skips it. It is for true false positives only (an example that is not a real value), never for a real value."
       if (incommit) print "fix: a flagged value in a commit is in a local commit: repairing the file does not remove it, and the commit has to be rewritten before pushing. Rewriting history is the user'"'"'s decision, so do not do it yourself: report it to the lead, who tells the user."
     }
-    if (hh) print "hint: write repo-relative paths and placeholders; machine-specific details go to .claude/local/ (playbook Part 4a)."
+    if (hh) print "hint: write repo-relative paths and placeholders; machine-specific details go to .claude/local/ (playbook Part 4a). A false positive: add the exact value with a reason to " DOC "/meta/leak-allow.txt."
     if (hl) print "hint: reference code by symbol (file:symbol), not by line number; line numbers go stale (playbook Part 8)."
+    if (hk) print "hint: an entry in " DOC "/meta/leak-allow.txt is `value  # reason`; without the reason it is not honoured."
     if (hd) print "hint: a dangling @-ref loads nothing: fix the path or remove the reference."
     if (hf) print "hint: force-load budget: move detail to a linked page first, never delete information (playbook Part 9 and Part 10)."
     if (ht) print "hint: trim the entry to what the term is plus a link to the page that holds the detail (playbook Part 9 and Part 10)."
