@@ -554,7 +554,7 @@ printf '%s\n' "$RECORDS" | awk -F'\t' -v FILTER="$FILTER" -v FILES="$FILES_SET" 
     for (i = 1; i <= nw; i++) print W[i]
     if (ne) {
       print "fix: replace each flagged value with a placeholder ($HOME, <host>, <user>, <ip>, ...) and move anything future agents need to .claude/local/ (untracked; never put a secret there or anywhere in the repo)."
-      print "note: a false positive (a version string read as an IP, a public handle)? Add the exact flagged value with a reason to " DOC "/meta/leak-allow.txt as `value  # why it is not a leak`; it matches that whole value only. Never add a real personal value there (real email, private username, private IP or host): remove it from the doc instead,; when unsure, do not add it and treat the value as real."
+      print "note: a false positive (a version string read as an IP, a public handle)? Add the exact flagged value with a reason to " DOC "/meta/leak-allow.txt as `value  # why it is not a leak`; it matches that whole value only. Never add a real personal value there (real email, private username, private IP or host): remove it from the doc instead; when unsure, do not add it and treat the value as real."
       print "note: `superdoc-lint: allow` on a line skips it. It is for true false positives only (an example that is not a real value), never for a real value."
       if (incommit) print "fix: a flagged value in a commit is in a local commit: repairing the file does not remove it, and the commit has to be rewritten before pushing. Rewriting history is the user'"'"'s decision, so do not do it yourself: report it to the lead, who tells the user."
     }
