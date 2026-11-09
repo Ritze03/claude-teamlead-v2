@@ -10,7 +10,39 @@ PL="$H/plan-lint.sh"
 PS2="$CLAUDE_PLUGIN_ROOT/skills/teamlead-plan/SKILL.md"
 SD="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/SKILL.md"
 LINT="$CLAUDE_PLUGIN_ROOT/skills/teamlead-superdoc/lint.sh"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+# The suite runs hooks and board.py against fixture projects under $T. Both resolve
+# a project by walking UP (git-common-dir), so a fixture that is not its own repo
+# and sits inside a real work tree lands on that tree's real board — the incident
+# of 2026-11-09: TMPDIR=<worktree>/.tl-scratch/tmp (the worker brief's own advice)
+# put every fixture under a worker worktree, and the suite wrote the lead's real
+# board.json and events.log. So the temp root must have no git work tree above it
+# (git is what the resolvers walk; a bare .claude/teamlead ancestor, e.g. in $HOME,
+# is never found by walking); otherwise fall back to $HOME/tmp, or refuse to run.
+# Inherited project/agent identity is dropped for the same reason (tests that
+# need them set them explicitly).
+unset CLAUDE_PROJECT_DIR CLAUDE_AGENT_ID TL_HOOK
+tl_tmp_unsafe() {   # 0 = unsafe: the dir or an ancestor is inside a git work tree
+  local d; d=$(cd "$1" 2>/dev/null && pwd -P) || return 0
+  while :; do
+    [ -e "$d/.git" ] && return 0
+    [ "$d" = / ] && return 1
+    d=$(dirname "$d")
+  done
+}
+T=$(mktemp -d)
+if tl_tmp_unsafe "$T"; then
+  rm -rf "$T"
+  mkdir -p "$HOME/tmp" && T=$(mktemp -d -p "$HOME/tmp") || T=
+  if [ -z "$T" ] || tl_tmp_unsafe "$T"; then
+    [ -n "$T" ] && rm -rf "$T"
+    echo "test.sh: refusing to run: TMPDIR (${TMPDIR:-/tmp}) and \$HOME/tmp are both inside a git work tree; point TMPDIR at a plain directory" >&2
+    exit 2
+  fi
+fi
+trap 'rm -rf "$T"' EXIT
+export TMPDIR="$T"   # anything a test spawns with mktemp stays inside the safe root
+# Probe for the regression test at the bottom: report the chosen root, run nothing.
+[ -z "${TL_TEST_PROBE_TMP:-}" ] || { echo "$T"; exit 0; }
 # statusline.sh normally prints a cache and refreshes in the background; the
 # assertions on its content want the computed segment, so compute inline. The
 # cache behaviour itself is tested separately, with this unset.
@@ -4747,6 +4779,35 @@ check "gate map: the DANGLING output is capped at 40 lines, with how many more" 
 sgstop $GM >/dev/null
 sgmerge $GM bmp4 superdoc/features/ok.md '# Ok\n[c](c.md)\n' superdoc/README.md '# I\n[c](features/c.md)\n[m](features/many.md)\n[ok](features/ok.md)\n'
 check "gate map: a merge with no dangling link is silent" "$(sgstop $GM)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
+
+echo "== test.sh never writes a real project's board, wherever TMPDIR points (2026-11-09 incident) =="
+# A worker ran ./test.sh with TMPDIR inside its worktree; the fixtures then lived
+# under the real project and hooks/board.py resolved them up to its real board.
+# Model that project, run test.sh's own temp-root selection with TMPDIR (and the
+# identity env) pointing into it, and require the board and log untouched. The
+# probe mode stops right after the root is chosen, so this stays fast; the old
+# test.sh ignored it, ran the whole suite there, and rewrote both files.
+IP=$T/inc; mkdir -p $IP
+(cd $IP && git init -q && git config user.email t@t.t && git config user.name t && echo x > f && git add -A \
+  && git commit -qm init && mkdir -p .claude/teamlead/.state && : > .claude/teamlead/.state/active \
+  && git worktree add -q .claude/worktrees/agent-x -b wx)
+IW=$IP/.claude/worktrees/agent-x; mkdir -p $IW/.tl-scratch/tmp
+printf '%s\n' '{"next_id":2,"tasks":[{"id":1,"task":"real work","agent":"tl-sonnet-high","owns":["a"],"state":"running","worker":"real1"}]}' > $IP/.claude/teamlead/.state/board.json
+printf '%s\n' '2026-01-01T00:00:00Z  start     agent=teamlead:tl-sonnet-high  id=real1' > $IP/.claude/teamlead/.state/events.log
+incsnap(){ cksum < $IP/.claude/teamlead/.state/board.json; cksum < $IP/.claude/teamlead/.state/events.log; ls -A $IP/.claude/teamlead/.state; }
+inc_before=$(incsnap)
+inc_root=$(cd $IW && env TMPDIR=$IW/.tl-scratch/tmp CLAUDE_PROJECT_DIR=$IP CLAUDE_AGENT_ID=x TL_TEST_PROBE_TMP=1 bash "$CLAUDE_PLUGIN_ROOT/test.sh" 2>$T/inc.err); inc_rc=$?
+check "TMPDIR inside a worker worktree: test.sh still starts" "$inc_rc" 0
+case "$inc_root" in
+  "") bad "  it reports a temp root" ;;
+  "$IP"/*) bad "  its temp root is outside the project (got $inc_root)" ;;
+  *) ok "  its temp root is outside the project" ;;
+esac
+check "  the project's board, events.log and state files are byte-identical" "$(incsnap)" "$inc_before"
+inc_rc=$(cd $IW && env TMPDIR=$IW/.tl-scratch/tmp HOME=$IW TL_TEST_PROBE_TMP=1 bash "$CLAUDE_PLUGIN_ROOT/test.sh" >/dev/null 2>$T/inc.err; echo $?)
+check "no safe temp root anywhere (TMPDIR and \$HOME/tmp both inside the project): refuses to run" "$inc_rc" 2
+check "  and says why" "$(grep -c 'refusing to run' $T/inc.err)" 1
+check "  still nothing written to the project's board or events.log" "$(incsnap | head -2)" "$(printf '%s\n' "$inc_before" | head -2)"
 
 echo
 printf '%d passed, %d failed\n' "$pass" "$fail"
