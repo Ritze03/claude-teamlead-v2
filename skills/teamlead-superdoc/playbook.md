@@ -622,6 +622,9 @@ audit found.)
   pages missing from `README.md`. Loopback, documentation ranges, `example.*` addresses and
   placeholder homes (`/home/user`, `$HOME`, `<name>`) are never findings. A line carrying
   `superdoc-lint: allow` is skipped: for a true false positive only, never for a real value.
+  A value that keeps tripping it (a version string read as an IP, a public handle) goes on the
+  project allow list instead: one line `value  # why it is not a leak` in
+  `<doc-root>/meta/leak-allow.txt` (see SKILL.md, "Suppressing a false positive").
 - **Link graph:** `python3 <plugin-root>/skills/teamlead-superdoc/map.py --check` lists
   `DANGLING` links (a missing file or a `#anchor` no heading matches) and `ORPHAN` pages (nothing
   links to them). Both are audit findings; fix dangling links by retargeting or removing them,

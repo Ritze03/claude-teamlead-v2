@@ -91,6 +91,32 @@ Part 9, lists its checks). A `⚠` from the size check is a HEALTH-CHECK finding
 A `note:` (total over 20 KB while every glossary entry is short) is not a `⚠`: the
 repair is the judgement pass in playbook Part 9, never a cut to meet a number.
 
+#### Suppressing a false positive (`meta/leak-allow.txt`)
+
+When a leak finding is a false positive that keeps coming back (a version number read as an IP,
+a public handle, a placeholder), add the exact value to `<doc-root>/meta/leak-allow.txt`, one per
+line, with a mandatory reason:
+
+```
+10.4.2.1  # version string of libfoo, not an IP
+Ritze     # the project's public GitHub handle
+```
+
+- **Exact whole value only, case-sensitive.** A finding is suppressed only when the value the
+  scanner flagged (the email address, the IP or `IP/N`, the home-folder or username name, the
+  host-path name) equals an entry. `Ritze` silences `/home/Ritze/x` and nothing else: never
+  `Ritze03`, `xRitze` or `Ritze.bak`. No substrings, prefixes or patterns. (Whole-token matching
+  is what "surrounded by spaces" means here; it also catches `/home/Ritze/`, which literal spaces
+  would miss.)
+- **No reason, no effect:** an entry without `# reason` is not honoured and lint warns about it.
+  Blank lines and full-line `#` comments are fine. Lint reads the working-tree file in every
+  mode (whole tree, `--files`, `--staged`, `--range`, `--push`, the Stop check); a missing file
+  allows nothing extra.
+- **The file is committed with the docs, so every entry is public.** Never add a real personal
+  value (real email, private username, private IP or host name): remove it from the doc instead
+  (placeholder, or `.claude/local/`). If you are unsure whether a value is real, do not add it:
+  report it to the lead, who asks the user.
+
 ### `/teamlead superdoc map` — the link graph (`map.py`)
 
 `map.py` (Python 3, stdlib only) maps how the pages link to each other. Run it yourself, no

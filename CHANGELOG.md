@@ -4,6 +4,15 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.0 — 2026-11-10
+
+Agents can suppress a leak finding that is a false positive (a version number read as an IP, a public handle), and the test suite can no longer touch a real project's board.
+
+- superdoc leak allow list: `<doc root>/meta/leak-allow.txt`, committed with the docs (so every entry is public). One value per line with a mandatory reason (`10.4.2.1  # version string of libfoo, not an IP`); blank lines and full-line `#` comments are ignored. `lint.sh` suppresses a finding only when the exact value its detector flagged equals an entry, case-sensitive: the email address, the IP or `IP/N`, the home-folder or username name, the host-path name. `Ritze` silences `/home/Ritze/x` and never `Ritze03`, `xRitze` or `Ritze.bak` (no substring, prefix or pattern match; whole-token matching is the "surrounded by spaces" rule, and also covers `/home/Ritze/`). An entry without a `# reason` is not honoured and lint warns (`leak-allow entry has no # reason (not honoured)`, the value is never printed). The working-tree file is read in every mode (whole tree, `--files`, `--staged`, `--range`, `--push`, hence the commit hooks, the Bash guard and the Stop check); a missing file allows nothing extra. The allow file's own reasoned values are not findings.
+- The lint error output now ends with a one-line how-to (add the exact value with a reason to `<doc>/meta/leak-allow.txt`, never a real personal value), and the host-path / public-IP hint mentions it. The superdoc SKILL.md ("Suppressing a false positive"), the playbook audit bullet and `docs/enforcement.md` carry the rule: a real email, private username, private IP or host is removed from the doc, never allow-listed; when unsure, report to the lead, who asks the user.
+- test: exact IP, `Ritze` vs `Ritze03` / `xRitze` / `Ritze.bak`, exact email vs another address at the same domain, exact host-path name, no reason / empty reason not honoured plus warning, missing file, no value printed, and the same file honoured by `--files`, `--staged` and `--range`.
+- test.sh can no longer write a real project's board or events.log. It picks its temp root outside any git work tree (falling back to `$HOME/tmp`, or refusing to run), and clears inherited CLAUDE_PROJECT_DIR / CLAUDE_AGENT_ID / TL_HOOK. A regression test replays the 2026-11-09 worker-worktree TMPDIR leak. (0eecedc)
+
 ## 2.9.1 — 2026-11-09
 
 A fresh superdoc install no longer starts with an orphan hub (#20).
