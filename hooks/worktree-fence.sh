@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Worker fence (PreToolUse on the file tools): a tl-* worker may only write
+# Worker fence (PreToolUse on the file tools): a worker (tl-*, or any agent whose dispatch carried `board: N`) may only write
 # under its own cwd. With isolation: worktree the cwd IS the worktree; without it
 # the cwd is the project, and "never write outside the project" is still right.
 #
@@ -32,8 +32,22 @@ set -uo pipefail
 in=$(cat)
 j() { jq -r "$1 // empty" <<<"$in" 2>/dev/null; }
 [ -n "$(j .agent_id)" ] || exit 0                 # the lead is not a worker
-# Namespaced when installed as a plugin: "teamlead:tl-sonnet-low".
-case "$(j .agent_type)" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+# Namespaced when installed as a plugin: "teamlead:tl-sonnet-low". GH#21: any other agent
+# type is a worker too when its dispatch carried `board: N` (lib.sh tl_worker_tracked reads
+# the ids record.sh stored in the main checkout's .state); every other agent is not fenced.
+source "$(dirname "$0")/lib.sh"
+main_state() {   # the main checkout's .state, resolved from a linked worktree like lib.sh does
+  local bp="${CLAUDE_PROJECT_DIR:-$(j .cwd)}" common
+  if common=$(git -C "$bp" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in /*) ;; *) common="$bp/$common" ;; esac
+    bp=$(cd "$(dirname "$common")" 2>/dev/null && pwd) || bp="${CLAUDE_PROJECT_DIR:-$(j .cwd)}"
+  fi
+  printf '%s' "$bp/.claude/teamlead/.state"
+}
+case "$(j .agent_type)" in
+  tl-*|*:tl-*) ;;
+  *) tl_worker_tracked "$(j .agent_type)" "$(j .agent_id)" "$(main_state)" || exit 0 ;;
+esac
 cwd=$(j .cwd); fp=$(j .tool_input.file_path); [ -n "$fp" ] || fp=$(j .tool_input.notebook_path)
 [ -n "$cwd" ] && [ -n "$fp" ] || exit 0
 

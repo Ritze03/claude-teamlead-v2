@@ -96,6 +96,64 @@ tl_event() {
   fi
 }
 
+# ---- tracked workers (GH#21) --------------------------------------------------------------
+# A "worker" is a tl-* agent (plugin-namespaced or not) OR any other agent type whose dispatch
+# carried a `board: N` line: that line is the explicit opt-in, so a project-level custom agent
+# (.claude/agents/my-worker.md pinning a model, say) gets the board link, ledger, base-guard
+# note and worktree fence exactly like a tl-* worker. SubagentStart/Stop and the file-tool hooks
+# see agent_type + agent_id but never the brief, so the brief's board line is carried over here:
+#   PreToolUse(Agent)  tl_track_pend TYPE      one "<epoch> TYPE" line in .state/tracked-pending
+#   SubagentStart      tl_track_claim TYPE ID  consumes the oldest fresh pending of TYPE, records ID
+#   PostToolUse(Agent) pairs id and brief exactly (tl_track_add), whichever of the two fired first
+# .state/tracked-workers holds the ids (one per line). tl_worker_tracked is the ONE test every
+# gate uses, in place of the old `case "$at" in tl-*|*:tl-*)`.
+
+# The board id of a brief: a `board: N` line of its own, anywhere in it. Prints N or nothing.
+tl_brief_board() { printf '%s' "$1" | grep -oE '^board: [0-9]+$' | head -1 | awk '{print $2}'; }
+
+# tl_worker_tracked TYPE ID [STATE_DIR]: 0 for a tl-* type or an id recorded as tracked.
+tl_worker_tracked() {
+  case "$1" in tl-*|*:tl-*) return 0 ;; esac
+  [ -n "$2" ] && grep -qxF -- "$2" "${3:-$TL_STATE}/tracked-workers" 2>/dev/null
+}
+
+tl_track_add() {
+  local f="$TL_STATE/tracked-workers"
+  [ -n "$1" ] || return 0
+  grep -qxF -- "$1" "$f" 2>/dev/null && return 0
+  mkdir -p "$TL_STATE" 2>/dev/null || return 0
+  printf '%s\n' "$1" >> "$f" 2>/dev/null || return 0
+  if [ "$(wc -l < "$f" 2>/dev/null || echo 0)" -gt 500 ]; then      # bounded, newest kept
+    tail -n 300 "$f" > "$f.tmp.$$" 2>/dev/null && mv "$f.tmp.$$" "$f"
+  fi
+  return 0
+}
+
+tl_track_pend() {
+  mkdir -p "$TL_STATE" 2>/dev/null || return 0
+  printf '%s %s\n' "$(date +%s)" "$1" >> "$TL_STATE/tracked-pending" 2>/dev/null || true
+}
+
+# tl_track_claim TYPE ID: 0 and ID recorded when a fresh (<=120s) pending entry of TYPE existed.
+tl_track_claim() {
+  local f="$TL_STATE/tracked-pending" now ts ty got="" tmp
+  [ -n "$2" ] && [ -s "$f" ] || return 1
+  now=$(date +%s); tmp="$f.tmp.$$"
+  {
+    flock 9 2>/dev/null
+    : > "$tmp"
+    while read -r ts ty; do
+      case "$ts" in ''|*[!0-9]*) continue ;; esac
+      [ $((now - ts)) -le 120 ] || continue
+      if [ -z "$got" ] && [ "$ty" = "$1" ]; then got=1; continue; fi
+      printf '%s %s\n' "$ts" "$ty" >> "$tmp"
+    done < "$f"
+    mv "$tmp" "$f"
+    [ -n "$got" ] && tl_track_add "$2"
+  } 9>"$TL_STATE/tracked.lock"
+  [ -n "$got" ]
+}
+
 # Block the turn with a message (Stop/PreToolUse deny both read stderr).
 tl_block() { printf '%s\n' "$*" >&2; exit 2; }
 

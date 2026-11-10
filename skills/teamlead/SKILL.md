@@ -350,7 +350,10 @@ re-deriving your context is not.** Write briefs that are thorough, not short.
    `running` with the worker's id and branch, and `SubagentStop` moves it to
    `returned` — so you never do that update by hand. The hook accepts the line
    anywhere in the brief, but put it first so it is never lost in an edit. There
-   is no brief without this line. A scout's row hits `returned` like any other, so
+   is no brief without this line. The line also makes tracking agent-type
+   independent: a project-level custom agent (not `tl-*`) dispatched with
+   `board: N` is linked, ledgered, returned and fenced exactly like a `tl-*`
+   worker; without the line it is left alone. A scout's row hits `returned` like any other, so
    you must act on its findings: record them in the row's `notes`, then move it to
    `merged` once you've acted on them.
 2. **Goal** — what done looks like.
