@@ -4,6 +4,14 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.1 — 2026-11-10
+
+A board row dispatched to a project-level custom agent (a type that does not start with `tl-`) is now tracked like any worker (#21).
+
+- Before: `record.sh` and `worktree-fence.sh` returned early for every agent type other than `tl-*`, so a background dispatch of e.g. `.claude/agents/my-worker.md` with `board: N` left the row `queued`, wrote no dispatch/start event, never became `returned` (the Stop gate never prompted the lead) and `board.py status` said 0 workers working. Now the `board: N` line is the opt-in: a dispatch whose brief carries it is linked (`running`), logged (dispatch, start, return), given the stale-base note, held/gated and fenced exactly like a `tl-*` worker, whatever its type (plain or `plugin:name`). `tl-*` workers behave as before, with or without the line; a non-`tl-*` dispatch without the line (Explore, general-purpose, claude-code-guide, web-fetch) is untouched: no log, no fence, no note.
+- How: SubagentStart/SubagentStop and the file-tool hooks see no brief, so PreToolUse(Agent) leaves a short-lived `.state/tracked-pending` entry (type + time, 120 s) for a board-line dispatch, SubagentStart claims it, and PostToolUse pairs the exact agent id with the brief (whichever of the two fires first). The ids live in `.state/tracked-workers` (capped); one helper, `tl_worker_tracked` in `hooks/lib.sh`, replaces the four `case "$at" in tl-*|*:tl-*` filters in `record.sh` and the one in `worktree-fence.sh`. The second-Go plan-row refusal (GH#18) applies to any agent type naming a plan row. Known limit: two parallel dispatches of the same non-`tl-*` type, one with and one without a board line, can swap tracking until PostToolUse pairs the ids.
+- test: custom and namespaced custom type end to end (row running, dispatch and start logged, status counts 1, returned on stop), either order of PostToolUse and SubagentStart, no board line untouched, Explore/internal agents untouched, an expired pending entry ignored, the fence on a tracked and an untracked id, the plan-row refusal. The old "non-tl-* does nothing on PostToolUse" test now uses a brief without a board line.
+
 ## 2.10.0 — 2026-11-10
 
 Agents can suppress a leak finding that is a false positive (a version number read as an IP, a public handle), and the test suite can no longer touch a real project's board.

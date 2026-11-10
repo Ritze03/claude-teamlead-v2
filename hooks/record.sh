@@ -227,11 +227,16 @@ case "$ev" in
     # agent_type, and counting those would corrupt every reconcile check.
     # Installed as a plugin the type is NAMESPACED ("teamlead:tl-sonnet-low"),
     # so a bare tl-* test silently matches nothing and the ledger stays empty.
-    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    # GH#21: any other type is ours too when the brief carries `board: N` (the explicit
+    # opt-in); without that line it stays untouched. See lib.sh "tracked workers".
+    case "$at" in
+      tl-*|*:tl-*) ;;
+      *) [ -n "$(tl_brief_board "$(tl_json .tool_input.prompt)")" ] || exit 0; nontl=1 ;;
+    esac
     # Second Go not yet answered: no plan-step worker until the user says "here" or runs
     # `/teamlead plan continue` (mode.sh lifts the mark). A scout/QC brief has no plan: row.
     if [ -f "$TL_STATE/plan-offer-pending" ] && [ -f "$TL_STATE/active-plan" ]; then
-      bid=$(tl_json .tool_input.prompt | grep -oE '^board: [0-9]+$' | head -1 | awk '{print $2}')
+      bid=$(tl_brief_board "$(tl_json .tool_input.prompt)")
       if [ -n "$bid" ] && jq -e --argjson id "$bid" '[.tasks[]? | select(.id == $id and ((.plan // "") != ""))] | length > 0' \
            "$TL_STATE/board.json" >/dev/null 2>&1; then
         jq -n --arg r "teamlead: the second Go is not answered yet, so no plan-step worker may start. Print this byte-exact, on its own paragraph, then STOP and dispatch nothing until the user says \"here\" or a fresh session runs /teamlead plan continue:
@@ -242,6 +247,7 @@ Or say \"here\" to continue in this session." \
         exit 0
       fi
     fi
+    [ -n "${nontl:-}" ] && tl_track_pend "$at"
     desc=$(tl_json .tool_input.description | tr '\n' ' ' | cut -c1-100)
     tl_event "dispatch  agent=$at  prompt=$(tl_json .prompt_id)  desc=$desc"
     ;;
@@ -251,7 +257,9 @@ Or say \"here\" to continue in this session." \
   PostToolUse)
     [ "$(tl_json .tool_name)" = "Agent" ] || exit 0
     at=$(tl_json .tool_input.subagent_type)
-    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    # GH#21: a non-tl type is tracked only when the brief carries `board: N` (checked first).
+    bid=$(tl_brief_board "$(tl_json .tool_input.prompt)")
+    case "$at" in tl-*|*:tl-*) ;; *) [ -n "$bid" ] || exit 0 ;; esac
     # tool_response is normally the object {status, agentId, description, prompt}
     # (verified in this project's own transcript). Fall back to hunting an
     # "agentId: X" substring in its text form for any other shape.
@@ -275,8 +283,10 @@ Or say \"here\" to continue in this session." \
     fi
     # The board-row marker is a line of its own, anywhere in the brief. No
     # marker → no board call: a scout, a QC pass, or any brief not tied to a row.
-    bid=$(tl_json .tool_input.prompt | grep -oE '^board: [0-9]+$' | head -1 | awk '{print $2}')
     [ -n "$bid" ] || exit 0
+    # GH#21: pair the id with the brief exactly. SubagentStart may have claimed the pending
+    # entry already (tracked); if not, consume it here so it cannot mark a later sibling.
+    tl_worker_tracked "$at" "$aid" || { tl_track_claim "$at" "$aid" || tl_track_add "$aid"; }
     br=""
     [ "$(tl_json .tool_input.isolation)" = "worktree" ] && br="worktree-agent-$aid"
     tl_board_call "$aid" "$bid" worker-start --id "$aid" --board "$bid" ${br:+--branch "$br"}
@@ -303,7 +313,9 @@ Or say \"here\" to continue in this session." \
     ;;
   SubagentStart)
     at=$(tl_json .agent_type)
-    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    # GH#21: tl-* always; any other type only when its dispatch carried `board: N`
+    # (claimed from the pending entry PreToolUse left, or already recorded by PostToolUse).
+    tl_worker_tracked "$at" "$(tl_json .agent_id)" || tl_track_claim "$at" "$(tl_json .agent_id)" || exit 0
     sfx=""; sid=$(tl_json .session_id); [ -n "$sid" ] && sfx="  session=$sid"
     tl_event "start     agent=$at  id=$(tl_json .agent_id)$sfx"
     # Workers keep scratch in <worktree>/.tl-scratch/ — keep it out of git for every
@@ -318,7 +330,7 @@ Or say \"here\" to continue in this session." \
     ;;
   SubagentStop)
     at=$(tl_json .agent_type)
-    case "$at" in tl-*|*:tl-*) ;; *) exit 0 ;; esac
+    tl_worker_tracked "$at" "$(tl_json .agent_id)" || exit 0
     # T65: a worker idling on its own run_in_background job fires SubagentStop
     # too — that is a pause, not a return. The transcript is written async (hooks
     # docs), so a pause verdict is re-read once before it sticks.

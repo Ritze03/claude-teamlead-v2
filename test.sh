@@ -2660,6 +2660,78 @@ check "a Go at stage 3 does not set the mark" "$(ogmark)" none
 : > $ogs/plan-offer-pending; rm -f $ogs/active-plan
 check "no active plan: a stale mark never refuses a dispatch" "$(ogdisp 'board: 1')" allow
 
+echo "== GH#21: any agent type is tracked when its brief carries board: N =="
+# A project-level custom agent (.claude/agents/my-worker.md) is not tl-*. Its dispatch with a
+# `board: N` line is the opt-in: row linking, ledger, return, fence. Without the line: untouched.
+t21=$T/t21; t21s=$t21/.claude/teamlead/.state; t21L=$t21s/events.log
+mkdir -p $t21s; : > $t21s/active
+for n in a b c d e; do python3 "$B" add --project $t21 --task "custom $n" --agent my-worker --owns t21/$n >/dev/null; done   # ids 1-5
+python3 "$B" add --project $t21 --task "plan step" --agent my-worker --owns t21/f --plan I1 >/dev/null   # id 6
+t21ev(){ echo "$1" | "$H/record.sh" >"$T/t21out" 2>&1; }
+t21pre(){ jq -nc --arg c "$t21" --arg t "$1" --arg b "$2" '{hook_event_name:"PreToolUse",cwd:$c,tool_name:"Agent",prompt_id:"p21",tool_input:{subagent_type:$t,description:"custom",prompt:("Brief.\n"+$b+"\nGo."),run_in_background:true}}'; }
+t21post(){ jq -nc --arg c "$t21" --arg t "$1" --arg b "$2" --arg a "$3" '{hook_event_name:"PostToolUse",cwd:$c,tool_name:"Agent",tool_input:{subagent_type:$t,description:"custom",prompt:("Brief.\n"+$b+"\nGo."),run_in_background:true},tool_response:{status:"async_launched",agentId:$a}}'; }
+t21start(){ jq -nc --arg c "$t21" --arg t "$1" --arg a "$2" '{hook_event_name:"SubagentStart",cwd:$c,agent_type:$t,agent_id:$a,session_id:"s21"}'; }
+t21stop(){ jq -nc --arg c "$t21" --arg t "$1" --arg a "$2" '{hook_event_name:"SubagentStop",cwd:$c,agent_type:$t,agent_id:$a,last_assistant_message:"done"}'; }
+t21row(){ python3 -c "import json;d=json.load(open('$t21s/board.json'));t=[x for x in d['tasks'] if x['id']==$1][0];print(t['state']+','+str(t['worker']))"; }
+t21ledger(){ python3 "$B" status --project $t21 | head -1 | grep -oE '[0-9]+ worker' | grep -oE '[0-9]+'; }
+# 1: bare custom type, the usual order (SubagentStart fires before the Agent tool returns)
+t21ev "$(t21pre my-worker 'board: 1')"; t21ev "$(t21start my-worker a1)"; t21ev "$(t21post my-worker 'board: 1' a1)"
+check "custom type + board: row 1 is running, linked to its worker" "$(t21row 1)" "running,a1"
+check "  dispatch event logged" "$(grep -c '  dispatch  agent=my-worker' $t21L)" 1
+check "  start event logged" "$(grep -c '  start     agent=my-worker  id=a1' $t21L)" 1
+check "  board.py status counts 1 worker working" "$(t21ledger)" 1
+check "  the stale-base/pending bookkeeping is consumed (no leftover pending entry)" "$(cat $t21s/tracked-pending 2>/dev/null | wc -l)" 0
+t21ev "$(t21stop my-worker a1)"
+check "  on stop the row is returned" "$(t21row 1)" "returned,a1"
+check "  return event logged" "$(grep -c '  return    agent=my-worker  id=a1' $t21L)" 1
+check "  and 0 workers working" "$(t21ledger)" 0
+# 2: namespaced custom type, Agent tool returned before SubagentStart this time
+t21ev "$(t21pre proj:my-worker 'board: 2')"; t21ev "$(t21post proj:my-worker 'board: 2' a2)"; t21ev "$(t21start proj:my-worker a2)"
+check "namespaced custom type: row 2 running/a2 (PostToolUse before SubagentStart)" "$(t21row 2)" "running,a2"
+check "  start event logged" "$(grep -c '  start     agent=proj:my-worker  id=a2' $t21L)" 1
+check "  pending entry consumed once, not left to mark a later sibling" "$(cat $t21s/tracked-pending 2>/dev/null | wc -l)" 0
+t21ev "$(t21stop proj:my-worker a2)"
+check "  on stop the row is returned" "$(t21row 2)" "returned,a2"
+# 3: no board line: untouched, exactly as before
+t21ev "$(t21pre my-worker 'no row here')"; t21ev "$(t21start my-worker u1)"; t21ev "$(t21post my-worker 'no row here' u1)"; t21ev "$(t21stop my-worker u1)"
+check "custom type without board line: row 3 untouched" "$(t21row 3)" "queued,None"
+check "  no dispatch logged for it (only the two board-line dispatches so far)" "$(grep -c '  dispatch' $t21L)" 2
+check "  no ledger line mentions it" "$(grep -c 'u1' $t21L)" 0
+check "  not recorded as tracked" "$(grep -cx u1 $t21s/tracked-workers)" 0
+for t in Explore general-purpose claude-code-guide ""; do
+  t21ev "$(t21start "$t" x9)"; t21ev "$(t21stop "$t" x9)"
+done
+check "Explore/general-purpose/internal agents never get a start/return line" "$(grep -c 'x9' $t21L)" 0
+check "  and print no stale-base note" "$(cat $T/t21out)" ""
+# a pending entry from a dispatch whose agent never started must expire, not tag a stranger
+printf '%s my-worker\n' "$(( $(date +%s) - 600 ))" > $t21s/tracked-pending
+t21ev "$(t21start my-worker u2)"
+check "an expired pending entry does not mark a later start" "$(grep -cx u2 $t21s/tracked-workers)" 0
+rm -f $t21s/tracked-pending
+# 4: tl-* keeps working with and without a board line
+t21ev "$(t21start teamlead:tl-sonnet-low t1)"
+check "tl-* without any dispatch is still logged at start (unchanged)" "$(grep -c '  start     agent=teamlead:tl-sonnet-low  id=t1' $t21L)" 1
+t21ev "$(t21stop teamlead:tl-sonnet-low t1)"
+check "  and at return" "$(grep -c '  return    agent=teamlead:tl-sonnet-low  id=t1' $t21L)" 1
+# 5: the worktree fence follows the tracked id
+t21fe(){ jq -nc --arg c "$t21" --arg f "$1" --arg t "$2" --arg a "$3" '{cwd:$c,agent_id:$a,agent_type:$t,tool_name:"Edit",tool_input:{file_path:$f}}' | CLAUDE_PROJECT_DIR="$t21" "$H/worktree-fence.sh"; }
+t21fd(){ out=$(t21fe "$@"); [ -z "$out" ] && echo allow || jq -r .hookSpecificOutput.permissionDecision <<<"$out"; }
+check "fence: tracked custom worker is refused outside its cwd" "$(t21fd "$T/t21-elsewhere/x" my-worker a1)" deny
+check "fence: tracked namespaced custom worker is refused too" "$(t21fd "$T/t21-elsewhere/x" proj:my-worker a2)" deny
+check "fence: tracked custom worker may write in its cwd"       "$(t21fd "$t21/src/x" my-worker a1)" allow
+check "fence: the same type, never tracked, is not fenced"      "$(t21fd "$T/t21-elsewhere/x" my-worker u1)" allow
+check "fence: Explore is not fenced"                            "$(t21fd "$T/t21-elsewhere/x" Explore e1)" allow
+check "fence: tl-* is still fenced"                             "$(t21fd "$T/t21-elsewhere/x" teamlead:tl-sonnet-low t1)" deny
+# 6: plan-row refusal while the second Go is unanswered applies to any agent type
+echo "$t21s/plan.md" > $t21s/active-plan; : > $t21s/plan-offer-pending
+t21pend0=$(cat $t21s/tracked-pending 2>/dev/null | wc -l)
+check "pending offer: custom-type dispatch for a plan: row is denied" \
+  "$(echo "$(t21pre my-worker 'board: 6')" | "$H/record.sh" | jq -r .hookSpecificOutput.permissionDecision)" deny
+check "  the refused dispatch leaves no pending claim behind" "$(cat $t21s/tracked-pending 2>/dev/null | wc -l)" "$t21pend0"
+check "  custom type for a non-plan row is allowed" "$(echo "$(t21pre my-worker 'board: 4')" | "$H/record.sh")" ""
+check "  custom type without board line is untouched" "$(echo "$(t21pre my-worker 'x')" | "$H/record.sh")" ""
+rm -f $t21s/plan-offer-pending $t21s/active-plan
+
 echo "== gate.sh: plan-mode checks — footer, plan-lint, stage 5->6, returned (D1, D9) =="
 gtp=$T/gtgate; mkdir -p $gtp/.claude/teamlead/plan $gtp/.claude/teamlead/.state
 : > $gtp/.claude/teamlead/.state/active
@@ -3929,8 +4001,8 @@ check "board: 2 while its blocker (1) is unmerged: hook still exits 0" "$rc" 0
 grep -q 'is blocked by 1' "$T/outB2" && ok "  names the blocker" || bad "  names the blocker"
 check "  row 2 unchanged (write was refused, never saved)" "$(row5d 2)" "$before2"
 
-echo "== I5: non-tl-* subagent_type does nothing on PostToolUse =="
-PTC='{"hook_event_name":"PostToolUse","cwd":"'$p5d'","tool_name":"Agent","tool_input":{"subagent_type":"generic-fetcher","description":"not ours","prompt":"Brief.\nboard: 1\nGoal: nothing."},"tool_response":{"status":"async_launched","agentId":"pwC","description":"x","prompt":"y"}}'
+echo "== I5: non-tl-* subagent_type without a board line does nothing on PostToolUse (with one: see GH#21) =="
+PTC='{"hook_event_name":"PostToolUse","cwd":"'$p5d'","tool_name":"Agent","tool_input":{"subagent_type":"generic-fetcher","description":"not ours","prompt":"Brief.\nGoal: nothing."},"tool_response":{"status":"async_launched","agentId":"pwC","description":"x","prompt":"y"}}'
 echo "$PTC" | "$H/record.sh" >"$T/outC" 2>&1; rc=$?
 check "non-tl-* subagent_type: exit 0" "$rc" 0
 check "  row 1 untouched" "$(row5d 1)" "queued,None"
