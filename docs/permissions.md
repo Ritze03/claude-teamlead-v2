@@ -10,12 +10,16 @@ control that classifier and its answers are not deterministic. What it does:
 - the lead states the review evidence (QC row id + verdict) in the turn right before the merge;
 - a brief never tells a worker to merge, push or delete a branch (a dispatch whose brief
   said "merge the PR yourself" was itself refused); workers commit and report;
-- on any refusal the lead stops, tells you, and offers the rule below. It adds it only
-  after your yes, and never writes settings from a hook.
+- before a run you will walk away from (the reply to the plan's second Go, or when you say
+  you want a long unattended run) the lead offers the rules below up front, as one command
+  you run yourself, so the run does not stall on a prompt nobody answers;
+- on any refusal the lead stops, tells you, and offers the same command with only the
+  lines that refusal needs. The lead never writes settings itself (the classifier can refuse
+  that as self-modification) and neither does a hook.
 
 ## The allow rules
 
-Put them in the project's `.claude/settings.json` (shared) or `.claude/settings.local.json`
+They go in the project's `.claude/settings.json` (shared) or `.claude/settings.local.json`
 (yours only), under `permissions.allow`:
 
 ```json
@@ -23,6 +27,7 @@ Put them in the project's `.claude/settings.json` (shared) or `.claude/settings.
   "permissions": {
     "allow": [
       "Bash(git merge *)",
+      "Bash(git push *)",
       "Bash(gh pr merge *)",
       "Bash(bash */scripts/worker-cleanup.sh *)"
     ]
@@ -30,15 +35,31 @@ Put them in the project's `.claude/settings.json` (shared) or `.claude/settings.
 }
 ```
 
+The lead hands you this as a `!` one-liner. The `!` prefix runs it as your own command, not
+as a lead tool call. It needs `jq`; it creates `.claude/settings.json` if missing,
+keeps every other key, and appends only the rules not already in the array. Run it from
+the project root (the lead trims the array to the rules it is offering; for the local
+file, change `settings.json` to `settings.local.json`):
+
+```
+!mkdir -p .claude && f=.claude/settings.json && { [ -f $f ] || echo '{}' > $f; } && jq --argjson new '["Bash(git merge *)","Bash(git push *)","Bash(gh pr merge *)","Bash(bash */scripts/worker-cleanup.sh *)"]' '(.permissions.allow // []) as $a | .permissions.allow = $a + ($new - $a)' $f > $f.tmp && mv $f.tmp $f
+```
+
+If the file exists but is not valid JSON (comments, a trailing comma), `jq` fails, the file
+is left untouched and a stray `settings.json.tmp` remains to delete. If the rules do not
+take effect right away, restart the session (the fresh-context `/clear` does it).
+
 | Rule | Covers | Add it when |
 |---|---|---|
-| `Bash(git merge *)` | the lead merging an accepted worker branch | a `git merge` is refused |
-| `Bash(gh pr merge *)` | merging a PR after QC (only if your flow uses PRs) | a `gh pr merge` is refused |
-| `Bash(bash */scripts/worker-cleanup.sh *)` | worker cleanup: `git worktree remove` + `git branch -d`, never `--force` | the cleanup call is refused |
+| `Bash(git merge *)` | the lead merging an accepted worker branch | a local merge flow, or a `git merge` is refused |
+| `Bash(git push *)` | the lead pushing | the run pushes, or a `git push` is refused |
+| `Bash(gh pr merge *)` | merging a PR after QC (only if your flow uses PRs) | a PR flow, or a `gh pr merge` is refused |
+| `Bash(bash */scripts/worker-cleanup.sh *)` | worker cleanup: `git worktree remove` + `git branch -d`, never `--force` | any flow that merges workers, or the cleanup call is refused |
 
-Add only what a refusal actually needs. Everything else the plugin prescribes
-(`board.py forget`/`clean`/`drop`, `gh issue create`, deleting state files, a push) has
-no rule here: if one is ever refused, the lead asks you before anything is allowed.
+The up-front offer lists the rules the planned flow needs; after a refusal the lead offers
+only the lines that refusal needs. Everything else the plugin prescribes
+(`board.py forget`/`clean`/`drop`, `gh issue create`, deleting state files) has no rule
+here: if one is ever refused, the lead asks you before anything is allowed.
 
 ## Worker writes outside the worktree
 
@@ -89,11 +110,11 @@ reads configuration, Route all shell commands through the classifier, Review den
 
 | Action the lead is told to run | Refusable | Recovery |
 |---|---|---|
-| merge a worker branch into the checked-out branch | yes | the general rule: stop, tell the user, offer `Bash(git merge *)` |
+| merge a worker branch into the checked-out branch | yes | the general rule: stop, tell the user, offer `Bash(git merge *)` (or offered up front at the second Go) |
 | `gh pr merge` | yes (the skill has no PR flow of its own) | same |
 | `worker-cleanup.sh` (worktree remove, `branch -d`) | yes | same; the script's own refusals (dirty tree, unmerged branch) are separate, exit 1, and are fixed rather than forced |
 | `git branch -D`, `git worktree remove --force` | yes | never prescribed; a refused `-d` is not escalated to `-D` |
-| `git push` | yes | never prescribed |
+| `git push` | yes | the general rule: stop, tell the user, offer `Bash(git push *)` |
 | `gh issue create` | yes | already user-gated; a refusal falls under the general rule |
 | `board.py forget` / `clean` / `drop` | possible | `drop` already asks first; a refusal falls under the general rule |
 | deleting state files | possible | never prescribed by hand; scripts do it |

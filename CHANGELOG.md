@@ -4,6 +4,16 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.2 — 2026-11-11
+
+The permission allow rules are offered before an unattended run, not only after a refusal, and as a command the user runs (#22).
+
+- Proactive offer: in the reply to the plan's second Go (before the fresh-context offer) and whenever the user signals a long unattended run, the lead offers the allow rules the planned flow needs (`git merge`, `git push`, `gh pr merge`, `worker-cleanup.sh`; local merge flow vs PR flow) once, so an overnight run does not stall on a prompt nobody answers. The rule set gains `Bash(git push *)`.
+- The offer is one `!`-prefixed `jq` one-liner the user types. It creates `.claude/settings.json` if missing, otherwise keeps every other key and appends only the rules not already in `permissions.allow`. Needs `jq`.
+- Fix: the reactive step 3 told the lead to write `.claude/settings.json` after a yes, which the auto-mode classifier refuses as self-modification. The lead now gives the same one-liner (only the lines the refusal needs) and never writes settings. "yes, merge" in the next message still works.
+- Hedged on purpose: whether settings changes apply mid-session is unverified, so the text says that if the rules do not take effect right away, the user restarts the session (the fresh-context `/clear` does it).
+- `docs/permissions.md` carries the one-liner and the updated rule table.
+
 ## 2.10.1 — 2026-11-10
 
 A board row dispatched to a project-level custom agent (a type that does not start with `tl-`) is now tracked like any worker (#21).

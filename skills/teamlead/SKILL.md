@@ -421,30 +421,38 @@ declined, a `permissions.deny` rule), then:
    gate stop asking).
 2. Say plainly what was refused and what is left undone (the row stays `returned`; the
    Stop gate will keep asking, and that is correct).
-3. Offer the user the exact allow rules below, and ask. Add them only after a yes,
-   to the **project** `.claude/settings.json` under `permissions.allow` (merge into any
-   existing array, never overwrite the file). Never write settings from a hook or
-   without the yes. The user can equally say "yes, merge" in their next message, which
-   the classifier reads as explicit intent for that one action.
+3. Give the user the allow-rule command below (only the lines the refusal needs) and
+   ask them to run it themselves with the `!` prefix. You never write settings: the
+   classifier can refuse a lead edit of `.claude/settings.json` as self-modification, and
+   a hook never writes it either. The user can equally say "yes, merge" in their next
+   message, which the classifier reads as explicit intent for that one action.
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(git merge *)",
-      "Bash(gh pr merge *)",
-      "Bash(bash */scripts/worker-cleanup.sh *)"
-    ]
-  }
-}
+**Offer the rules before the refusal, not after.** A run the user walks away from
+(an overnight build, "go until user-testing") stalls on the first prompt nobody
+answers, so offer the rules up front, once: in the reply to the second Go (see
+`teamlead-plan`, *The second Go*) and whenever the user signals a long unattended
+run. Offer the set the planned flow needs: `Bash(bash */scripts/worker-cleanup.sh *)`
+for any flow that merges workers, `Bash(git merge *)` for a local merge,
+`Bash(gh pr merge *)` for a PR flow, `Bash(git push *)` if the run pushes. If the user already has them
+(or declines), do not ask again.
+
+The command merges into an existing `.claude/settings.json` (other keys kept, no
+duplicates) or creates the file, and needs `jq`. Paste it as one `!` line with only the
+rules you are offering in the array (all four shown):
+
+```
+!mkdir -p .claude && f=.claude/settings.json && { [ -f $f ] || echo '{}' > $f; } && jq --argjson new '["Bash(git merge *)","Bash(git push *)","Bash(gh pr merge *)","Bash(bash */scripts/worker-cleanup.sh *)"]' '(.permissions.allow // []) as $a | .permissions.allow = $a + ($new - $a)' $f > $f.tmp && mv $f.tmp $f
 ```
 
-Offer only the lines the refusal actually needs. `Bash(...)` rules match the command
-text from its start, with `*` standing for any text (`Bash(x:*)` is the older
-spelling of `Bash(x *)`); narrow rules like these stay in effect in auto mode, while
-broad ones such as `Bash(*)` are suspended. Allow rules cover only that exact command
-form (`git -C <dir> merge` does not match `git merge *`), so write merges the way the
-rule reads. The full list and the reasoning are in `docs/permissions.md`.
+If the rules do not take effect right away, restart the session (the fresh-context
+`/clear` does it).
+
+`Bash(...)` rules match the command text from its start, with `*` standing for any
+text (`Bash(x:*)` is the older spelling of `Bash(x *)`); narrow rules like these stay
+in effect in auto mode, while broad ones such as `Bash(*)` are suspended. Allow rules
+cover only that exact command form (`git -C <dir> merge` does not match
+`git merge *`), so write merges the way the rule reads. The full list and the
+reasoning are in `docs/permissions.md`.
 
 The same rule covers the other actions this skill prescribes: `git branch -d`/`-D` and
 `git worktree remove` (via `worker-cleanup.sh`), `board.py forget`/`clean`/`drop`,
