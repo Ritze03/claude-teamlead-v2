@@ -798,14 +798,21 @@ would have to type Go again. At stage 4 you print the plan, the footer, and
 nothing about clearing. In this order:
 
 1. Set the header to `> **Stage 5**`.
-2. Print, **byte-exact**, on its own paragraph:
+2. Offer the permission allow rules, once, **before** the fresh-context offer: the
+   `!` one-liner from the `teamlead` skill (*Permission refusal*), with the rules
+   the plan's flow needs (cleanup for any flow that merges workers, `git merge` for a
+   local merge, `gh pr merge` for a PR flow, `git push` if the run pushes), so an
+   unattended build does not stall on a merge, push or cleanup prompt. Check
+   `.claude/settings*.json` first and skip it if the rules are already there or the
+   user declined.
+3. Print, **byte-exact**, on its own paragraph:
 
    ```
    To build this on a fresh context: `/clear`, then `/teamlead plan continue`.
    Or say "here" to continue in this session.
    ```
 
-3. **Stop — dispatch nothing.** Wait for the user to say "here", or for the plan
+4. **Stop — dispatch nothing.** Wait for the user to say "here", or for the plan
    to be picked up again via `/teamlead plan continue`. Never run `/clear`
    yourself.
 
