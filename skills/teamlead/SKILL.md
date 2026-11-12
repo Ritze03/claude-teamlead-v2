@@ -760,8 +760,11 @@ WHERE THINGS LIVE (all per project, nothing in your home folder)
   .claude/teamlead/plan/*.md       plan files; yours to edit
   .claude/teamlead/plan/done/      finished plans, archived out of the way
   .claude/teamlead/settings.md     the dials
-  .claude/teamlead/.state/         mine; gitignored automatically
+  .claude/teamlead/.state/         mine
     board.json.dropped             the last board I dropped; overwritten each drop
+  .claude/worktrees/               Claude Code's per-worker git worktrees
+  (.claude/teamlead/ and .claude/worktrees/ are gitignored automatically; the rest
+   of .claude/ — settings.json, agents/, commands/ — stays shareable)
   superdoc/                        agent-facing docs (docs/ stays yours)
 ```
 

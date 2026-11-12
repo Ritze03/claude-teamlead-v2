@@ -229,12 +229,14 @@ Open tasks, workers still out, and anything the checks would flag.
 
 ```
 .claude/teamlead/
-├── settings.md      effort / opus                    (committed)
-├── board.md         live working set                 (gitignored)
-├── plan/            plan files you open              (committed)
-├── brainstorm/      live brainstorm runs             (committed)
-└── .state/          hook-owned, never hand-edited    (gitignored)
+├── settings.md      effort / opus
+├── board.md         live working set
+├── plan/            plan files you open
+├── brainstorm/      live brainstorm runs
+└── .state/          hook-owned, never hand-edited
 ```
+
+All of `.claude/teamlead/` is gitignored, as is `.claude/worktrees/` (the per-worker git worktrees); both are added to the project's `.gitignore` automatically. The rest of `.claude/` is left alone, so `settings.json`, `agents/` and `commands/` stay shareable.
 
 Nothing is stored in your home folder. Everything is per project.
 

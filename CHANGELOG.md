@@ -4,6 +4,15 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.3 — 2026-11-12
+
+`.claude/worktrees/` is now gitignored alongside `.claude/teamlead/` (#133).
+
+- Per-user teamlead state must never be committed, because it breaks collaboration between teamlead users. The per-worker git worktrees of `isolation: worktree` live in `.claude/worktrees/`; unignored they showed up as untracked nested repos and could be committed as embedded repos (gitlinks). `tl_ensure_gitignore` (every turn, idempotent, silent, a no-op outside a git repo) now ensures both `.claude/teamlead/` and `.claude/worktrees/`.
+- The whole `.claude/` is deliberately left shared: `settings.json`, `agents/` and `commands/` stay committable. A whole-`.claude` entry (`.claude`, `.claude/`, `/.claude`, `/.claude/`) covers both directories and nothing is appended; otherwise each directory is checked on its own in its common spellings (with or without trailing slash or leading `/`) and only the missing one is appended. The old `.claude/teamlead/.state/` and `.claude/teamlead/board.md` lines are still cleaned up.
+- test: a fresh `.gitignore` gets both lines once, a second call adds nothing, an existing `.claude/` adds neither, `/.claude/teamlead` adds only worktrees, `.claude/worktrees` adds only teamlead.
+- docs: `skills/teamlead/SKILL.md` tree, `docs/enforcement.md` and `README.md` say both directories are ignored. The README State tree no longer marks `settings.md`, `plan/` and `brainstorm/` as "(committed)" (wrong: all of `.claude/teamlead/` is gitignored); it states that once.
+
 ## 2.10.2 — 2026-11-11
 
 The permission allow rules are offered before an unattended run, not only after a refusal, and as a command the user runs (#22).

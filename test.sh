@@ -2350,8 +2350,8 @@ n=$(wc -l < $rl)
 rm -f $rl $proj/.claude/teamlead/.state/events.archive.log
 
 echo "== runtime state is gitignored =="
-# tl_ensure_gitignore now writes one blanket line, '.claude/teamlead/', and
-# migrates away the two old, narrower lines it used to write.
+# tl_ensure_gitignore writes '.claude/teamlead/' and '.claude/worktrees/' (never the
+# whole '.claude/'), and migrates away the two old, narrower lines it used to write.
 rm -rf $proj/.claude $proj/.gitignore
 printf 'node_modules/\n' > $proj/.gitignore
 ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"/teamlead"}' "$H/mode.sh" >/dev/null
@@ -2372,6 +2372,29 @@ grep -qxF '.claude/teamlead/.state/' $proj/.gitignore && bad "  and migrates the
 rm -f $proj/.gitignore
 ev '{"hook_event_name":"SessionStart","cwd":"'$proj'","source":"startup"}' "$H/restore.sh" >/dev/null
 check "backfilled on session restore" "$(grep -cxF '.claude/teamlead/' $proj/.gitignore)" 1
+# .claude/worktrees/ (per-worker git worktrees) is ignored alongside .claude/teamlead/.
+rm -f $proj/.gitignore
+printf 'node_modules/\n' > $proj/.gitignore
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
+check "fresh .gitignore: teamlead line exactly once" "$(grep -cxF '.claude/teamlead/' $proj/.gitignore)" 1
+check "fresh .gitignore: worktrees line exactly once" "$(grep -cxF '.claude/worktrees/' $proj/.gitignore)" 1
+check "worktrees dir is ignored by git" "$(git -C $proj check-ignore -q .claude/worktrees/agent-x; echo $?)" 0
+check "the whole .claude/ is NOT ignored (settings.json stays shareable)" "$(git -C $proj check-ignore -q .claude/settings.json; echo $?)" 1
+cp $proj/.gitignore "$T/gi2.before"
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
+cmp -s "$T/gi2.before" $proj/.gitignore && ok "second call adds nothing (idempotent)" || bad "second call adds nothing (idempotent)"
+printf '.claude/\n' > $proj/.gitignore
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
+check "existing '.claude/' line: nothing appended" "$(cat $proj/.gitignore)" ".claude/"
+printf '/.claude/teamlead\n' > $proj/.gitignore
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
+check "existing '/.claude/teamlead': only worktrees appended" "$(cat $proj/.gitignore)" "/.claude/teamlead
+.claude/worktrees/"
+printf '.claude/worktrees\n' > $proj/.gitignore
+ev '{"hook_event_name":"UserPromptSubmit","cwd":"'$proj'","prompt":"ordinary turn"}' "$H/mode.sh" >/dev/null
+check "existing '.claude/worktrees' (no slash): only teamlead appended" "$(cat $proj/.gitignore)" ".claude/worktrees
+.claude/teamlead/"
+rm -f $proj/.gitignore
 
 echo "== routing resolution =="
 mkdir -p .claude/teamlead
