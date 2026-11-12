@@ -51,11 +51,17 @@ tl_pin_root() {
     || printf '%s\n' "$CLAUDE_PLUGIN_ROOT" > "$TL_STATE/plugin-root"
 }
 
-# Runtime state must never be committed. A worker running `git add -A` otherwise
-# captures board.json onto its branch, and checking back to main deletes it — the
-# board silently vanishes. Idempotent, so it is safe to call on every turn; it must
-# NOT live only in the activation path, or a project activated by an older version
-# never gets it.
+# Per-user teamlead state must never be committed, because it breaks collaboration
+# between teamlead users. Two directories are ignored, and only those two (never the
+# whole `.claude/`, so settings.json, agents/ and commands/ stay shareable):
+#   .claude/teamlead/  runtime state. A worker running `git add -A` otherwise
+#                      captures board.json onto its branch, and checking back to
+#                      main deletes it — the board silently vanishes.
+#   .claude/worktrees/ where Claude Code puts the per-worker git worktrees of
+#                      `isolation: worktree`. Unignored they show up as untracked
+#                      nested repos and can be committed as embedded repos (gitlinks).
+# Idempotent, so it is safe to call on every turn; it must NOT live only in the
+# activation path, or a project activated by an older version never gets it.
 tl_ensure_gitignore() {
   git -C "$TL_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
   local gi="$TL_PROJECT/.gitignore"
@@ -69,13 +75,19 @@ tl_ensure_gitignore() {
   fi
   # F11/D7: exact-match only used to mean a pre-existing equivalent pattern
   # (".claude/", no trailing slash, a leading "/") got a redundant line appended
-  # underneath it. Any of these already covers us.
-  local pat
-  for pat in ".claude" ".claude/" "/.claude" "/.claude/" \
-             ".claude/teamlead" ".claude/teamlead/" "/.claude/teamlead" "/.claude/teamlead/"; do
+  # underneath it. A whole-.claude entry covers both directories.
+  local pat d
+  for pat in ".claude" ".claude/" "/.claude" "/.claude/"; do
     grep -qxF "$pat" "$gi" 2>/dev/null && return 0
   done
-  printf '%s\n' ".claude/teamlead/" >> "$gi"
+  # Otherwise check each directory on its own, in any of its common spellings,
+  # and append only the missing one(s).
+  for d in "teamlead" "worktrees"; do
+    for pat in ".claude/$d" ".claude/$d/" "/.claude/$d" "/.claude/$d/"; do
+      grep -qxF "$pat" "$gi" 2>/dev/null && continue 2
+    done
+    printf '%s\n' ".claude/$d/" >> "$gi"
+  done
 }
 
 tl_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
