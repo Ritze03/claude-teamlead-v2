@@ -400,9 +400,15 @@ def check_plan(db: dict, project=None) -> list[str]:
     wave is already fully merged), it falls back to the lowest wave that has
     no step on the board and isn't fully merged — the natural "next wave" nudge.
     A fully-merged wave is never demanded.
+
+    While .state/plan-offer-pending exists (set at the second Go, lifted by "here" or
+    `/teamlead plan continue`) nothing is demanded: board-fence refuses board_add of
+    plan-step rows in that state, so the gate must not ask for them (#23).
     """
     ap = root(project) / ".state" / "active-plan"
     if not ap.exists():
+        return []
+    if (root(project) / ".state" / "plan-offer-pending").exists():
         return []
     plan_path = ap.read_text().strip()
     if not plan_path:
