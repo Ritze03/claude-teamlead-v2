@@ -1641,12 +1641,14 @@ DONE='# T\n\n## Done when\n- [x] it works — *verified by: agent*\n'
 printf "$DONE" > $apf
 echo "$apf" > $ap/.claude/teamlead/.state/active-plan
 : > $ap/.claude/teamlead/.state/plan-touched; cp $apf $ap/.claude/teamlead/.state/snap/topic.md
+: > $ap/.claude/teamlead/.state/plan-offer-pending
 bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap >/dev/null 2>&1
 d=$(date +%Y-%m-%d)
 [ -f "$ap/.claude/teamlead/plan/done/$d-topic.md" ] && ok "archives with a datestamp" || bad "archives with a datestamp"
 [ -f "$apf" ] && bad "  removes it from the active folder" || ok "  removes it from the active folder"
 [ -f "$ap/.claude/teamlead/.state/active-plan" ] && bad "  clears active-plan" || ok "  clears active-plan"
 [ -f "$ap/.claude/teamlead/.state/snap/topic.md" ] && bad "  clears the snapshot" || ok "  clears the snapshot"
+[ -f "$ap/.claude/teamlead/.state/plan-offer-pending" ] && bad "  #23 clears plan-offer-pending (no leak into the next plan)" || ok "  #23 clears plan-offer-pending (no leak into the next plan)"
 printf "$DONE" > $apf
 bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap >/dev/null 2>&1
 [ -f "$ap/.claude/teamlead/plan/done/$d-topic-2.md" ] && ok "  a same-day second plan does not overwrite" || bad "  same-day collision"
@@ -2987,6 +2989,22 @@ grep -qi 'phase' "$T/wcout" && bad "  unphased message carries no phase prefix" 
 grep -q 'I4' "$T/wcout" && bad "  should not name I4 (a later wave)" || ok "  does not name I4 (a later wave)"
 python3 "$B" add --project $wcp --task "do3" --agent tl-sonnet-low --owns src/c --plan I3 >/dev/null
 check "wave 1 merged, wave 2 (I3) boarded and not merged: clean" "$(wcchk)" 0
+
+echo "== board.py check_plan: no missing-row demand while plan-offer-pending is set (#23) =="
+# board-fence refuses plan: board_add until "here", so the check must not ask for it. Phased (cpp) and unphased (wcp).
+for fx in cpp wcp; do
+  fxp=${!fx}; fxs=$fxp/.claude/teamlead/.state; rm -f $fxs/board.json $fxp/.claude/teamlead/board.md $fxs/plan-offer-pending
+  fxchk(){ python3 "$B" check --project $fxp >"$T/pdout" 2>&1; echo $?; }
+  check "#23 $fx: no rows, mark absent: still reported" "$(fxchk)" 1
+  grep -q 'has no board task' "$T/pdout" && ok "  names the missing step" || bad "  names the missing step"
+  : > $fxs/plan-offer-pending
+  check "#23 $fx: no rows, mark present: clean" "$(fxchk)" 0
+  grep -q 'has no board task' "$T/pdout" && bad "  must not name a missing step" || ok "  names no missing step"
+  python3 "$B" status --project $fxp > "$T/pdstatus" 2>&1
+  grep -q 'has no board task' "$T/pdstatus" && bad "  status silent too" || ok "  status is silent too"
+  rm -f $fxs/plan-offer-pending
+  check "#23 $fx: mark lifted: reported again" "$(fxchk)" 1
+done
 
 echo "== state.sh: stage/go/watcher status block (D14) =="
 stp=$T/state1; mkdir -p $stp/.claude/teamlead/plan $stp/.claude/teamlead/.state

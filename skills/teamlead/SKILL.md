@@ -657,7 +657,7 @@ Neither script prompts on stdin. The confirmation is **yours**, through
 
     It datestamps the file into `.claude/teamlead/plan/done/` (as
     `YYYY-MM-DD-abandoned-<name>.md` — it never deletes), removes `.state/active-plan`,
-    `.state/plan-watch`, `.state/plan-touched` and the plan's snapshot, kills the plan
+    `.state/plan-watch`, `.state/plan-touched`, `.state/plan-offer-pending` and the plan's snapshot, kills the plan
     watcher, and — because `--abandon` was passed — runs `board.py forget` to close out
     any worker still outstanding. With `active-plan` gone, `check` has nothing to
     complain about and the gate lets the turn end. Archiving is a user-facing decision

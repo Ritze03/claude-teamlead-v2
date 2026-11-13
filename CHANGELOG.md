@@ -4,6 +4,16 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.4 — 2026-11-13
+
+The Stop gate no longer demands plan-step board rows that board-fence refuses while the second Go is unanswered (#23).
+
+- Bug: after the second Go (stage 4 → 5) `mode.sh` sets `.state/plan-offer-pending` and `board-fence.sh` refuses `board_add` of `plan:` rows until the user says "here" or runs `/teamlead plan continue`. `board.py check` (the gate's check 1b) still reported "plan step In has no board task — copy it from the wave table", so the gate asked for exactly what the fence forbade, every turn, until "here".
+- Fix: `check_plan` in `scripts/board.py` returns nothing while `.state/plan-offer-pending` exists, covering both the phased and the unphased variant. Silent on purpose: the lead can end its turn cleanly after printing the offer. Once "here" or `/teamlead plan continue` lifts the mark, the check behaves exactly as before. The guard sits in `check_plan` because the gate, `board.py check` and `board.py status` all go through it and it already knows the state dir.
+- `scripts/plan-archive.sh` also clears `.state/plan-offer-pending`, so a plan archived or abandoned while the second-Go offer is unanswered cannot leak the mark into the next plan (where board-fence would refuse its rows and `check_plan` would stay silent).
+- test: phased and unphased fixtures, no rows: mark absent still reports the missing steps, mark present is clean for `check` and `status`, mark lifted reports again; archiving a plan removes a present `plan-offer-pending`.
+- docs: `docs/enforcement.md` notes the exemption on the `board.py` row.
+
 ## 2.10.3 — 2026-11-12
 
 `.claude/worktrees/` is now gitignored alongside `.claude/teamlead/` (#133).

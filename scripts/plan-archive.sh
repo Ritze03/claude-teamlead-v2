@@ -72,7 +72,7 @@ if [ -f "$pidf" ]; then
 fi
 
 mv "$plan" "$out"
-rm -f "$state/active-plan" "$state/plan-watch" "$state/plan-touched" \
+rm -f "$state/active-plan" "$state/plan-watch" "$state/plan-touched" "$state/plan-offer-pending" \
       "$state/snap/$(basename "$plan")" 2>/dev/null
 
 printf 'archived: %s\n' "$out"
