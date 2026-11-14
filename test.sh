@@ -4903,6 +4903,13 @@ out_h=$(mapin $HUB --check); rc_h=$?
 check "map: the Part 5 template links the hub (no ORPHAN for overview.md), no dangling, exit 0 (#20)" "$rc_h/$(printf '%s\n' "$out_h" | grep -c 'overview.md')/$(printf '%s\n' "$out_h" | grep -c '^DANGLING')" "0/0/0"
 check "map: the Part 5 template block was extracted (guard against a vacuous pass)" "$(grep -c 'superdoc/architecture/overview.md' $HUB/CLAUDE.md)" "1"
 
+# #24: a heading with an inline code span slugs from its raw text (GitHub keeps the code text, drops the backticks)
+MC=$T/mpc; gfix $MC; mkdir -p $MC/superdoc
+printf '# I\n[ok](a.md#block-direct-scanout-switch-displayblock_direct_scanout) [t](a.md#vect-sizes) [fenced](a.md#in-fence)\n' > $MC/superdoc/README.md
+printf '# A\n## Block direct scanout switch (`display.block_direct_scanout`)\n## `Vec<T>` sizes\n```\n## In fence\n```\n' > $MC/superdoc/a.md
+out_mc=$(mapin $MC --check)
+check "map: links to headings with inline code resolve (raw-text slug); a heading inside a fenced block is not an anchor (#24)" "$(printf '%s\n' "$out_mc" | grep '^DANGLING' | tr '\n' '|')" "DANGLING  superdoc/README.md:2 -> superdoc/a.md#in-fence  (anchor missing)|"
+
 echo "== superdoc map: gate shows dangling links once (gate.sh check 8, #19) =="
 GM=$T/mpg; sgmk $GM
 printf '# I\n[a](features/a.md)\n[old](features/old-gone.md)\n' > $GM/superdoc/README.md; (cd $GM && git add superdoc && git commit -qm readme)
