@@ -48,8 +48,12 @@ def die(msg, code=2):
     sys.exit(code)
 
 
-def prose_lines(path):
-    """(lineno, text) of every line outside fenced code blocks, inline code spans blanked."""
+def blank(line):
+    return CODESPAN.sub(lambda x: ' ' * len(x.group(0)), line)
+
+
+def prose_lines(path, raw=False):
+    """(lineno, text) of every line outside fenced code blocks, inline code spans blanked unless raw."""
     try:
         with open(path, encoding='utf-8', errors='replace') as f:
             lines = f.read().splitlines()
@@ -65,12 +69,12 @@ def prose_lines(path):
         if m:
             fence = m.group(1)
             continue
-        yield n, CODESPAN.sub(lambda x: ' ' * len(x.group(0)), line)
+        yield n, line if raw else blank(line)
 
 
 def slug(text):
     text = re.sub(r'!?\[([^\]]*)\]\([^)]*\)', r'\1', text)   # a link in a heading: its text
-    text = re.sub(r'<[^>]+>', '', text).strip().lower()
+    text = re.sub(r'(`+)(.+?)\1|<[^>]+>', lambda m: m.group(2) or '', text).strip().lower()   # code span: its text, no backticks; HTML tag: dropped
     return re.sub(r'[^\w\- ]', '', text).replace(' ', '-')
 
 
@@ -80,14 +84,14 @@ _anchors = {}
 def anchors_of(path):
     if path not in _anchors:
         seen, out = {}, set()
-        for _, line in prose_lines(path):
+        for _, line in prose_lines(path, raw=True):   # headings keep their code-span text (backticks drop in slug)
             m = HEADING.match(line)
             if m:
                 s = slug(m.group(1))
                 k = seen.get(s, 0)
                 seen[s] = k + 1
                 out.add(s if k == 0 else '%s-%d' % (s, k))
-            for e in EXPLICIT.finditer(line):
+            for e in EXPLICIT.finditer(blank(line)):
                 out.add((e.group(1) or e.group(2)).lower())
         _anchors[path] = out
     return _anchors[path]

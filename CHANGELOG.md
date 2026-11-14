@@ -4,6 +4,14 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.5 — 2026-11-14
+
+`map.py --check` no longer reports false `DANGLING ... (anchor missing)` for links to headings that contain an inline code span (#24).
+
+- Bug: `anchors_of()` read headings through `prose_lines()`, which blanks inline code spans (so links inside them stay ignored). `## Block direct scanout switch (`display.block_direct_scanout`)` slugged to `block-direct-scanout-switch-` instead of GitHub's `block-direct-scanout-switch-displayblock_direct_scanout`.
+- Fix: `prose_lines(path, raw=True)` keeps fence tracking but returns the original line; `anchors_of()` matches `HEADING` on it, and `slug()` keeps a code span's text without the backticks (and no longer strips `<T>` inside one, as GitHub). Explicit `<a name>`/`id=` anchors are still read from the blanked line, and link finding is unchanged, so links inside code spans stay ignored.
+- test: a link to the example heading resolves, `` `Vec<T>` sizes `` resolves as `vect-sizes`, and a heading inside a fenced block is still not an anchor.
+
 ## 2.10.4 — 2026-11-13
 
 The Stop gate no longer demands plan-step board rows that board-fence refuses while the second Go is unanswered (#23).
