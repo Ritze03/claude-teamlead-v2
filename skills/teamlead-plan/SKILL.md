@@ -28,7 +28,7 @@ Plan files: `<project>/.claude/teamlead/plan/<topic-slug>.md`
 | Stage | What happens | Ends when |
 |---|---|---|
 | **1 Topic** | Settle what is being planned and derive the filename. **Skip it entirely when the topic came with the command** (`/teamlead plan <topic>`) — that is the normal case. If the file already exists, offer to **continue** it; never silently overwrite. | You have a filename |
-| **2 Create and show** | Create the near-empty plan — the template's sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan`, start the watcher, and **show the path table**. | The path is on screen |
+| **2 Create and show** | Create the near-empty plan — the template's sections, **no `## Done when` and no `## Implementation plan`** — with `> **Stage 2**` in its header, write `.state/active-plan` (deleting `.state/phase-accepted`), start the watcher, and **show the path table**. | The path is on screen |
 | **3 Work it out** | Scout (the code **and the project docs** for the areas the plan touches), then ask what they want out of this — one question — and derive the specific questions from their answer. Update the header to `> **Stage 3**`. Back-and-forth until "Go". | The user says "Go" |
 | **4 Done when + implementation plan** | First, the **context audit** (see *The first Go*, below), which includes **reading the relevant doc pages** so the plan follows the documented architecture. Then you alone write the acceptance criteria and the wave table, inserting both **above `## Open questions`**. Then **stop again** — the header can't move to 5 without it; `plan-fence.sh` refuses the bump until a "Go" is recorded. Ask for the Go with the fixed footer and nothing else: **no `/clear` or `/teamlead plan continue` offer yet** (see *The second Go*). | The user says "Go" |
 | **5 Build** | Translate into `board.md` and execute. Update the header to `> **Stage 5**` — `board-fence.sh` refuses `board_add` of plan-step rows (`plan:`) until this header is set; rows without `plan:` (scouts, unrelated work) are allowed earlier. | Every task of the **current phase** merged, board empty (no phase rows: the whole plan is one phase) |
@@ -76,7 +76,7 @@ Stage 2 is short and must not be buried. In one turn, in this order:
 1. Create the file and **say the path, in the table, as your first output** — before
    any slow work. Scouting takes a minute or more; the user should be opening the
    file *during* it, not waiting to learn where it is.
-2. Start the watcher and write `.state/active-plan`.
+2. Start the watcher and write `.state/active-plan` (and delete `.state/phase-accepted`, left over from the previous plan).
 3. *Then* dispatch the scout and move to stage 3.
 
 Getting this backwards — scouting first and mentioning the path in the same message
@@ -226,7 +226,10 @@ merge your line back in, write. Observed today.
 `.claude/teamlead/.state/plugin-root`, and the injected state block prints it. Use it.
 
 Write the plan's absolute path to `.claude/teamlead/.state/active-plan` at stage 2, so a
-session that resumes after a compaction is told which plan is live.
+session that resumes after a compaction is told which plan is live. In the same step delete
+`.claude/teamlead/.state/phase-accepted`: it holds the previous plan's accepted step ids, and a
+new plan reuses I1.., so a stale file makes phase A look accepted (the state block would say
+"phase B of 2").
 
 **Start the watcher at stage 2** with the **Monitor** tool. Monitor is usually a
 *deferred* tool — `ToolSearch("select:Monitor")` first, or the call will fail. Give
@@ -278,7 +281,7 @@ Stop it on leaving plan mode by any other route too; a monitor otherwise outlive
 the mode.
 
 **Cancelling a plan is one of those routes.** If the user calls it off mid-way:
-stop the watcher, delete `.state/plan-watch`, clear `.state/active-plan`, and run
+stop the watcher, delete `.state/plan-watch`, clear `.state/active-plan` and `.state/phase-accepted`, and run
 `board.py forget --project "$PWD"` — a scout killed mid-plan emits no stop event
 and would otherwise be counted as working for hours.
 
@@ -694,7 +697,7 @@ $(cat .claude/teamlead/.state/plugin-root)/scripts/plan-archive.sh <plan-file> -
 ```
 
 It datestamps the file into `.claude/teamlead/plan/done/YYYY-MM-DD-<topic>.md`,
-stops the watcher, and clears `active-plan` and the snapshot. Say where it went.
+stops the watcher, and clears `active-plan`, `phase-accepted` and the snapshot. Say where it went.
 
 It **refuses** a plan with an unticked `Done when` box, or with no criteria at all —
 step 1–3 above are not optional, and filing a plan away is exactly how the last
