@@ -4,6 +4,14 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.10.6 — 2026-11-14
+
+A new plan starts at phase A: `.state/phase-accepted` no longer carries the previous plan's step ids into it (#25).
+
+- Bug: `plan-scope.py snap` writes the accepted step ids (I1..In) to `.state/phase-accepted`, and nothing cleared it. A new plan reuses I1.., so its phase A matched the stale list and counted as accepted: the SessionStart state block said "phase B of 2" and `next:` skipped phase A (`gate.sh`, `state.sh` and `statusline.sh` all read it through `board.py ... info`).
+- Fix: `scripts/plan-archive.sh` removes `.state/phase-accepted` (archive and `--abandon`), next to `plan-offer-pending`. A new plan can also start without archiving the old one, so `skills/teamlead-plan/SKILL.md` tells the model to delete the file in the same step that writes `active-plan` at stage 2, and the cancel and archive descriptions list it. `skills/teamlead/SKILL.md` lists it among the files `plan-archive.sh` removes. Phase hand-offs inside a running plan are untouched (`active-plan` stays set there on purpose).
+- test: archiving a plan removes a present `phase-accepted`.
+
 ## 2.10.5 — 2026-11-14
 
 `map.py --check` no longer reports false `DANGLING ... (anchor missing)` for links to headings that contain an inline code span (#24).

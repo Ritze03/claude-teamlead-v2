@@ -1641,6 +1641,7 @@ DONE='# T\n\n## Done when\n- [x] it works — *verified by: agent*\n'
 printf "$DONE" > $apf
 echo "$apf" > $ap/.claude/teamlead/.state/active-plan
 : > $ap/.claude/teamlead/.state/plan-touched; cp $apf $ap/.claude/teamlead/.state/snap/topic.md
+echo "I1 I2" > $ap/.claude/teamlead/.state/phase-accepted
 : > $ap/.claude/teamlead/.state/plan-offer-pending
 bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap >/dev/null 2>&1
 d=$(date +%Y-%m-%d)
@@ -1649,6 +1650,7 @@ d=$(date +%Y-%m-%d)
 [ -f "$ap/.claude/teamlead/.state/active-plan" ] && bad "  clears active-plan" || ok "  clears active-plan"
 [ -f "$ap/.claude/teamlead/.state/snap/topic.md" ] && bad "  clears the snapshot" || ok "  clears the snapshot"
 [ -f "$ap/.claude/teamlead/.state/plan-offer-pending" ] && bad "  #23 clears plan-offer-pending (no leak into the next plan)" || ok "  #23 clears plan-offer-pending (no leak into the next plan)"
+[ -f "$ap/.claude/teamlead/.state/phase-accepted" ] && bad "  #25 clears phase-accepted (a new plan starts at phase A)" || ok "  #25 clears phase-accepted (a new plan starts at phase A)"
 printf "$DONE" > $apf
 bash "$CLAUDE_PLUGIN_ROOT/scripts/plan-archive.sh" $apf --project $ap >/dev/null 2>&1
 [ -f "$ap/.claude/teamlead/plan/done/$d-topic-2.md" ] && ok "  a same-day second plan does not overwrite" || bad "  same-day collision"
