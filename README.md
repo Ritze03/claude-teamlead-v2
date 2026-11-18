@@ -136,6 +136,9 @@ teamlead — 2 open task(s), 1 worker(s) out
 | `/teamlead brainstorm <agents> <iterations> <topic>` | N thinkers over M rounds, then an Opus verify. |
 | `/teamlead superdoc` | Set up / audit the agent-facing docs in `superdoc/`. |
 | `/teamlead superdoc map` | Print the doc link graph (pages, links in and out) and its findings: dangling links, orphan pages. |
+| `/teamlead statusbar` | Show the configured status line and what it renders. Changes nothing. |
+| `/teamlead statusbar install` | Install teamlead's status line — see [Status line](#status-line-optional). |
+| `/teamlead statusbar uninstall` | Put the status line you had before back. |
 
 ## Dials
 
@@ -174,7 +177,7 @@ then to execution. Your plan of *what*, and its plan of *how*, are separate appr
 ## Status line (optional)
 
 A plugin **cannot** install a main status line — only your `settings.json` can. So this ships
-a segment and leaves the slot alone rather than claiming it:
+a segment, and `/teamlead statusbar install` puts it there when you ask:
 
 ```
 ⚑ teamlead 📄 Planning: recipes-section · stage 3/5 working it out · 2 open
@@ -195,6 +198,18 @@ when something needs you:
 It prints nothing unless teamlead is active in the current project, and resolves a worker's
 worktree back to the main checkout so it reads the same everywhere — including in non-git
 projects, where worktree resolution is skipped rather than fatal.
+
+### Install it
+
+Run `/teamlead statusbar install`. It edits your global `settings.json` (`$CLAUDE_CONFIG_DIR` or
+`~/.claude`) and writes a `settings.json.bak.<timestamp>` backup first. With no status line
+configured it installs teamlead's alone; if you already have one it asks once whether to
+**combine** (keeps yours and adds teamlead's segment next to it, through a combiner script
+`statusline.sh` in the config dir you can add more segments to) or **replace** it. It takes
+effect in new sessions. `/teamlead statusbar` shows what is configured, and
+`/teamlead statusbar uninstall` restores what you had.
+
+### By hand
 
 If you have no status line yet:
 

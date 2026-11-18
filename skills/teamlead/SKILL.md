@@ -544,6 +544,32 @@ does not cover the body.
 | `/teamlead board` | Print `.claude/teamlead/board.md` as plain markdown — the tables and headings as they are in the file, **never inside a code fence**, and without the leading `<!-- GENERATED … -->` comment — so the terminal renders it as a table. |
 | `/teamlead board clean` | Run `board.py clean`. Drops every `merged` row, and with it the `## Done` table and the `### How it was solved` notes. **Ask nothing** — no confirmation, nothing open is touched. Refused (exit 1) in the rare case where cutting the merged rows would leave the board invalid: a merged row can be the middle link of a `blocked_by` chain that is the only reason two open rows may own the same path. |
 | `/teamlead board drop` | Run `board.py drop`. Empties the board entirely, open tasks included. **One `AskUserQuestion` first** — see below. |
+| `/teamlead statusbar install` | Install teamlead's status line into the user's global `settings.json`. Run `install-statusline.sh` yourself, no worker — see **Status line commands** below. |
+| `/teamlead statusbar uninstall` | Run `install-statusline.sh --uninstall`: restore the status line that was configured before, and report. |
+| `/teamlead statusbar` | Run `install-statusline.sh --show`: print the configured status line and what it renders. Changes nothing. |
+
+### Status line commands
+
+All three run `bash "$(cat .claude/teamlead/.state/plugin-root)/scripts/install-statusline.sh" <flag>`
+yourself. **Always pass a flag**: with none the script asks on stdin, which you cannot answer.
+It edits the user's global `settings.json` (`$CLAUDE_CONFIG_DIR` or `~/.claude`), so run it only
+for these explicit commands, never on your own initiative. Each change writes
+`settings.json.bak.<timestamp>` first; the script prints that path.
+
+- **`statusbar`**: run `--show`, print its output. `statusLine: <none>` means nothing is configured.
+- **`statusbar install`**: run `--show` first.
+  - Nothing configured: run `--only`.
+  - Already teamlead's (the command is `hooks/statusline.sh` of the plugin, or the combiner
+    `<config dir>/statusline.sh`): change nothing, say it is already installed. Do not run
+    `--combined` on it, that would list the combiner as a segment of itself.
+  - Someone else's status line: one `AskUserQuestion`, two options, **Combine (Recommended)**
+    keeps theirs and adds teamlead's segment next to it, **Replace** teamlead's alone. Then run
+    `--combined` or `--only`. If `--combined` prints that `statusline.sh` already exists and was
+    not written by the installer, nothing changed: relay the line it asks the user to add.
+  Report what changed, the `backup:` path, and `combiner:` if printed. The script says the new
+  status line takes effect in new sessions: relay that, do not promise it refreshes sooner.
+- **`statusbar uninstall`**: run `--uninstall`, report the `restored:` line (`<none>` means the
+  status line was removed) and the backup path. The combiner file, if any, is left in place.
 
 ### Confirming `board clean` and `board drop`
 
@@ -707,6 +733,9 @@ COMMANDS
   /teamlead brainstorm <n> <r> <t>  n agents over r rounds on topic t, then an Opus verify
   /teamlead superdoc                set up / audit the agent-facing docs in superdoc/
   /teamlead superdoc map            the doc link graph: dangling links, orphans
+  /teamlead statusbar               show the configured status line, change nothing
+  /teamlead statusbar install       add teamlead to your status line (edits ~/.claude/settings.json, backs up first)
+  /teamlead statusbar uninstall     put your previous status line back
 
 DIALS (asked once per project, change anytime; no argument re-opens the picker)
   /teamlead settings               re-open the picker for both dials at once

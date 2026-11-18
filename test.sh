@@ -447,7 +447,7 @@ only_f=$(comm -13 "$T/cs-table" "$T/cs-fence" | tr '\n' ' ')
 # Pin the set itself too, so a command added to BOTH copies still gets looked at here.
 check "the shared set is exactly the commands that exist today" \
   "$(tr '\n' ' ' < "$T/cs-table")" \
-  "/teamlead /teamlead board /teamlead board clean /teamlead board drop /teamlead brainstorm /teamlead effort /teamlead help /teamlead opus /teamlead plan /teamlead plan continue /teamlead settings /teamlead status /teamlead stop /teamlead superdoc /teamlead superdoc map "
+  "/teamlead /teamlead board /teamlead board clean /teamlead board drop /teamlead brainstorm /teamlead effort /teamlead help /teamlead opus /teamlead plan /teamlead plan continue /teamlead settings /teamlead status /teamlead statusbar /teamlead statusbar install /teamlead statusbar uninstall /teamlead stop /teamlead superdoc /teamlead superdoc map "
 # F5: README.md carries a THIRD hand-written copy of the same list (## Commands plus
 # ## Dials) and had no test at all. It is the project's front door, so a command that
 # exists only there — or only not there — is a user-visible lie. Same extractor, same
