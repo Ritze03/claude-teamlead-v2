@@ -4,6 +4,15 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.11.0 — 2026-11-18
+
+`/teamlead statusbar install|uninstall|show` runs the status line installer for the user.
+
+- Feature: `skills/teamlead/SKILL.md` gets three Commands rows, a "Status line commands" section and help-text lines. The lead runs `scripts/install-statusline.sh` itself with a flag (the no-flag form reads stdin, which an agent cannot answer): `--show` first; nothing configured -> `--only`; already teamlead's (hooks segment or the combiner) -> nothing, reported; someone else's -> one `AskUserQuestion`, combine (recommended) or replace, then `--combined` or `--only`. `uninstall` runs `--uninstall`. It edits the global `settings.json` (backup written first), so it only runs for these explicit commands.
+- README: the Commands table lists the three commands and the Status line section leads with `/teamlead statusbar install`; the hand-edit instructions stay under "By hand".
+- No `mode.sh` change: `/teamlead statusbar ...` is already an ordinary `/teamlead <subcommand>` prompt.
+- test: the pinned command set includes the three new commands (SKILL.md table, help fence and README stay in sync).
+
 ## 2.10.6 — 2026-11-14
 
 A new plan starts at phase A: `.state/phase-accepted` no longer carries the previous plan's step ids into it (#25).
