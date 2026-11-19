@@ -4,6 +4,18 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.12.0 — 2026-11-19
+
+A refused worker hand-back no longer loses the report (#26). Four plan-mode fixes: the snapshot and lint now run from a hook, the user's plan edits are picked up without the watcher, the Go footer is shown only when the plan changed, and the lead's readings of a decision get their own marker (#27–#30).
+
+- Fix (#26): when the harness refuses a worker's `SubagentHandback` (for example "Only the auto-mode classifier can allow SubagentHandback"), the lead no longer ends up with a `returned` row and no report. `record.sh` saves the worker's final plain-text message, or else the refused call's own message, to `.claude/teamlead/.state/reports/<agent-id>.md` and logs `return … handback=refused`. A hand-back that does get through clears any stale report file for that agent id.
+- The Stop gate (check 7) and the session-start state block now name the report path for those rows instead of the generic "check what came back". `board.py status` shows it too, and a new read-only `board.py refused` command lists each such row with its path. `tl-*` agents retry a refused hand-back at most once, then put the full report in their final message. The teamlead skill ("Close out every worker") and `docs/enforcement.md` describe how to recover.
+- Plan mode (#27): new `hooks/plan-post.sh` PostToolUse hook (`Edit|Write|MultiEdit`). After each of the lead's edits to the active plan it refreshes `.state/snap/<file>` and runs `plan-lint`. It returns lint failures as hook context and stays silent when lint passes. The lead no longer copies the snapshot by hand after each write, and the watcher no longer reports the lead's own multi-edit folds as user edits.
+- Plan mode (#28): `mode.sh` diffs the active plan against its snapshot on every prompt, adds the diff and any lint failures to the turn, and then refreshes the snapshot. A user's edits to the plan file now reach the lead even when no watcher is running. When the Monitor expires, the lead re-arms the watcher only if that window delivered an event or the user wrote since. Otherwise the watcher stays off, and on the user's next message `mode.sh` says to restart it (stages 2–4 and 7, not on a Go).
+- Plan mode (#29): `gate.sh` demands the fixed Go footer only on turns where the plan file or its stage changed since the previous Stop (tracked in `.state/plan-footer`). Watcher re-arms, notification turns and side questions no longer need it.
+- Plan mode (#30): the lead's interpretation of a user decision goes in its own marker, `— *user: "…"* · *lead's reading (unconfirmed): …*`, which becomes `(confirmed)` once the user confirms. `plan-lint` accepts the marker, flags one with no status, and from stage 4 refuses unconfirmed readings the same way it refuses unanswered open questions. At the first Go the context audit lists them. `docs/example-plan.md` and `docs/plan.md` are updated.
+- test: 1801 checks.
+
 ## 2.11.0 — 2026-11-18
 
 `/teamlead statusbar install|uninstall|show` runs the status line installer for the user.
