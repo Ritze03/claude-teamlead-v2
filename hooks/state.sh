@@ -103,7 +103,7 @@ if [ -f "$d/.state/active-plan" ]; then
           else
             root=$(cat "$d/.state/plugin-root" 2>/dev/null)
             [ -n "$root" ] || root="$(dirname "$0")/.."
-            echo "  watcher: NOT running — restart it: $root/hooks/watch-plan.sh \"$proj\" \"$pf\"  (Monitor tool, timeout 1800000, then write the task id to .state/plan-watch)"
+            echo "  watcher: NOT running — restart it: $root/hooks/watch-plan.sh \"$proj\" \"$pf\"  (Monitor tool, timeout 1800000, then write the task id to .state/plan-watch). An empty Monitor expiry is not re-armed; the user's next message restarts it, and the session start is one"
           fi
           ;;
         *) echo "  watcher: off (stages 5-6)" ;;

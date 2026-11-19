@@ -60,6 +60,42 @@ fi
 tl_pin_root
 tl_ensure_gitignore
 
+# GH#28: edits the user made to the plan file since the lead last saw it. The
+# snapshot is refreshed by plan-post.sh after the lead's own edits and by the watcher
+# after it reports one, so any difference here is the user's. Handing it over with
+# the prompt means a file edit made just before typing in chat reaches the lead with
+# no Monitor running at all; the snapshot is then refreshed so nothing reports it twice.
+plan_active=""; plan_cur=""
+if [ -f "$TL_STATE/active-plan" ]; then
+  plan_active=$(cat "$TL_STATE/active-plan" 2>/dev/null)
+  if [ -n "$plan_active" ] && [ -f "$plan_active" ]; then
+    plan_cur=$(grep -m1 -oiE '^> \*\*stage [0-9]+\*\*' "$plan_active" | grep -oE '[0-9]+')
+    snap="$TL_STATE/snap/$(basename "$plan_active")"
+    if [ ! -f "$snap" ]; then
+      mkdir -p "$TL_STATE/snap"; cp "$plan_active" "$snap"      # no baseline yet: nothing to diff against
+    elif ! cmp -s "$plan_active" "$snap"; then
+      : > "$TL_STATE/plan-touched"                             # same meaning as in watch-plan.sh
+      echo "[teamlead] The plan file changed on disk since you last saw it (your own edits are already excluded), so these are the user's edits:"
+      diff -u "$snap" "$plan_active" | tail -n +3 | head -60
+      "$HERE/plan-lint.sh" "$plan_active" 2>&1 | grep -v '^plan-lint: ok$'
+      cp "$plan_active" "$snap"
+    fi
+  fi
+fi
+
+# GH#28: the watcher is not re-armed on an empty Monitor expiry (skills/teamlead-plan,
+# "The watcher follows who has control"); the user's next message is what restarts it.
+# Not on a Go: the lead hands the watcher over deliberately around both Gos.
+case "$plan_cur" in
+  2|3|4|7)
+    if [ "$p" != "go" ] && command -v inotifywait >/dev/null 2>&1; then
+      pidf="$TL_STATE/plan-watch.pid"
+      if ! { [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; }; then
+        echo "[teamlead] Plan watcher is not running — start it now: $(cat "$TL_STATE/plugin-root" 2>/dev/null)/hooks/watch-plan.sh \"$TL_PROJECT\" \"$plan_active\" (Monitor tool, timeout_ms 1800000, then write the task id to .state/plan-watch)"
+      fi
+    fi ;;
+esac
+
 # D16: record "Go" against the active plan's current stage. Other hooks
 # (plan-fence.sh, gate.sh, state.sh) read $TL_STATE/plan-go for this exact
 # "<stage> <ISO-8601 UTC timestamp>" line format — do not change the shape.
