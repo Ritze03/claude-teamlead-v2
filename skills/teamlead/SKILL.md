@@ -142,6 +142,15 @@ If the merge or the cleanup is refused by the permission layer (auto mode), foll
 *Merging and cleanup under auto mode* below: say the review evidence, then stop and
 offer the allow rule if it still refuses.
 
+**A `returned` row whose report never came** (the harness refused the worker's
+`SubagentHandback`, e.g. "Only the auto-mode classifier can allow SubagentHandback":
+`events.log` shows `return … handback=refused`, `board.py status` prints "hand-back
+refused: the report is at …", and the Stop gate and the session-start state block say
+the same) is not lost: the hook saved the worker's final plain-text message (else the
+refused call's own message) to `.claude/teamlead/.state/reports/<agent-id>.md`. Read
+that file — not the worker's `.output` transcript — and triage the row as usual. Or
+`SendMessage` the worker to resend its report. (`board.py refused` lists row and path.)
+
 **A row stuck at `running` because the worker paused on its own background job**
 (`events.log` shows `pause`, `board.py status` still lists the worker as working,
 no report ever came) is not a reason to wait: if the branch shows the work is done,

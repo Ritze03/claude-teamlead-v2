@@ -348,6 +348,13 @@ fi
 # 7. Tasks stuck in 'returned' — the triage step got skipped.
 if [ -f "$TL_STATE/board.json" ]; then
   nret=$(tl_state_count returned)
+  # GH#26: rows whose hand-back the harness refused: the lead never got that report.
+  refused=$(python3 "${CLAUDE_PLUGIN_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}/scripts/board.py" refused --project "$TL_PROJECT" 2>/dev/null) || refused=""
+  if [ -n "$refused" ]; then
+    nref=$(printf '%s\n' "$refused" | wc -l | tr -d ' ')
+    nret=$((nret - nref))
+    problems+=$'\n'"- the hand-back was refused for $nref returned task(s), so you never received the report (nothing to act on until you read it):"$'\n'"$(printf '%s\n' "$refused" | sed 's/^\([0-9]*\) \(.*\)$/    row \1: the report is at \2/')"$'\n'"  Read that file, or SendMessage the worker to resend it."
+  fi
   [ "$nret" -gt 0 ] && problems+=$'\n'"- $nret task(s) are in 'returned' — check what came back and move each to 'merged' (with notes on how it was solved) or back to 'queued'. Waiting on the user's decision instead? Set it to 'blocked' with a note saying what you are waiting for (blocked rows are not flagged here); if it keeps a worktree, board.py hold it too"
 fi
 

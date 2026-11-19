@@ -10,8 +10,8 @@ Two front ends over the same core:
   MCP   board.py --mcp                (the agent, as tool calls)
 
 Commands: add, update, remove, list, status, check, render, clean, drop,
-          forget, hold, release, held, held-noted, ledger, worker-start, worker-stop.
-  Read-only: list, status, check, held, ledger.  Everything else writes and goes
+          forget, hold, release, held, held-noted, ledger, refused, worker-start, worker-stop.
+  Read-only: list, status, check, held, ledger, refused.  Everything else writes and goes
   through _cli_write_project: refused for a worker (cwd in an agent worktree of
   the project whose board it is) and for a blank/valueless --project.
 
@@ -1129,6 +1129,20 @@ def summary(db):
             "tasks": live}
 
 
+def refused_reports(db, project=None) -> dict:
+    """GH#26: {row id: report path} for 'returned' rows whose worker's SubagentHandback was
+    refused by the harness. record.sh saved that worker's report to
+    .state/reports/<agent-id>.md (and removes it again on a delivered hand-back), so the file
+    existing is the whole link between a row and its missing report."""
+    out = {}
+    for t in db["tasks"]:
+        w = re.sub(r"[^A-Za-z0-9_-]", "", t.get("worker") or "")
+        f = root(project) / ".state" / "reports" / f"{w}.md"
+        if t["state"] == "returned" and w and f.is_file():
+            out[t["id"]] = str(f)
+    return out
+
+
 # ---- ledger -----------------------------------------------------------------
 
 # Only for workers that started and never stopped at all — a killed or crashed
@@ -1424,6 +1438,8 @@ def main(argv):
         for t in live:
             b = f" [{t['branch']}]" if t.get("branch") else ""
             print(f"  #{t['id']:<3} {t['state']:<9} {t['task'][:64]}{b}")
+        for rid, path in refused_reports(db, proj).items():
+            print(f"  #{rid} hand-back refused: the report is at {path}")
         if lg["outstanding"]:
             print("  workers still working: " +
                   ", ".join(f"{a} ({lg['agents'].get(a, '?')})" for a in lg["outstanding"]))
@@ -1462,6 +1478,9 @@ def main(argv):
         print(json.dumps(mutate(op_held_noted, project=proj, id=rid)))
     elif cmd == "held":                         # for the Stop gate: {worktree: {row, reason, lapsed, ...}}
         print(json.dumps(held_worktrees(load(proj))))
+    elif cmd == "refused":                      # for the Stop gate / state.sh: one "<row> <path>" per line
+        for rid, path in refused_reports(load(proj), proj).items():
+            print(rid, path)
     elif cmd == "ledger":
         print(json.dumps(ledger(proj), indent=2))
     elif cmd == "forget":

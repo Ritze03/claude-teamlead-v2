@@ -4453,6 +4453,43 @@ check "harness without SubagentHandback (never named): final, row 2 -> returned"
 ev "$(TSTOP tw3 $T/nope.jsonl done)" "$H/record.sh" >/dev/null
 grep -q '  return    agent=teamlead:tl-sonnet-low  id=tw3' $LT && ok "unreadable transcript: final, return line written" || bad "unreadable transcript: final, return line written"
 
+echo "== GH#26: a refused SubagentHandback leaves the report in .state/reports and says so =="
+rp=$T/gh26; mkdir -p "$rp/.claude/teamlead/.state"; : > "$rp/.claude/teamlead/.state/active"
+git -C "$rp" init -q; git -C "$rp" config user.email t@t.t; git -C "$rp" config user.name t
+echo a > "$rp/a"; git -C "$rp" add a; git -C "$rp" commit -qm init
+python3 "$B" add --project $rp --task "scout A" --agent tl-sonnet-low --owns g26/a >/dev/null   # id 1
+python3 "$B" add --project $rp --task "scout B" --agent tl-sonnet-low --owns g26/b >/dev/null   # id 2
+RL=$rp/.claude/teamlead/.state/events.log; RPD=$rp/.claude/teamlead/.state/reports
+RGATE='{"hook_event_name":"Stop","cwd":"'$rp'","stop_hook_active":false}'
+GREM='{"type":"user","message":{"role":"user","content":"<system-reminder>\nYour final report is delivered through SubagentHandback: call it when done.\n</system-reminder>"}}'
+GHB_TU='{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"h1","name":"SubagentHandback","input":{"message":"REPORT-FROM-CALL"}}]}}'
+GHB_ERR='{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"h1","is_error":true,"content":"Only the auto-mode classifier can allow SubagentHandback: the session is not in auto mode"}]}}'
+GHB_OK='{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"h1","content":"{\"success\":true}"}]}}'
+printf '%s\n' "$GREM" "$GHB_TU" "$GHB_ERR" > $T/g26-refused.jsonl
+printf '%s\n' "$GREM" "$GHB_TU" "$GHB_OK" > $T/g26-ok.jsonl
+GSTOP(){ jq -n --arg cwd "$rp" --arg id "$1" --arg tp "$2" --arg m "$3" '{hook_event_name:"SubagentStop",cwd:$cwd,agent_type:"teamlead:tl-sonnet-low",agent_id:$id,agent_transcript_path:$tp,last_assistant_message:$m}'; }
+for n in 1 2; do
+  ev '{"hook_event_name":"PostToolUse","cwd":"'$rp'","tool_name":"Agent","tool_input":{"subagent_type":"teamlead:tl-sonnet-low","description":"s","prompt":"x\nboard: '$n'"},"tool_response":{"agentId":"gw'$n'"}}' "$H/record.sh" >/dev/null
+  ev '{"hook_event_name":"SubagentStart","cwd":"'$rp'","agent_type":"teamlead:tl-sonnet-low","agent_id":"gw'$n'"}' "$H/record.sh" >/dev/null
+done
+check "refused hand-back stop: exit 0" "$(ev "$(GSTOP gw2 $T/g26-refused.jsonl $'Plain text report.\nSecond line.')" "$H/record.sh")" 0
+check "  the report file holds the worker's last message" "$(cat $RPD/gw2.md 2>/dev/null)" $'Plain text report.\nSecond line.'
+grep -qE '  return    agent=teamlead:tl-sonnet-low  id=gw2  handback=refused  msg=Plain text report\. Second line\.' $RL && ok "  events.log return line carries handback=refused" || bad "  events.log return line carries handback=refused"
+check "  row 2 -> returned" "$(python3 "$B" list --project $rp | python3 -c "import json,sys;print(json.load(sys.stdin)['by_state'])")" "{'returned': [2], 'running': [1]}"
+check "  board.py refused names row and path" "$(python3 "$B" refused --project $rp)" "2 $RPD/gw2.md"
+python3 "$B" status --project $rp | grep -q "#2 hand-back refused: the report is at $RPD/gw2.md" && ok "  board.py status shows it" || bad "  board.py status shows it"
+ev "$RGATE" "$H/gate.sh" >/dev/null
+grep -q "the hand-back was refused for 1 returned task(s)" $T/out && grep -q "row 2: the report is at $RPD/gw2.md" $T/out && ok "  gate names the report path" || bad "  gate names the report path ($(cat $T/out))"
+grep -q "task(s) are in 'returned' — check what came back" $T/out && bad "  gate drops the generic text for that row" || ok "  gate drops the generic text for that row"
+bash "$H/state.sh" "$rp" | grep -q "row 2: the hand-back was refused; the report is at $RPD/gw2.md" && ok "  state block names the report path" || bad "  state block names the report path"
+ev "$(GSTOP gw3 $T/g26-refused.jsonl '')" "$H/record.sh" >/dev/null
+check "refused call, empty final message: falls back to the call's input.message" "$(cat $RPD/gw3.md 2>/dev/null)" "REPORT-FROM-CALL"
+check "delivered hand-back stop: exit 0" "$(ev "$(GSTOP gw1 $T/g26-ok.jsonl 'Handed back.')" "$H/record.sh")" 0
+check "  no report file" "$([ -e $RPD/gw1.md ] && echo yes || echo no)" no
+grep -q '  return    agent=teamlead:tl-sonnet-low  id=gw1  msg=Handed back\.' $RL && ok "  its return line has no handback= marker" || bad "  its return line has no handback= marker"
+ev "$RGATE" "$H/gate.sh" >/dev/null
+check "  row 1 -> returned: the generic text now covers it alone" "$(grep -c "1 task(s) are in 'returned' — check what came back" $T/out)" 1
+
 echo "== #4/#9: a worktree kept on purpose is held, not re-flagged every turn =="
 # The flaw class: check 3 cannot tell "kept on purpose" from "forgotten", so it fires
 # every turn on a correct state. `board.py hold` is the acknowledgement; it lapses on
