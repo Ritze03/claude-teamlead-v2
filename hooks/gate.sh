@@ -9,7 +9,7 @@
 #   3. worktrees    — work left behind by a worker that has FINISHED
 #   3b. plan-stage  — header stage vs. last-accepted (D2): catches a plan-file
 #                      write that bypassed plan-fence.sh entirely (F1)
-#   4. plan footer  — during planning (stage <=4), the turn must end on the fixed line
+#   4. plan footer  — during planning (stage <=4), a turn that changed the plan (or the stage) must end on the fixed line
 #   4b. no /clear offer — stage 4: the fresh-context offer waits for the recorded Go
 #   5. plan-lint    — stage 4: the implementation plan itself must pass lint
 #   6. stage 5->6   — every step of the current phase boarded + merged, header never bumped
@@ -230,8 +230,22 @@ if [ -n "$plan_stage" ] && [ "$plan_stage" -ge 1 ] && [ "$plan_stage" -le 4 ]; t
   else
     footer='Type "Go" if you want me to plan the implementation.'
   fi
+  # GH#29: the footer is the Go command staying visible while the plan moves. A turn
+  # that did not move it (a watcher re-arm, a notification, a side question) owes none.
+  # "Moved" = the plan's hash or stage differs from what the previous Stop recorded in
+  # .state/plan-footer ("<stage> <md5>"). Read at Stop, not at UserPromptSubmit: a
+  # notification-triggered turn runs no UserPromptSubmit, but every turn ends at Stop.
+  # Recorded whether or not the footer passed, so a blocked turn is not owed twice; a
+  # stage change always changes the file, the stage field covers a lost/other hash.
+  # No record yet counts as changed.
+  pf_hash=$(md5sum < "$plan_file" 2>/dev/null | cut -c1-32)
+  pf_stage=""; pf_md5=""
+  [ -f "$TL_STATE/plan-footer" ] && read -r pf_stage pf_md5 < "$TL_STATE/plan-footer" 2>/dev/null
+  need_footer=1
+  [ "$pf_stage" = "$plan_stage" ] && [ "$pf_md5" = "$pf_hash" ] && need_footer=""
+  printf '%s %s\n' "$plan_stage" "$pf_hash" > "$TL_STATE/plan-footer" 2>/dev/null
   tp=$(tl_json .transcript_path)
-  if [ -n "$tp" ] && [ -f "$tp" ]; then
+  if [ -n "$need_footer" ] && [ -n "$tp" ] && [ -f "$tp" ]; then
     last_line=$(python3 - "$tp" <<'PYEOF' 2>/dev/null
 import json, sys
 path = sys.argv[1]

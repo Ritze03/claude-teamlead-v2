@@ -39,7 +39,8 @@ the two would block both.
   second release once we see real usage.*
 
 - **D8** Exceeding the limit throttles, never hard-blocks — *a hard block turns a
-  burst into an outage for a paying customer.*
+  burst into an outage for a paying customer.* — *user: "don't cut paying customers off"* ·
+  *lead's reading (confirmed): a 429 with `Retry-After`, never a hard block.* *(illustration — the reading marker keeps the user's words and the lead's interpretation apart; it reads `(unconfirmed)` until the user confirms, and the plan cannot reach Stage 4 with one unconfirmed.)*
 
 - **D9** Cache is keyed per-user — *the data is already keyed by user id.* *(illustration —
   see the answer loop under ### Answered.)*

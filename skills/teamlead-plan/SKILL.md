@@ -132,7 +132,7 @@ you do not ask whether to start. Banned:
   for the word "go" and logs it to `.state/plan-go`; a "Go" typed into the file is
   never seen by that hook.
 
-Instead, end every planning turn with one **fixed** line, set off from the body:
+Instead, end every turn that changes the plan (and the first one after a stage change) with one **fixed** line, set off from the body:
 
 - Stages 1–3: `Type "Go" if you want me to plan the implementation.`
 - Stage 4 only: `Type "Go" if you want me to start implementing.`
@@ -141,9 +141,17 @@ Instead, end every planning turn with one **fixed** line, set off from the body:
 *"Type Go, I think we're about there"* — it becomes the banned question again.
 A static line is not you judging readiness; it is the command staying visible.
 
-**`gate.sh` checks it.** It reads the transcript at Stop; at stages 1–4, a turn
-whose last line is not this exact text is blocked. That is the other reason it
-is byte-exact — a paraphrase reads fine to a person and fails a string compare.
+**`gate.sh` checks it, on turns that moved the plan.** It reads the transcript at
+Stop; at stages 1–4, a turn that **changed the plan file** — or is the first one
+after a stage change — and whose last line is not this exact text is blocked. The gate
+compares the plan's hash and stage with what the previous Stop recorded
+(`.state/plan-footer`). A turn that changed nothing owes no footer: a
+watcher re-arm or empty expiry, a subagent or monitor notification you only
+acknowledge, a side question about something else. Leave it off there (GH#29). The
+rule is about the plan, not about who started the turn: a user edit in the file that
+reaches you and that you fold in is a plan change, so that turn is footered. When
+the footer is owed it is byte-exact — a paraphrase reads fine to a person and
+fails a string compare.
 
 ## Stage 3 opens with a scout
 
@@ -206,8 +214,13 @@ their work.
   never reword a line; the only edit you make is removing a note once it is folded
   into a Decision (see *Everything ends up in Decisions*). `plan-fence.sh` refuses
   any add or reword there outright; removing a folded note still goes through.
-- After every write of yours, refresh the snapshot so the watcher stays quiet:
-  `cp <plan> <project>/.claude/teamlead/.state/snap/<file>`
+- **You do not refresh the snapshot or run the linter by hand.** `plan-post.sh` (a
+  PostToolUse hook on `Edit|Write|MultiEdit`) does both inside the tool call that wrote
+  the plan: it copies the file to `.state/snap/<file>`, so the watcher and the
+  next-prompt diff stay quiet about your own edit, and runs `plan-lint`, handing
+  failures back as context right after the write (silent when clean). A multi-`Edit`
+  fold can show a failure that the next `Edit` fixes; read the last one. Only
+  an edit made through the file tools counts; one made through shell does neither.
 - If the file changed since you last read it, they edited it — **merge first**.
   The watcher is convenience; this check is correctness.
 - **Collapse blank runs after every write.** Striking a question into
@@ -233,8 +246,8 @@ new plan reuses I1.., so a stale file makes phase A look accepted (the state blo
 
 **Start the watcher at stage 2** with the **Monitor** tool. Monitor is usually a
 *deferred* tool — `ToolSearch("select:Monitor")` first, or the call will fail. Give
-it the longest `timeout_ms` allowed (1800000) and re-arm on expiry; there is no
-`persistent` parameter:
+it the longest `timeout_ms` allowed (1800000); there is no `persistent` parameter,
+and **re-arming on expiry is conditional** (below):
 
 ```
 $(cat .claude/teamlead/.state/plugin-root)/hooks/watch-plan.sh "$PWD" <plan-file>
@@ -249,6 +262,16 @@ Starting it while one is already running is safe: the script kills the previous
 watcher itself, so there is never more than one instance. That is also how you
 re-arm it — the Monitor tool expires after ~30 minutes, and re-arming is just
 starting `watch-plan.sh` again.
+
+**Re-arm on expiry only if the expired window delivered at least one event, or the
+user has sent a message since it started.** Otherwise leave it off: an expiry wake-up
+with nothing in it is a whole turn spent saying "re-armed", repeated every 30 minutes
+while the user is away (GH#28). End that turn quietly and do not re-arm. The user's
+next message restarts it: `mode.sh` injects the plan file's diff since the snapshot
+into that turn (their edits reach you with no watcher at all), and prints a line
+when the watcher is not running at stage 2–4 or 7. Start it then, as above. A turn
+that only handled an expiry changed nothing in the plan, so it owes no footer
+(*Never assume planning is finished*).
 
 **Record the Monitor's task id** to `.claude/teamlead/.state/plan-watch` as soon as
 you start it, so you can still stop it after a compaction has wiped your memory of
@@ -274,8 +297,8 @@ So hand the watcher back and forth with control:
 | Header set to **7**, user list handed over | **start** it, record the id — the user ticks their `verified by: user` boxes in the file, and this is how you see it |
 | Findings, header back to **5** | **TaskStop** it, delete `.state/plan-watch` — you are building again |
 
-At stage 7 your own writes are small (the header bump back to 5), so the usual
-refresh-the-snapshot-after-every-write rule keeps it quiet. Archiving stops it.
+At stage 7 your own writes are small (the header bump back to 5), and `plan-post.sh`
+refreshes the snapshot after each one, so it stays quiet. Archiving stops it.
 
 Stop it on leaving plan mode by any other route too; a monitor otherwise outlives
 the mode.
@@ -307,7 +330,7 @@ Constraints, what exists, what must not break. Scout findings land here.
 ## Decisions
 - **D1** The call — *why, in one line.*
 
-- **D2** The next call — *why, in one line.*
+- **D2** The next call — *why, in one line.* — *user: "their words"* · *lead's reading (unconfirmed): what I took that to mean*
 
 ## Done when
 - [ ] A concrete, checkable condition — *verified by: agent* (`pytest -q` passes)
@@ -348,6 +371,22 @@ Initial brainstorm [y/n]:
 
 One blank line between entries in `## Decisions` and `## Open questions` — never
 two (`plan-lint` flags 2+ consecutive blank lines). `### Answered` stays tight.
+
+**A decision is the user's call; your reading of it is not.** When the user's words
+leave the scope open and you have to interpret them, do not fold the interpretation
+into the decision text as if they had said it (the observed `(read as: …)` clause).
+Keep their words and your reading apart, in the decision line itself:
+
+```markdown
+- **D5** Keep the current architecture — *cheapest path.* — *user: "keep the current architecture"* · *lead's reading (unconfirmed): nothing carried over between runs either*
+```
+
+State the reading in chat too, so they can object. Once the user confirms it, change
+the marker to `*lead's reading (confirmed): …*` (or fold it into the decision text);
+if they correct it, rewrite the reading and keep it unconfirmed until they confirm that.
+`plan-lint` recognises the marker, flags one with no `(unconfirmed)` / `(confirmed)`
+status, and, like an open question, refuses unconfirmed ones from stage 4 on. After a
+compaction or `/clear` the marker is what tells the next session whose words are whose.
 
 **`## Notes from me` is created empty** (theirs to write; you only ever remove a
 line once it is folded into a Decision), and **the file always ends with exactly
@@ -495,6 +534,14 @@ head is about to be silently dropped.
   `## Goal` / `## Context` where it belongs), resolving it on your own judgement
   wherever the answer follows from what is settled, the code, or a sensible default.
   Numbering follows *Everything ends up in Decisions* — continue the sequence.
+- **Unconfirmed readings are handled like open questions.** Every
+  `*lead's reading (unconfirmed): …*` in `## Decisions` (*A decision is the user's
+  call*, above) is listed in the audit, one line each, and the user is asked to
+  confirm or correct each of them **before the implementation plan is written**. As
+  with a real question, **stay at Stage 3** with the Stage 1–3 footer and ask them
+  to confirm or correct, so that the next Go finds them confirmed. A confirmed
+  reading becomes `(confirmed)`; a correction is rewritten and asked again.
+  `plan-lint` refuses stage 4 while any is left.
 - **Ask only when you must** — only if a forgotten item raises a question that is
   truly theirs (taste, priorities, a fork the code and existing decisions cannot
   settle). Follow *Never ask a bare question*, give it a new number in
@@ -737,21 +784,25 @@ apply the usual re-read-before-write rule. A note you cannot fold yet stays put 
 becomes an open question instead.
 
 **Definition of done for the plan:** `Open questions` holds nothing unanswered,
-`Notes from me` is empty, `Goal` is not `TBD`, and every decision is referenced by
-an implementation step. `plan-lint` enforces all four at stage 4 — a plan that
+`Notes from me` is empty, `Goal` is not `TBD`, no lead's reading is left
+unconfirmed, and every decision is referenced by an implementation step. `plan-lint`
+enforces all of these at stage 4 — a plan that
 still has an inbox is not finished being planned.
 
 ## Lint before offering Go
 
-Run after every write, and always before the stage-4 footer:
+`plan-post.sh` runs it after every `Edit`/`Write` of the plan (*Sharing the file with
+the user*), so you do not run it per write. Before the stage-4 footer the last write's
+lint must have been clean; if you are not sure, or the plan changed some other way,
+run it by hand:
 
 ```
 $(cat .claude/teamlead/.state/plugin-root)/hooks/plan-lint.sh <plan-file>
 ```
 
 It checks section order, dependency waves, `Owns` overlap, agent tiers, decisions
-with no step, un-promoted `> me:` answers, stray `TBD`s at stage 4, and the
-staleness stamp. **Re-stamp whenever the Decisions section changes** — planning is
+with no step, un-promoted `> me:` answers, stray `TBD`s at stage 4, unconfirmed
+lead's readings at stage 4, and the staleness stamp. **Re-stamp whenever the Decisions section changes** — planning is
 not linear, and a stage-4 plan that predates a new decision keeps looking
 authoritative while the ground under it has moved.
 

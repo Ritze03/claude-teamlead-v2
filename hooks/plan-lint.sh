@@ -12,7 +12,7 @@ add() { fail+="  - $1"$'\n'; }
 # 1. sections present, in order  (checks are numbered as in the skill: 1 sections,
 # 2 dependency waves, 3 Owns overlap, 4 agent tier, 5 decisions covered,
 # 6 unpromoted answers, 7 placeholder marker at stage 4, 8 staleness stamp,
-# 9 bare open questions, 10 stable open-question numbers)
+# 9 bare open questions, 10 stable open-question numbers, 11 the lead's reading of a decision)
 # 'Done when' and 'Implementation plan' are both written at stage 4, from the same
 # settled decisions, so before then they are simply absent. Both land ABOVE the two
 # inboxes: 'Open questions' and 'Notes from me' are the user's half of the file and
@@ -216,6 +216,20 @@ if [ -n "$open_nums" ]; then
       fi
     fi
   fi
+fi
+
+# 11. the lead's reading of a user decision (GH#30). A decision may carry
+# `— *user: "…"* · *lead's reading (unconfirmed): …*`, which becomes `(confirmed)`
+# once the user confirms. Scope is '## Decisions'; a wrapped line is joined first.
+# A marker with no status is malformed at every stage; an unconfirmed one is, like an
+# open question, fine while planning and refused from stage 4 (see check 7).
+dec_flat=$(awk '/^## Decisions/{o=1;next} /^## /{o=0} o' "$f" | tr '\n' ' ')
+rd_all=$(grep -oE "lead['’]s reading" <<<"$dec_flat" | grep -c .) || rd_all=0
+rd_ok=$(grep -oE "lead['’]s reading \((un)?confirmed\)" <<<"$dec_flat" | grep -c .) || rd_ok=0
+[ "$rd_all" -gt "$rd_ok" ] && add "$((rd_all - rd_ok)) decision reading(s) have no status — write *lead's reading (unconfirmed): …* (or *(confirmed)* once the user has confirmed it)"
+if [ -n "${st:-}" ] && [ "$st" -ge 4 ]; then
+  rd_un=$(grep -oE "lead['’]s reading \(unconfirmed\)" <<<"$dec_flat" | grep -c .) || rd_un=0
+  [ "$rd_un" -gt 0 ] && add "stage $st reached with $rd_un unconfirmed lead reading(s) in Decisions — ask the user to confirm or correct each, then mark it (confirmed) or fold it into the decision text"
 fi
 
 # 8. staleness — the implementation plan must be stamped with the decisions it was built from

@@ -1358,3 +1358,33 @@ have silently stopped applying the moment the header ticked to 5. They now run a
 unticked boxes (§18's mechanism), which is what makes stage 7 un-skippable: there is no
 path from "implemented" to "archived" that does not pass through the user's own checks.
 
+
+## 20. Less bookkeeping in plan mode (GH#27–#30) — 2026-11-19
+
+Four changes from one long planning session, each removing a duty the lead did by hand or a
+turn that carried no content.
+
+- **Snapshot and lint in the tool call (#27).** `hooks/plan-post.sh`, a PostToolUse hook on
+  `Edit|Write|MultiEdit`, acts when the edited file is the active plan and the caller is the
+  lead (no `agent_id`): it copies the plan to `.state/snap/<file>` and runs `plan-lint.sh`,
+  returning failures as `additionalContext` and staying silent on `plan-lint: ok`. The watcher's
+  2 s settle delay is enough now, because the snapshot is refreshed by the same call that wrote
+  the file. The skill no longer asks for a `cp` or a lint per write.
+- **The user's edits reach the lead without a Monitor (#28a).** `mode.sh` diffs the plan against
+  its snapshot on every prompt; a difference is the user's (the lead's own edits refresh the
+  snapshot), so the diff is injected and the snapshot refreshed.
+- **No empty re-arm turns (#28b).** On Monitor expiry the lead re-arms only if the window
+  delivered an event or the user has written since it started. Otherwise the watcher stays off;
+  `mode.sh` prints a "watcher is not running" line on the user's next message (stages 2–4 and 7,
+  not on a Go) and the lead starts it then.
+- **The footer follows the plan (#29).** `gate.sh` demands the fixed Go footer only on a turn
+  that changed the plan file or its stage since the previous Stop (`.state/plan-footer`,
+  `<stage> <md5>`, written at every Stop at stages 1–4). Watcher re-arms, notification turns and
+  side questions that touch nothing owe none. Read at Stop, not at UserPromptSubmit, because a
+  notification-triggered turn runs no UserPromptSubmit.
+- **The lead's reading of a decision (#30).** A decision whose words left scope open carries
+  `— *user: "…"* · *lead's reading (unconfirmed): …*`, set to `(confirmed)` once the user
+  confirms. The first Go treats unconfirmed readings like open questions: they are listed in the
+  context audit and confirmed or corrected before the implementation plan is written, and
+  `plan-lint` refuses them from stage 4 on (and refuses a reading marker with no status at any
+  stage).

@@ -2784,6 +2784,7 @@ check "stage 3, footer present: exit 0" \
   "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false,"transcript_path":"'$gttx1'"}')" 0
 
 gttx2=$gtp/tx2.jsonl; gtmktx "$gttx2" $'body\n\nType "Go" if you want me to start implementing.'
+rm -f $gtp/.claude/teamlead/.state/plan-footer   # GH#29: an unchanged plan owes no footer, so make this a fresh turn
 check "stage 3, last line is the stage-4 footer instead: exit 2" \
   "$(gtev '{"hook_event_name":"Stop","cwd":"'$gtp'","stop_hook_active":false,"transcript_path":"'$gttx2'"}')" 2
 grep -q 'Type "Go" if you want me to plan the implementation.' "$T/gtout" && ok "  names the stage-3 footer it wanted" || bad "  names the wanted footer"
@@ -4978,6 +4979,114 @@ check "gate map: the DANGLING output is capped at 40 lines, with how many more" 
 sgstop $GM >/dev/null
 sgmerge $GM bmp4 superdoc/features/ok.md '# Ok\n[c](c.md)\n' superdoc/README.md '# I\n[c](features/c.md)\n[m](features/many.md)\n[ok](features/ok.md)\n'
 check "gate map: a merge with no dangling link is silent" "$(sgstop $GM)/$(cat $T/sgout | wc -c | tr -d ' ')" "0/0"
+
+echo "== plan-post.sh: the lead's edit of the active plan refreshes the snapshot and lints it (GH#27) =="
+ppp=$T/ppost; mkdir -p $ppp/.claude/teamlead/.state/snap $ppp/.claude/teamlead/plan
+: > $ppp/.claude/teamlead/.state/active
+ppf=$ppp/.claude/teamlead/plan/topic.md; pps=$ppp/.claude/teamlead/.state/snap/topic.md
+echo "$ppf" > $ppp/.claude/teamlead/.state/active-plan
+PPOK='# T\n\n> **Stage 3** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** a — *w.*\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n'
+ppev(){ jq -n --arg c "$ppp" --arg f "$1" --arg a "${2:-}" --arg t "${3:-Edit}" \
+  '{hook_event_name:"PostToolUse",cwd:$c,tool_name:$t,tool_input:{file_path:$f}} + (if $a=="" then {} else {agent_id:$a} end)' | "$H/plan-post.sh"; }
+printf "$PPOK" > $ppf; printf 'stale\n' > $pps
+out=$(ppev $ppf)
+check "lead edit of the active plan: snapshot now equals the plan" "$(cmp -s $ppf $pps && echo same || echo differ)" same
+check "  a clean plan prints nothing (plan-lint: ok stays silent)" "$out" ""
+printf "$PPOK" | sed 's/^## Context/\n\n## Context/' > $ppf; printf 'stale\n' > $pps
+out=$(ppev $ppf "" Write)
+check "lint failure: the hook returns PostToolUse additionalContext" "$(jq -r .hookSpecificOutput.hookEventName <<<"$out")" PostToolUse
+grep -q 'consecutive blank lines' <<<"$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" && ok "  carrying the lint finding" || bad "  carrying the lint finding (got: $out)"
+check "  and the snapshot is refreshed even then" "$(cmp -s $ppf $pps && echo same || echo differ)" same
+printf 'stale\n' > $pps
+out=$(ppev $ppf agent-1)
+check "a subagent's edit of the plan: no output" "$out" ""
+check "  and the snapshot is left alone" "$(cat $pps)" stale
+ppo=$ppp/other.md; printf 'x\n' > $ppo
+out=$(ppev $ppo)
+check "a non-plan file: no output, snapshot untouched" "$out$(cat $pps)" stale
+out=$(ppev $ppf "" Bash)
+check "a non-edit tool is ignored" "$out$(cat $pps)" stale
+jq -e '.hooks.PostToolUse[] | select(.matcher=="Edit|Write|MultiEdit") | .hooks[].command | endswith("hooks/plan-post.sh")' "$CLAUDE_PLUGIN_ROOT/hooks/hooks.json" >/dev/null 2>&1 \
+  && ok "  hooks.json wires plan-post.sh under PostToolUse Edit|Write|MultiEdit" || bad "  hooks.json wires plan-post.sh under PostToolUse"
+grep -q 'refresh the snapshot so the watcher stays quiet' "$PS2" && bad "  the skill no longer asks for a manual snapshot refresh" || ok "  the skill no longer asks for a manual snapshot refresh"
+
+echo "== mode.sh: the user's plan edits are injected into the next turn; an idle watcher is flagged (GH#28) =="
+mdp=$T/mdiff; mkdir -p $mdp/.claude/teamlead/.state/snap $mdp/.claude/teamlead/plan
+: > $mdp/.claude/teamlead/.state/active
+mdf=$mdp/.claude/teamlead/plan/topic.md; mds=$mdp/.claude/teamlead/.state/snap/topic.md
+echo "$mdf" > $mdp/.claude/teamlead/.state/active-plan
+printf "$PPOK" > $mdf; cp $mdf $mds
+mdev(){ jq -n --arg c "$mdp" --arg p "$1" '{hook_event_name:"UserPromptSubmit",cwd:$c,prompt:$p}' | "$H/mode.sh"; }
+out=$(mdev "hello")
+grep -q 'plan file changed on disk' <<<"$out" && bad "an unchanged plan injects no diff" || ok "an unchanged plan injects no diff"
+sed -i 's/^C$/C\nthe user added this line/' $mdf
+out=$(mdev "hello")
+grep -q 'plan file changed on disk' <<<"$out" && ok "an edited plan: the diff is announced" || bad "an edited plan: the diff is announced (got: $out)"
+grep -q '^+the user added this line' <<<"$out" && ok "  and carries the added line" || bad "  and carries the added line"
+check "  and the snapshot is refreshed" "$(cmp -s $mdf $mds && echo same || echo differ)" same
+check "  and plan-touched is set" "$([ -f $mdp/.claude/teamlead/.state/plan-touched ] && echo y || echo n)" y
+out=$(mdev "hello again")
+grep -q 'plan file changed on disk' <<<"$out" && bad "  the same edit is not reported twice" || ok "  the same edit is not reported twice"
+rm -f $mds
+out=$(mdev "hi")
+check "  no snapshot yet: baseline only, no diff of the whole file" "$(grep -c 'plan file changed' <<<"$out")/$(cmp -s $mdf $mds && echo same || echo differ)" "0/same"
+if command -v inotifywait >/dev/null 2>&1; then
+  grep -q 'Plan watcher is not running' <<<"$out" && ok "stage 3, no watcher: the next message says to start it" || bad "stage 3, no watcher: the next message says to start it"
+  grep -q 'Plan watcher is not running' <<<"$(mdev go)" && bad "  not on a Go (the lead hands the watcher over then)" || ok "  not on a Go (the lead hands the watcher over then)"
+  echo $$ > $mdp/.claude/teamlead/.state/plan-watch.pid
+  grep -q 'Plan watcher is not running' <<<"$(mdev hi)" && bad "  silent while the watcher runs" || ok "  silent while the watcher runs"
+  rm -f $mdp/.claude/teamlead/.state/plan-watch.pid
+  sed -i 's/Stage 3/Stage 5/' $mdf; cp $mdf $mds
+  grep -q 'Plan watcher is not running' <<<"$(mdev hi)" && bad "  silent at stage 5 (watcher is off by design)" || ok "  silent at stage 5 (watcher is off by design)"
+fi
+grep -q 'Re-arm on expiry only if the expired window delivered at least one event' "$PS2" && ok "skill: re-arm only after an event or a user message" || bad "skill: re-arm only after an event or a user message"
+grep -q 'and re-arm on expiry; there is no' "$PS2" && bad "  skill no longer says to re-arm on every expiry" || ok "  skill no longer says to re-arm on every expiry"
+
+echo "== gate.sh: the Go footer is owed only by a turn that changed the plan or its stage (GH#29) =="
+gfp=$T/gfoot; mkdir -p $gfp/.claude/teamlead/plan $gfp/.claude/teamlead/.state
+: > $gfp/.claude/teamlead/.state/active
+gff=$gfp/.claude/teamlead/plan/topic.md; gfst=$gfp/.claude/teamlead/.state
+echo "$gff" > $gfst/active-plan
+git -C $gfp init -q; git -C $gfp config user.email t@t.t; git -C $gfp config user.name t
+echo a > $gfp/a.txt; git -C $gfp add -A >/dev/null; git -C $gfp commit -qm init >/dev/null
+gfev(){ echo '{"hook_event_name":"Stop","cwd":"'$gfp'","stop_hook_active":false,"transcript_path":"'$1'"}' | "$H/gate.sh" >"$T/gfout" 2>&1; echo $?; }
+gftx_no=$gfp/no.jsonl; gtmktx "$gftx_no" 'Restarted the watcher.'
+gftx_yes=$gfp/yes.jsonl; gtmktx "$gftx_yes" $'ok\n\nType "Go" if you want me to plan the implementation.'
+printf "$PPOK" > $gff
+check "first turn at stage 3 (nothing recorded), no footer: blocked" "$(gfev $gftx_no)" 2
+grep -q 'end the turn with the fixed line' $T/gfout && ok "  naming the footer" || bad "  naming the footer"
+check "next turn, plan untouched, no footer (a re-arm or notification turn): not blocked" "$(gfev $gftx_no)" 0
+check "  and a footered turn is fine too" "$(gfev $gftx_yes)" 0
+printf 'a user line\n' >> $gff
+check "a turn after the plan file changed, no footer: blocked" "$(gfev $gftx_no)" 2
+check "  once seen, the following plan-less turn is exempt again" "$(gfev $gftx_no)" 0
+printf '# T\n\n> **Stage 3** — x\n' > $gff; gfhash=$(md5sum < $gff | cut -c1-32)
+printf '4 %s\n' "$gfhash" > $gfst/plan-footer
+check "the stage differs from the last footered one (hash equal), no footer: blocked" "$(gfev $gftx_no)" 2
+check "  recorded, then exempt" "$(gfev $gftx_no)" 0
+cp "$CLAUDE_PLUGIN_ROOT/docs/example-plan.md" $gff
+printf '3 2020-01-01T00:00:00Z\n' > $gfst/plan-stage; printf '3 2021-01-01T00:00:00Z\n' > $gfst/plan-go
+check "stage 3 -> 4 (a Go recorded): the stage-change turn, no footer: blocked" "$(gfev $gftx_no)" 2
+grep -q 'start implementing' $T/gfout && ok "  and it asks for the stage-4 footer" || bad "  and it asks for the stage-4 footer"
+check "  the next turn at stage 4 with no plan change: exempt" "$(gfev $gftx_no)" 0
+grep -q 'changed the plan file' "$PS2" && ok "skill explains the footer follows plan changes" || bad "skill explains the footer follows plan changes"
+
+echo "== plan-lint: the lead's reading of a user decision (GH#30) =="
+mkdec(){ printf '# T\n\n> **Stage %s** — x\n\n## Goal\nG\n\n## Context\nC\n\n## Decisions\n- **D1** %b\n\n## Open questions\n*(none)*\n\n### Answered\n\n## Notes from me\n\n' "$1" "$2" > $T/rd.md; "$PL" $T/rd.md >$T/rdout 2>&1; echo $?; }
+RD_UN='keep the architecture — *cheapest.* — *user: "keep it"* · *lead'"'"'s reading (unconfirmed): nothing carried over between runs*'
+check "the marker, unconfirmed, at stage 3: accepted" "$(mkdec 3 "$RD_UN")" 0
+check "  confirmed, at stage 3: accepted" "$(mkdec 3 "${RD_UN/unconfirmed/confirmed}")" 0
+check "  wrapped over two lines: still recognised (unconfirmed at stage 4 refused)" "$(mkdec 4 "keep it — *w.* — *user: \"keep it\"* ·\n  *lead's reading\n  (unconfirmed): same*")" 1
+check "unconfirmed at stage 4: refused, like an open question" "$(mkdec 4 "$RD_UN")" 1
+grep -q 'unconfirmed lead reading' $T/rdout && ok "  and says to ask the user to confirm or correct it" || bad "  and says to ask the user to confirm or correct it (got: $(cat $T/rdout))"
+check "  a confirmed reading at stage 4: no finding about it" "$(mkdec 4 "${RD_UN/unconfirmed/confirmed}" >/dev/null; grep -c 'lead reading' $T/rdout)" 0
+check "a reading with no status: malformed, at any stage" "$(mkdec 3 'x — *lead'"'"'s reading: whatever*')" 1
+grep -q 'no status' $T/rdout && ok "  and the finding says why" || bad "  and the finding says why"
+grep -q "lead's reading (confirmed)" "$CLAUDE_PLUGIN_ROOT/docs/example-plan.md" && ok "example-plan.md shows the marker" || bad "example-plan.md shows the marker"
+grep -q "lead's reading (unconfirmed)" "$PS2" && ok "skill documents the marker" || bad "skill documents the marker"
+grep -q "Unconfirmed readings are handled like open questions" "$PS2" && ok "skill: the first Go audit lists and asks about them" || bad "skill: the first Go audit lists and asks about them"
+sed 's/(confirmed)/(unconfirmed)/' "$CLAUDE_PLUGIN_ROOT/docs/example-plan.md" > $gff
+check "the Stop gate at stage 4 surfaces an unconfirmed reading (through plan-lint)" "$(gfev $gftx_yes >/dev/null; grep -c 'unconfirmed lead reading' $T/gfout)" 1
 
 echo "== test.sh never writes a real project's board, wherever TMPDIR points (2026-11-09 incident) =="
 # A worker ran ./test.sh with TMPDIR inside its worktree; the fixtures then lived
