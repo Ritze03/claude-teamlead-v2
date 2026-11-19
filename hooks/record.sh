@@ -82,6 +82,39 @@ sys.exit(0 if offered and last != "SubagentHandback" else 1)
 PY
 }
 
+# GH#26: was the worker's LAST SubagentHandback refused by the harness (tool_result
+# is_error, e.g. "Only the auto-mode classifier can allow SubagentHandback")? Then the
+# lead never got the report. Exit 0 and print that call's input.message (the fallback
+# report text) when so; exit 1 otherwise (delivered, no hand-back call, unreadable).
+#   $1 = agent_transcript_path
+tl_handback_refused() {
+  [ -n "$1" ] && [ -r "$1" ] || return 1
+  python3 - "$1" <<'PY'
+import json, sys
+last, err = None, {}
+try:
+    for line in open(sys.argv[1], errors="replace"):
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        blocks = (o.get("message") or {}).get("content") if isinstance(o, dict) else None
+        for b in blocks if isinstance(blocks, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "SubagentHandback":
+                last = b
+            elif b.get("type") == "tool_result":
+                err[b.get("tool_use_id")] = b.get("is_error") is True
+except Exception:
+    sys.exit(1)
+if last is None or not err.get(last.get("id")):
+    sys.exit(1)
+m = (last.get("input") or {}).get("message")
+sys.stdout.write(m if isinstance(m, str) else "")
+PY
+}
+
 # T76: background Bash tasks the worker launched and never closed. Parses the
 # worker's own transcript (same file tl_worker_paused reads): every
 # "Command running in background with ID: X. Output is being written to: P" is a
@@ -342,7 +375,23 @@ Or say \"here\" to continue in this session." \
       exit 0
     fi
     msg=$(tl_json .last_assistant_message | tr '\n' ' ' | cut -c1-200)
-    tl_event "return    agent=$at  id=$(tl_json .agent_id)  msg=$msg"
+    # GH#26: a refused hand-back never reached the lead. Keep the report where the lead can
+    # read it (.state/reports/<agent-id>.md: the worker's final plain-text message, else the
+    # refused call's own message) and mark the event; board.py/gate.sh/state.sh key off that
+    # file. A delivered hand-back clears a stale file from an earlier refusal of this id.
+    aid=$(tl_json .agent_id | tr -cd 'A-Za-z0-9_-')
+    hb=""
+    if refmsg=$(tl_handback_refused "$tp"); then
+      hb="handback=refused  "
+      rep=$(tl_json .last_assistant_message)
+      [ -n "${rep//[[:space:]]/}" ] || rep="$refmsg"
+      if [ -n "$aid" ] && mkdir -p "$TL_STATE/reports"; then
+        printf '%s\n' "$rep" > "$TL_STATE/reports/$aid.md" || true
+      fi
+    elif [ -n "$aid" ]; then
+      rm -f "$TL_STATE/reports/$aid.md"
+    fi
+    tl_event "return    agent=$at  id=$(tl_json .agent_id)  ${hb}msg=$msg"
     tl_board_call "$(tl_json .agent_id)" "" worker-stop --id "$(tl_json .agent_id)"
     # T76: a real return — stop the background tasks it launched and left open.
     # Inline, and after the recording above so a failure here can never lose it:

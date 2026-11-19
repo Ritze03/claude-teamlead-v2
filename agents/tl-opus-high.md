@@ -46,6 +46,7 @@ row: <N>
 You report to the lead, not to a human reader. **Brevity is not your job — density is.**
 The lead cannot see your tool output, your files, or your reasoning; whatever you leave out
 is simply lost, and re-deriving it costs another dispatch.
+If `SubagentHandback` is refused, retry at most once, then put the full report in your final message (the hook saves it for the lead).
 
 Include, always:
 - **What you did or found**, concretely. Real paths, `file.py:42` line references, exact

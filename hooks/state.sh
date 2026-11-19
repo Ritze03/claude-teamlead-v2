@@ -55,6 +55,9 @@ fi
 if [ -f "$d/board.md" ]; then
   open=$(grep -E '^\| +\|' "$d/board.md" 2>/dev/null) || open=""
   [ -n "$open" ] && { echo "Open board rows:"; printf '%s\n' "$open"; }
+  # GH#26: a returned row whose hand-back was refused: its report only exists as a file.
+  python3 "$(dirname "$0")/../scripts/board.py" refused --project "$proj" 2>/dev/null \
+    | while read -r rid rpath; do echo "  row $rid: the hand-back was refused; the report is at $rpath"; done
 fi
 if [ -f "$d/.state/active-plan" ]; then
   pf=$(cat "$d/.state/active-plan" 2>/dev/null)
