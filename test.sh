@@ -1584,6 +1584,14 @@ python3 -c "import json;d=json.load(open('$ic/settings.json'));assert d['model']
 ls $ic/settings.json.bak.* >/dev/null 2>&1 && ok "  wrote a backup" || bad "  wrote a backup"
 run --combined >/dev/null
 check "idempotent" "$(grep -cF "$H/statusline.sh" $ic/statusline.sh)" 1
+# a second --combined on the installed combiner must not nest it in itself
+cp $ic/settings.json "$T/set.before"; nbak=$(ls $ic/settings.json.bak.* | wc -l)
+rc=$(run --combined)
+check "  second --combined exits 0" "$rc" 0
+check "  the combiner does not list itself" "$(grep -cF "$ic/statusline.sh" $ic/statusline.sh)" 0
+cmp -s "$T/set.before" $ic/settings.json && ok "  settings.json unchanged" || bad "  settings.json unchanged"
+check "  no new backup" "$(ls $ic/settings.json.bak.* | wc -l)" "$nbak"
+grep -q 'already installed' "$T/iout" && ok "  says already installed" || bad "  says already installed"
 run --uninstall >/dev/null
 check "uninstall restores the original" "$(sl)" 'bash "/tmp/prior.sh"'
 # version pinning is removed so a plugin update cannot break the segment
