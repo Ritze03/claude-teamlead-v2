@@ -560,8 +560,8 @@ for these explicit commands, never on your own initiative. Each change writes
 - **`statusbar install`**: run `--show` first.
   - Nothing configured: run `--only`.
   - Already teamlead's (the command is `hooks/statusline.sh` of the plugin, or the combiner
-    `<config dir>/statusline.sh`): change nothing, say it is already installed. Do not run
-    `--combined` on it, that would list the combiner as a segment of itself.
+    `<config dir>/statusline.sh`): change nothing, say it is already installed (the script
+    also reports "already installed" and changes nothing if run on it).
   - Someone else's status line: one `AskUserQuestion`, two options, **Combine (Recommended)**
     keeps theirs and adds teamlead's segment next to it, **Replace** teamlead's alone. Then run
     `--combined` or `--only`. If `--combined` prints that `statusline.sh` already exists and was

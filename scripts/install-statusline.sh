@@ -131,6 +131,12 @@ if [ "$mode" = "ask" ]; then
   case "${a:-1}" in 1) mode=--combined ;; 2) mode=--only ;; *) echo '  cancelled'; exit 0 ;; esac
 fi
 
+# Already teamlead's: nothing to write. Re-running --combined on the combiner would
+# take it as the user's previous segment and list the combiner inside itself.
+if [[ $mode = --combined || $mode = --only ]] && [ "$existing" = "bash \"$SEG\"" ] || { [ "$mode" = --combined ] && [ "$existing" = "bash \"$COMBINED\"" ]; }; then
+  printf '  already installed: %s\n' "$existing"; exit 0
+fi
+
 case "$mode" in
   --combined)
     backup
