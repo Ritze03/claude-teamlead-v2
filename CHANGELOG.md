@@ -4,6 +4,15 @@ Newest first. One line per change, commit id at the end.
 
 Versioning: every push that changes what users get bumps `.claude-plugin/plugin.json` and adds an entry here.
 
+## 2.12.1 — 2026-11-21
+
+The Stop gate no longer blocks, turn after turn, on a merged row's worktree it cannot get rid of (#31).
+
+- Fix (#31): check "D7" (`board.py check_git`, "task N is merged but worktree … still exists") fired on every turn for a worktree Claude Code had locked (`locked claude agent agent-<id> (pid <pid> start <n>)` in `git worktree list --porcelain`), because the lock holds while the spawning session runs and `git worktree remove` then fails (only `-f -f` gets past it, which the lead must not run). A worktree whose lock names a pid that is still alive (`os.kill(pid, 0)`, EPERM counts as alive) is now not a finding. An unlocked worktree, or one with a stale lock (dead pid, or a lock with no pid), is still reported.
+- The gate's `board.py check` now records what it reported in `.state/merged-worktree-shown`, keyed by row + worktree + lock state, and does not report the same finding on two turns in a row; a lock that goes away, a new row or a new worktree reports again. `board.py status` is unchanged and lists every finding.
+- The finding is shorter: row and the worktree's directory name, with the full path only in the `git worktree remove` command.
+- test: 1811 checks.
+
 ## 2.12.0 — 2026-11-19
 
 A refused worker hand-back no longer loses the report (#26). Four plan-mode fixes: the snapshot and lint now run from a hook, the user's plan edits are picked up without the watcher, the Go footer is shown only when the plan changed, and the lead's readings of a decision get their own marker (#27–#30).

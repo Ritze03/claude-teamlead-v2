@@ -210,6 +210,36 @@ def _worktree_branches(proj) -> dict:
     return branches
 
 
+def _worktree_locks(proj) -> dict:
+    """{path: lock reason ("" when git gives none)} for every LOCKED worktree in
+    `git worktree list --porcelain` (`locked` or `locked <reason>`). Claude Code
+    locks a worker's worktree as `claude agent agent-<id> (pid <pid> start <n>)`
+    for as long as the spawning session runs (#31)."""
+    out = _git(proj, "worktree", "list", "--porcelain") or ""
+    locks, path = {}, None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif path and (line == "locked" or line.startswith("locked ")):
+            locks[path] = line[len("locked"):].strip()
+    return locks
+
+
+def _lock_pid_alive(reason: str) -> bool:
+    """True when a lock reason names a pid (`pid <n>`) that still runs. EPERM is
+    alive (another user's process); no pid in the reason, or no such process, is not."""
+    m = re.search(r"\bpid (\d+)\b", reason)
+    if not m:
+        return False
+    try:
+        os.kill(int(m.group(1)), 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _linked_worktrees(proj) -> dict:
     """{realpath: path as git lists it} for every LINKED worktree, whatever its
     branch (detached included). The first `git worktree list` entry is the main
@@ -229,7 +259,7 @@ def _wt_fingerprint(path) -> str | None:
     return hashlib.sha1(f"{head}\n{st}".encode()).hexdigest()[:16]
 
 
-def check_git(db: dict, project=None) -> list[str]:
+def check_git(db: dict, project=None, once: bool = False) -> list[str]:
     """The board validates itself; nothing asked git whether 'merged' was true.
     A task marked merged whose commits are not in HEAD is exactly the reported
     'work never merged back', and was undetectable.
@@ -270,15 +300,32 @@ def check_git(db: dict, project=None) -> list[str]:
     # actually merged back" AND still hold a worktree; both lines are useful,
     # the second tells the lead what to do once the first is fixed. Never
     # removes anything.
+    # #31: with `once` (the gate), a finding already shown for the same row +
+    # worktree + lock state does not block again; .state/merged-worktree-shown.
+    sf = root(project) / ".state" / "merged-worktree-shown"
+    shown = set(sf.read_text().split()) if once and sf.exists() else set()
+    seen = []
+    locks = _worktree_locks(proj)
     for t in db["tasks"]:
         br = (t.get("branch") or "").strip()
         if t["state"] != "merged" or not br or br in ("-", "—"):
             continue
         path = wt_by_branch.get(f"refs/heads/{br}")
         if path:
+            # #31: a worktree locked by a live session cannot be removed (only
+            # `remove -f -f`, which the lead must not run), so it is not a finding.
+            lock = locks.get(path)
+            if lock is not None and _lock_pid_alive(lock):
+                continue
+            key = f"{t['id']}|{path}|{'unlocked' if lock is None else 'locked-stale'}"
+            seen.append(key)
+            if key in shown:
+                continue
             problems.append(
-                f"task {t['id']} is merged but worktree {path} still exists — "
-                f"`git worktree remove {path}`")
+                f"task {t['id']} is merged but worktree {os.path.basename(path)} "
+                f"still exists — `git worktree remove {path}`")
+    if once:                              # the gate's `check`: what is live now, so a change re-fires
+        _atomic_write(sf, "\n".join(seen) + "\n" if seen else "")
     # D6: a 'returned' branch about to be merged should not have fallen
     # behind main since the worker branched off. 'running' rows are skipped
     # on purpose — a running row falls behind every time anyone else merges,
@@ -1501,7 +1548,7 @@ def main(argv):
             save(db, proj); print("rendered")
     elif cmd == "check":                        # drift + validity, for the Stop gate
         db = load(proj)
-        probs = validate(db) + check_git(db, proj) + check_plan(db, proj)
+        probs = validate(db) + check_git(db, proj, once=True) + check_plan(db, proj)
         _, m = _paths(proj)
         if not m.exists():
             if db["tasks"]:

@@ -3726,7 +3726,9 @@ git merge -q wtb >/dev/null
 python3 "$B" update --project $d7p --id 1 --state merged --branch wtb >/dev/null
 python3 "$B" check --project $d7p >"$T/d7out" 2>&1; rc=$?
 check "merged but the worktree is still there: check fails" "$rc" 1
-grep -q "is merged but worktree $T/d7wt still exists" "$T/d7out" && ok "  names the worktree path" || bad "  names the worktree path"
+grep -q "is merged but worktree d7wt still exists" "$T/d7out" && ok "  names the row and the worktree directory" || bad "  names the row and the worktree directory"
+grep -q "git worktree remove $T/d7wt\`" "$T/d7out" && ok "  the remove command carries the full path" || bad "  the remove command carries the full path"
+check "  the full path appears once" "$(grep -o "$T/d7wt" "$T/d7out" | wc -l)" 1
 grep -q 'git worktree remove' "$T/d7out" && ok "  suggests the removal command" || bad "  suggests the removal command"
 lines=$(grep -c '^  - ' "$T/d7out")
 check "exactly one problem line (real merge, not a squash-mismatch too)" "$lines" 1
@@ -3750,8 +3752,37 @@ done
 git worktree add -q "$T/d7hand" -b handb >/dev/null 2>&1
 python3 "$B" update --project $d7m --id 1 --branch handb >/dev/null
 python3 "$B" check --project $d7m >"$T/d7mout" 2>&1
-grep -q "is merged but worktree $T/d7hand still exists" "$T/d7mout" && ok "  linked (non-agent) worktree of a merged row is still flagged" || bad "  linked (non-agent) worktree of a merged row is still flagged"
+grep -q "is merged but worktree d7hand still exists" "$T/d7mout" && ok "  linked (non-agent) worktree of a merged row is still flagged" || bad "  linked (non-agent) worktree of a merged row is still flagged"
 git worktree remove "$T/d7hand"
+# #31: Claude Code locks a worker's worktree while the spawning session runs, and a
+# locked worktree cannot be removed (only `-f -f`, which the lead must not run).
+# A live lock pid is no finding; a dead one is; an unchanged finding is shown once.
+d7l=$T/d7lock; mkdir -p $d7l; cd $d7l; git init -q; git config user.email t@t.t; git config user.name t
+printf '.claude/teamlead/.state/\n.claude/teamlead/board.md\n' > .gitignore
+echo base > a.txt; git add -A >/dev/null; git commit -qm init
+python3 "$B" add --project $d7l --task w --agent tl-sonnet-high --owns a.txt >/dev/null                 # id 1
+git worktree add -q "$T/d7lwt" -b lockb >/dev/null 2>&1
+python3 "$B" update --project $d7l --id 1 --state merged --branch lockb >/dev/null
+sleep 300 & d7live=$!
+git worktree lock --reason "claude agent agent-x (pid $d7live start 1)" "$T/d7lwt"
+python3 "$B" check --project $d7l >"$T/d7lout" 2>&1; rc=$?
+check "merged row, worktree locked by a live pid: check passes" "$rc" 0
+grep -q 'still exists' "$T/d7lout" && bad "  no finding for a live lock" || ok "  no finding for a live lock"
+kill $d7live 2>/dev/null; wait $d7live 2>/dev/null
+git worktree unlock "$T/d7lwt"
+git worktree lock --reason "claude agent agent-x (pid $d7live start 1)" "$T/d7lwt"
+python3 "$B" check --project $d7l >"$T/d7lout" 2>&1; rc=$?
+check "locked by a dead pid (stale lock): check fails" "$rc" 1
+grep -q "task 1 is merged but worktree d7lwt still exists" "$T/d7lout" && ok "  stale lock is reported" || bad "  stale lock is reported"
+python3 "$B" check --project $d7l >"$T/d7lout" 2>&1; rc=$?
+check "same stale-lock finding next turn: check passes" "$rc" 0
+git worktree unlock "$T/d7lwt"
+python3 "$B" check --project $d7l >"$T/d7lout" 2>&1; rc=$?
+check "lock went away (state changed): reported again" "$rc" 1
+python3 "$B" check --project $d7l >"$T/d7lout" 2>&1; rc=$?
+check "unlocked, nothing changed since: not shown twice in a row" "$rc" 0
+python3 "$B" status --project $d7l 2>&1 | grep -q 'still exists' && ok "  status still lists it (read-only, not deduplicated)" || bad "  status still lists it (read-only, not deduplicated)"
+git worktree remove "$T/d7lwt"
 cd $proj
 
 echo "== D12: worker-start/worker-stop lifecycle =="
