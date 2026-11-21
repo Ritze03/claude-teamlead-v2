@@ -77,7 +77,10 @@ Or run against a local checkout without installing:
 claude --plugin-dir /path/to/claude-teamlead-v2
 ```
 
-To update later: `claude plugin update teamlead@teamlead`, then restart Claude Code. Check
+To update later: `claude plugin update teamlead@teamlead`, then restart Claude Code. To get
+updates automatically, turn on auto-update for the `teamlead` marketplace in `/plugin` →
+Marketplaces (third-party marketplaces have it off by default); Claude Code then checks at
+startup and asks you to restart when a new version lands. Check
 which build you have with `/plugin`, the `[teamlead vX.Y.Z]` line at session start, or
 `jq '.plugins["teamlead@teamlead"]' ~/.claude/plugins/installed_plugins.json` (version and
 `gitCommitSha`). See [CHANGELOG.md](CHANGELOG.md).
